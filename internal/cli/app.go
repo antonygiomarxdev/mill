@@ -97,6 +97,8 @@ func (a *App) Run(args ...string) error {
 		return a.runLand(args[1:])
 	case "watch":
 		return a.runWatch(args[1:])
+	case "slots":
+		return a.runSlots(args[1:])
 	case "compact":
 		return a.runCompact(args[1:])
 	default:
@@ -117,5 +119,6 @@ Usage:
   role <get|set>     Show or set the active role (staff|pm)
   watch              Wait for task state changes (blocks until all settle)
   compact [--dry-run]  Compact session context to save tokens
+  slots              Show slot/concurrency status
 `)
 }

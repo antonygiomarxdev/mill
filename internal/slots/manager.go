@@ -118,7 +118,7 @@ func NewManager(maxSlots int) *Manager {
 
 	m := &Manager{
 		maxSlots:        maxSlots,
-		queue:           make(chan slotRequest, maxSlots),
+		queue:           make(chan slotRequest, 256),
 		stop:            make(chan struct{}),
 		active:          make(map[int]*activeSlot),
 		goroutineSlots:  make(map[uint64]int),

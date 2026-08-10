@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/antonygiomarxdev/mill/internal/issue"
 	"github.com/antonygiomarxdev/mill/internal/ledger"
 	"github.com/antonygiomarxdev/mill/internal/role"
+	"github.com/antonygiomarxdev/mill/internal/slots"
 	"github.com/antonygiomarxdev/mill/internal/state"
 )
 
@@ -26,14 +28,17 @@ import (
 func (a *App) runDelegate(args []string) error {
 	// Extract --role and --model before flag parsing since Go's flag
 	// package stops at the first positional argument.
+	// Note: --priority is a boolean flag handled by the FlagSet directly.
 	roleName, args := extractFlag(args, "role")
 	modelFlag, args := extractFlag(args, "model")
 
 	fs := flag.NewFlagSet("delegate", flag.ContinueOnError)
 	fs.SetOutput(a.Err)
 	var model string
-	var maxTurns int
 	var wait bool
+	var priority bool
+	var maxTurns int
+	fs.BoolVar(&priority, "priority", false, "preempt next available slot (staff only)")
 	fs.StringVar(&model, "model", modelFlag, "model to use (default: from config)")
 	fs.IntVar(&maxTurns, "max-turns", 100, "max conversation turns")
 	fs.BoolVar(&wait, "wait", false, "wait for agent to finish (default: async)")
@@ -95,6 +100,17 @@ func (a *App) runDelegate(args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Initialize slot manager if not already set (from config concurrency settings).
+	if a.slots == nil {
+		maxSlots := MaxSlotsFromConfig(cfg)
+		a.slots = slots.NewManager(maxSlots)
+	}
+
+	// Validate --priority flag (staff only).
+	if err := ValidatePriority(priority, activeRole); err != nil {
+		return err
+	}
+
 	// Resolve model from stage label, role frontmatter, or config
 	if model == "" {
 		model = a.resolveModel(targetRole, stageLabel, cfg)
@@ -150,12 +166,23 @@ func (a *App) runDelegate(args []string) error {
 		Budget:   cfg.Budget,
 	}
 
+	// Acquire slot before dispatching (blocks if all slots occupied).
+	ctx := context.Background()
+	maxSlots := MaxSlotsFromConfig(cfg)
+	if _, err := AcquireSlot(ctx, a.slots, a.Err, issueNum, targetRole, priority, maxSlots); err != nil {
+		return fmt.Errorf("slot acquisition failed: %w", err)
+	}
+
 	if wait {
+		defer a.slots.Release()
 		return a.runDispatchLoop(issueNum, taskID, opts, issueBody, labels, cfg)
 	}
 
 	// Async: fire and forget. Agent runs in background goroutine.
-	go a.runDispatchLoop(issueNum, taskID, opts, issueBody, labels, cfg)
+	go func() {
+		defer a.slots.Release()
+		a.runDispatchLoop(issueNum, taskID, opts, issueBody, labels, cfg)
+	}()
 	fmt.Fprintf(a.Out, "Delegated issue %d — task %s (async)\n", issueNum, taskID)
 	return nil
 }

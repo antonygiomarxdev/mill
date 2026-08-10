@@ -14,9 +14,8 @@ import (
 	"text/template"
 )
 
-//go:embed static
+//go:embed static static/scaffold/.omp static/scaffold/.claude static/scaffold/.github
 var staticFS embed.FS
-
 // initConfig holds the values used to render the mill.yml template.
 type initConfig struct {
 	Name      string

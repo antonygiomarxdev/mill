@@ -3,27 +3,11 @@ default_target: develop
 default_role: sr-dev
 
 models:
-  free:
-    - provider: commandcode
-      model: poolside/laguna-s-2.1-free
-      context_limit: 150000
-    - provider: opencode
-      model: deepseek/deepseek-v4-flash
-      context_limit: 128000
-  paid:
-    - provider: commandcode
-      model: deepseek/deepseek-v4-flash
-      context_limit: 200000
-    - provider: opencode
-      model: deepseek/deepseek-v4-pro
-      context_limit: 200000
-  pro:
-    - provider: commandcode
-      model: deepseek/deepseek-v4-pro
-      context_limit: 200000
-    - provider: opencode
-      model: claude-sonnet-4-20250514
-      context_limit: 200000
+  free: "laguna-free"
+  paid: "laguna-pro"
+  pro: "laguna-ultra"
+
+rate: 0.00001  # dollars per token — set to your provider's rate for cost estimates
 
 targets:
   develop:

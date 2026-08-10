@@ -95,6 +95,8 @@ func (a *App) Run(args ...string) error {
 		return a.runLand(args[1:])
 	case "watch":
 		return a.runWatch(args[1:])
+	case "compact":
+		return a.runCompact(args[1:])
 	default:
 		usage(a.Err)
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -112,7 +114,6 @@ Usage:
   status             Show status of all mill tasks
   role <get|set>     Show or set the active role (staff|pm)
   watch              Wait for task state changes (blocks until all settle)
-  land <target>      Run gates and merge to target branch
-  -h, --help         Show this help message
+  compact [--dry-run]  Compact session context to save tokens
 `)
 }

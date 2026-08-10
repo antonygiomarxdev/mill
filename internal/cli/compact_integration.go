@@ -21,7 +21,7 @@ func resolveCompactMode(configFlag string, cfg config.Config) compact.Mode {
 		return ""
 	}
 	if cfg.Compact != nil && cfg.Compact.Enabled {
-		return cfg.Compact.Mode
+		return compact.Mode(cfg.Compact.Mode)
 	}
 	return ""
 }

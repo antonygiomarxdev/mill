@@ -1,0 +1,138 @@
+{
+  "version": "1.0.0",
+  "skills": {
+    "wayfinder": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/wayfinder/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/wayfinder.md",
+      "description": "Chart a decision map for a loose idea too big for one agent session"
+    },
+    "grilling": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/productivity/grilling/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/grilling.md",
+      "description": "Interview the user relentlessly to stress-test a plan or decision"
+    },
+    "domain-modeling": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/domain-modeling/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/domain-modeling.md",
+      "description": "Build and sharpen a project's domain model and ubiquitous language"
+    },
+    "brainstorming": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/brainstorming/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/brainstorming.md",
+      "description": "Explore user intent and design before implementation"
+    },
+    "tdd": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/tdd/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/tdd.md",
+      "description": "Test-driven development: red-green-refactor cycle"
+    },
+    "writing-plans": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/to-spec/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/writing-plans.md",
+      "description": "Write implementation plans for multi-step tasks"
+    },
+    "executing-plans": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/implement/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/executing-plans.md",
+      "description": "Execute an implementation plan with review checkpoints"
+    },
+    "verification-before-completion": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/verification-before-completion/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/verification-before-completion.md",
+      "description": "Verify work before declaring it complete"
+    },
+    "systematic-debugging": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/diagnosing-bugs/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/systematic-debugging.md",
+      "description": "Diagnosis loop for hard bugs and performance regressions"
+    },
+    "codebase-design": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/codebase-design/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/codebase-design.md",
+      "description": "Design deep modules and improve interface boundaries"
+    },
+    "code-review": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/code-review/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/code-review.md",
+      "description": "Review changes for standards compliance and spec match"
+    },
+    "using-git-worktrees": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/using-git-worktrees/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/using-git-worktrees.md",
+      "description": "Isolate feature work in git worktrees"
+    },
+    "using-superpowers": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/using-superpowers/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/using-superpowers.md",
+      "description": "Find and invoke relevant skills before any response"
+    },
+    "caveman": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/productivity/caveman/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/caveman.md",
+      "description": "Ultra-compressed communication mode for token efficiency"
+    },
+    "dispatching-parallel-agents": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/dispatching-parallel-agents/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/dispatching-parallel-agents.md",
+      "description": "Fan out 2+ independent tasks to parallel subagents"
+    },
+    "writing-for-agents": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/productivity/writing-for-agents/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/writing-for-agents.md",
+      "description": "Write documents agents consume: skills, AGENTS.md, CLAUDE.md"
+    },
+    "prototype": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/prototype/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/prototype.md",
+      "description": "Build a throwaway prototype to answer a design question"
+    },
+    "research": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/research/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/research.md",
+      "description": "Research against primary sources and capture findings"
+    },
+    "resolving-merge-conflicts": {
+      "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/resolving-merge-conflicts/SKILL.md",
+      "hash": "sha256:placeholder",
+      "version": "1.2.3",
+      "local": "skills/resolving-merge-conflicts.md",
+      "description": "Resolve in-progress git merge/rebase conflicts"
+    }
+  }
+}

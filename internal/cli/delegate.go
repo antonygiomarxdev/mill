@@ -1,7 +1,11 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
+
 	"flag"
+	"strings"
 	"fmt"
 	"time"
 
@@ -77,6 +81,13 @@ func (a *App) runDelegate(args []string) error {
 	if err := ledger.Append(a.ledgerPath(issueNum), dispatchEntry); err != nil {
 		return fmt.Errorf("failed to append ledger entry: %w", err)
 	}
+
+	// Install gauntlet hooks into worktree
+	wt := a.worktreePath(issueNum)
+	if err := installHooks(wt); err != nil {
+		fmt.Fprintf(a.Err, "warning: failed to install hooks: %v\n", err)
+	}
+
 
 	// Build prompt and dispatch opts
 	prompt := buildPrompt(issueNum)
@@ -188,4 +199,32 @@ func buildPrompt(issueNum int) string {
 
 Read the codebase, make the necessary changes, and when you are done,
 end your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.`, issueNum)
+}
+
+// installHooks copies gauntlet hook scripts into the worktree's .git/hooks directory.
+func installHooks(worktree string) error {
+	srcDir := "checks"
+	hookDir := filepath.Join(worktree, ".git", "hooks")
+	if err := os.MkdirAll(hookDir, 0755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".sh" {
+			continue
+		}
+		src := filepath.Join(srcDir, e.Name())
+		dst := filepath.Join(hookDir, strings.TrimSuffix(e.Name(), ".sh"))
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, data, 0755); err != nil {
+			return err
+		}
+	}
+	return nil
 }

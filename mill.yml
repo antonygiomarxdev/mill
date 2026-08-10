@@ -1,0 +1,73 @@
+name: mill
+default_target: develop
+default_role: sr-dev
+
+models:
+  free:
+    - provider: commandcode
+      model: poolside/laguna-s-2.1-free
+      context_limit: 150000
+    - provider: opencode
+      model: deepseek/deepseek-v4-flash
+      context_limit: 128000
+  paid:
+    - provider: commandcode
+      model: deepseek/deepseek-v4-flash
+      context_limit: 200000
+    - provider: opencode
+      model: deepseek/deepseek-v4-pro
+      context_limit: 200000
+  pro:
+    - provider: commandcode
+      model: deepseek/deepseek-v4-pro
+      context_limit: 200000
+    - provider: opencode
+      model: claude-sonnet-4-20250514
+      context_limit: 200000
+
+targets:
+  develop:
+    from: "feature/*"
+    gates:
+      - lint
+      - type-check
+      - build
+    review:
+      - tech-lead
+    labels:
+      start: "stage:dev"
+      review: "stage:review"
+      land: "stage:qa"
+
+  staging:
+    from: develop
+    gates:
+      - lint
+      - type-check
+      - build
+      - diff-coverage
+    review:
+      - tech-lead
+      - reviewer
+    labels:
+      start: "stage:review"
+      review: "stage:staff-review"
+      land: "stage:done"
+
+  main:
+    from: staging
+    gates:
+      - lint
+      - type-check
+      - build
+      - diff-coverage
+      - mutation-testing
+    review:
+      - tech-lead
+      - reviewer
+      - staff
+    confirm: true
+    labels:
+      start: "stage:staff-review"
+      review: null
+      land: "stage:done"

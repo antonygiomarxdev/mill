@@ -285,3 +285,285 @@ func TestCountCommitsZero(t *testing.T) {
 		t.Errorf("expected 0 commits, got %d", got)
 	}
 }
+
+func TestBudgetTimeExceeded(t *testing.T) {
+	dir := t.TempDir()
+
+	fakeBin := filepath.Join(dir, "cmd")
+	script := `#!/bin/sh
+sleep 2
+echo '{"type":"result","subtype":"success","finalText":"should not reach"}'
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write fake binary: %v", err)
+	}
+
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	a := &CommandCodeAdapter{}
+
+	opts := DispatchOpts{
+		Worktree: t.TempDir(),
+		Prompt:   "test",
+		Model:    "laguna-free",
+		MaxTurns: 5,
+		Budget:   &Budget{TimeSeconds: 1},
+	}
+
+	s, err := a.Dispatch(opts)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	result, err := s.Wait()
+	if err != nil {
+		t.Fatalf("Wait should not error on budget kill: %v", err)
+	}
+
+	if result.ExitCode != -1 {
+		t.Errorf("expected exit code -1 (time budget exceeded), got %d", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "blocked: time budget exceeded") {
+		t.Errorf("expected stderr to contain 'blocked: time budget exceeded', got %q", result.Stderr)
+	}
+}
+
+func TestBudgetProcessFinishesInTime(t *testing.T) {
+	dir := t.TempDir()
+
+	fakeBin := filepath.Join(dir, "cmd")
+	script := `#!/bin/sh
+echo '{"type":"result","subtype":"success","sessionId":"sess-ok","finalText":"APPROVED"}'
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write fake binary: %v", err)
+	}
+
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	a := &CommandCodeAdapter{}
+
+	opts := DispatchOpts{
+		Worktree: t.TempDir(),
+		Prompt:   "test",
+		Model:    "laguna-free",
+		MaxTurns: 5,
+		Budget:   &Budget{TimeSeconds: 5},
+	}
+
+	s, err := a.Dispatch(opts)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	result, err := s.Wait()
+	if err != nil {
+		t.Fatalf("Wait failed: %v", err)
+	}
+
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	}
+	if !strings.Contains(result.Output, "APPROVED") {
+		t.Errorf("expected output to contain APPROVED, got: %q", result.Output)
+	}
+}
+
+func TestBudgetAnalysisParalysis(t *testing.T) {
+	dir := t.TempDir()
+
+	fakeBin := filepath.Join(dir, "cmd")
+	script := `#!/bin/sh
+echo '{"type":"event","event":{"type":"thinking","toolName":""}}'
+echo '{"type":"event","event":{"type":"thinking","toolName":""}}'
+echo '{"type":"event","event":{"type":"thinking","toolName":""}}'
+echo '{"type":"event","event":{"type":"thinking","toolName":""}}'
+echo '{"type":"result","subtype":"success","sessionId":"sess-ap","finalText":"done but paralyzed"}'
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write fake binary: %v", err)
+	}
+
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	a := &CommandCodeAdapter{}
+
+	opts := DispatchOpts{
+		Worktree: t.TempDir(),
+		Prompt:   "test",
+		Model:    "laguna-free",
+		MaxTurns: 5,
+		Budget:   &Budget{MaxTurns: 3},
+	}
+
+	s, err := a.Dispatch(opts)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	result, err := s.Wait()
+	if err != nil {
+		t.Fatalf("Wait should not error on analysis paralysis: %v", err)
+	}
+
+	if result.ExitCode != -2 {
+		t.Errorf("expected exit code -2 (analysis paralysis), got %d", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "blocked: analysis paralysis detected") {
+		t.Errorf("expected stderr to contain 'blocked: analysis paralysis detected', got %q", result.Stderr)
+	}
+}
+
+func TestBudgetNoParalysisWithWrites(t *testing.T) {
+	dir := t.TempDir()
+
+	fakeBin := filepath.Join(dir, "cmd")
+	script := `#!/bin/sh
+echo '{"type":"event","event":{"type":"thinking","toolName":""}}'
+echo '{"type":"event","event":{"type":"tool_use","toolName":"write"}}'
+echo '{"type":"event","event":{"type":"thinking","toolName":""}}'
+echo '{"type":"event","event":{"type":"tool_running","toolName":"edit_file"}}'
+echo '{"type":"event","event":{"type":"thinking","toolName":""}}'
+echo '{"type":"result","subtype":"success","sessionId":"sess-np","finalText":"APPROVED with writes"}'
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write fake binary: %v", err)
+	}
+
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	a := &CommandCodeAdapter{}
+
+	opts := DispatchOpts{
+		Worktree: t.TempDir(),
+		Prompt:   "test",
+		Model:    "laguna-free",
+		MaxTurns: 5,
+		Budget:   &Budget{MaxTurns: 3},
+	}
+
+	s, err := a.Dispatch(opts)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	result, err := s.Wait()
+	if err != nil {
+		t.Fatalf("Wait failed: %v", err)
+	}
+
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	}
+	if !strings.Contains(result.Output, "APPROVED") {
+		t.Errorf("expected output to contain APPROVED, got: %q", result.Output)
+	}
+}
+
+func TestBudgetZeroValueFastPath(t *testing.T) {
+	dir := t.TempDir()
+
+	fakeBin := filepath.Join(dir, "cmd")
+	script := `#!/bin/sh
+echo '{"type":"result","subtype":"success","sessionId":"sess-fast","finalText":"APPROVED fast"}'
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write fake binary: %v", err)
+	}
+
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	a := &CommandCodeAdapter{}
+
+	// Zero-value budget should use fast path (backward compat).
+	opts := DispatchOpts{
+		Worktree: t.TempDir(),
+		Prompt:   "test",
+		Model:    "laguna-free",
+		MaxTurns: 5,
+		Budget:   &Budget{TimeSeconds: 0, MaxTurns: 0},
+	}
+
+	s, err := a.Dispatch(opts)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	result, err := s.Wait()
+	if err != nil {
+		t.Fatalf("Wait failed: %v", err)
+	}
+
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	}
+	if !strings.Contains(result.Output, "APPROVED") {
+		t.Errorf("expected output to contain APPROVED, got: %q", result.Output)
+	}
+}
+
+func TestDetectAnalysisParalysis_Detected(t *testing.T) {
+	output := `{"type":"event","event":{"type":"thinking","toolName":""}}
+{"type":"event","event":{"type":"thinking","toolName":""}}
+{"type":"event","event":{"type":"thinking","toolName":""}}
+{"type":"result","subtype":"success","finalText":"done"}`
+
+	if !detectAnalysisParalysis(output, 3) {
+		t.Error("expected analysis paralysis detected with 3 consecutive thinking frames")
+	}
+}
+
+func TestDetectAnalysisParalysis_NotDetected(t *testing.T) {
+	output := `{"type":"event","event":{"type":"thinking","toolName":""}}
+{"type":"event","event":{"type":"tool_use","toolName":"write"}}
+{"type":"event","event":{"type":"thinking","toolName":""}}
+{"type":"event","event":{"type":"thinking","toolName":""}}
+{"type":"result","subtype":"success","finalText":"done"}`
+
+	if detectAnalysisParalysis(output, 3) {
+		t.Error("expected no analysis paralysis when writes break consecutive thinking")
+	}
+}
+
+func TestIsThinkingFrame_EventType(t *testing.T) {
+	frame := ndjsonFrame{Type: "event", Event: &frameEvent{Type: "thinking"}}
+	if !isThinkingFrame(frame) {
+		t.Error("expected isThinkingFrame=true for event with thinking type")
+	}
+}
+
+func TestIsThinkingFrame_TopLevelType(t *testing.T) {
+	frame := ndjsonFrame{Type: "thinking"}
+	if !isThinkingFrame(frame) {
+		t.Error("expected isThinkingFrame=true for top-level thinking type")
+	}
+}
+
+func TestIsThinkingFrame_NotThinking(t *testing.T) {
+	frame := ndjsonFrame{Type: "event", Event: &frameEvent{Type: "tool_use", ToolName: "write"}}
+	if isThinkingFrame(frame) {
+		t.Error("expected isThinkingFrame=false for tool_use event")
+	}
+}
+
+func TestIsWriteFrame_WriteEvent(t *testing.T) {
+	frame := ndjsonFrame{Type: "event", Event: &frameEvent{Type: "tool_use", ToolName: "write"}}
+	if !isWriteFrame(frame) {
+		t.Error("expected isWriteFrame=true for tool_use write event")
+	}
+}
+
+func TestIsWriteFrame_EditEvent(t *testing.T) {
+	frame := ndjsonFrame{Type: "event", Event: &frameEvent{Type: "tool_running", ToolName: "edit_file"}}
+	if !isWriteFrame(frame) {
+		t.Error("expected isWriteFrame=true for tool_running edit_file event")
+	}
+}
+
+func TestIsWriteFrame_NotWrite(t *testing.T) {
+	frame := ndjsonFrame{Type: "event", Event: &frameEvent{Type: "tool_use", ToolName: "search"}}
+	if isWriteFrame(frame) {
+		t.Error("expected isWriteFrame=false for non-write tool")
+	}
+}
+

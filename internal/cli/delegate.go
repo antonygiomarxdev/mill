@@ -1,12 +1,11 @@
 package cli
 
 import (
+	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
-
-	"flag"
 	"strings"
-	"fmt"
 	"time"
 
 	"github.com/antonygiomarxdev/mill/internal/adapter"
@@ -14,6 +13,7 @@ import (
 	"github.com/antonygiomarxdev/mill/internal/domain"
 	"github.com/antonygiomarxdev/mill/internal/issue"
 	"github.com/antonygiomarxdev/mill/internal/ledger"
+	"github.com/antonygiomarxdev/mill/internal/role"
 	"github.com/antonygiomarxdev/mill/internal/state"
 )
 
@@ -24,11 +24,16 @@ import (
 // OK/MAX_TURNS→done, AUTH/NO_CREDIT→abort, RATE_LIMITED/TRANSIENT→backoff+retry,
 // BLOCKED→persist+stop, FATAL→retry.
 func (a *App) runDelegate(args []string) error {
+	// Extract --role and --model before flag parsing since Go's flag
+	// package stops at the first positional argument.
+	roleName, args := extractFlag(args, "role")
+	modelFlag, args := extractFlag(args, "model")
+
 	fs := flag.NewFlagSet("delegate", flag.ContinueOnError)
 	fs.SetOutput(a.Err)
 	var model string
 	var maxTurns int
-	fs.StringVar(&model, "model", "", "model to use (default: from config)")
+	fs.StringVar(&model, "model", modelFlag, "model to use (default: from config)")
 	fs.IntVar(&maxTurns, "max-turns", 100, "max conversation turns")
 
 	if err := fs.Parse(args); err != nil {
@@ -41,12 +46,26 @@ func (a *App) runDelegate(args []string) error {
 	fsArgs := fs.Args()
 	if len(fsArgs) < 1 {
 		fs.Usage()
-		return fmt.Errorf("usage: mill delegate <issue>")
+		return fmt.Errorf("usage: mill delegate <issue> [--role <role>]")
 	}
 
 	issueNum, err := issue.Parse(fsArgs[0])
 	if err != nil {
 		return err
+	}
+
+	// Determine active role from .mill/role (defaults to "staff")
+	activeRole := a.readActiveRole()
+
+	// If --role specified, validate delegation chain
+	var targetRole string
+	if roleName != "" {
+		targetRole = roleName
+		if err := a.validateDelegation(activeRole, targetRole); err != nil {
+			return err
+		}
+	} else {
+		targetRole = activeRole
 	}
 
 	// Load config for default model
@@ -88,9 +107,8 @@ func (a *App) runDelegate(args []string) error {
 		fmt.Fprintf(a.Err, "warning: failed to install hooks: %v\n", err)
 	}
 
-
-	// Build prompt and dispatch opts
-	prompt := buildPrompt(issueNum)
+	// Build role-aware prompt and dispatch opts
+	prompt := buildRolePrompt(issueNum, targetRole)
 	opts := adapter.DispatchOpts{
 		Worktree: a.worktreePath(issueNum),
 		Prompt:   prompt,
@@ -193,7 +211,99 @@ func (a *App) recordError(s state.State, issueNum int, task domain.Task, err err
 	})
 }
 
-// buildPrompt constructs the query passed to `cmd -p` for a given issue.
+// readActiveRole reads the current active role from .mill/role.
+// Returns "staff" if no role file exists (backward compat).
+func (a *App) readActiveRole() string {
+	roleFile := filepath.Join(a.MillDir, "role")
+	data, err := os.ReadFile(roleFile)
+	if err != nil {
+		return "staff"
+	}
+	role := strings.TrimSpace(string(data))
+	if role == "" {
+		return "staff"
+	}
+	return role
+}
+
+// projectRoot walks up from the current working directory to find the
+// project root, identified by the presence of go.mod or mill.yml.
+func projectRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		if _, err := os.Stat(filepath.Join(dir, "mill.yml")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("project root not found (no go.mod or mill.yml)")
+		}
+		dir = parent
+	}
+}
+
+// validateDelegation checks that the active role can delegate to the target role.
+// Reads the active role's ROLE.md frontmatter to get delegates_to.
+func (a *App) validateDelegation(activeRole, targetRole string) error {
+	root, err := projectRoot()
+	if err != nil {
+		return fmt.Errorf("cannot find project root: %w", err)
+	}
+	rolePath := filepath.Join(root, "roles", activeRole, "ROLE.md")
+	fm, err := role.ParseFrontmatter(rolePath)
+	if err != nil {
+		return fmt.Errorf("cannot read role %s: %w", activeRole, err)
+	}
+
+	// If no delegates_to defined, the role cannot delegate
+	if len(fm.DelegatesTo) == 0 {
+		return fmt.Errorf("%s has no delegation targets. Valid: none", activeRole)
+	}
+
+	// Check if target is in the delegates_to list
+	for _, allowed := range fm.DelegatesTo {
+		if allowed == targetRole {
+			return nil
+		}
+	}
+
+	validList := "'" + strings.Join(fm.DelegatesTo, "', '") + "'"
+	return fmt.Errorf("%s delegates to %s, not %s. Valid targets: %s",
+		activeRole,
+		strings.Join(fm.DelegatesTo, ", "),
+		targetRole,
+		validList,
+	)
+}
+
+// buildRolePrompt constructs a role-aware prompt for a given issue and target role.
+func buildRolePrompt(issueNum int, targetRole string) string {
+	root, err := projectRoot()
+	if err != nil {
+		root = "."
+	}
+	rolePrompt, err := role.LoadFrom(root, targetRole)
+	if err != nil {
+		// Fall back to generic prompt if role can't be loaded
+		return fmt.Sprintf(`You are mill, an agent delegation harness.
+Role: %s
+Work on GitHub issue #%d.
+
+Read the codebase, make the necessary changes, and when you are done,
+end your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.`, targetRole, issueNum)
+	}
+
+	return fmt.Sprintf("%s\n\n---\n\nWork on GitHub issue #%d.\n\nRead the codebase, make the necessary changes, and when you are done,\nend your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.", rolePrompt, issueNum)
+}
+
+// buildPrompt constructs the query passed to the agent for a given issue.
+// Deprecated: use buildRolePrompt for role-aware prompts.
 func buildPrompt(issueNum int) string {
 	return fmt.Sprintf(`You are mill, an agent delegation harness. Work on GitHub issue #%d.
 
@@ -213,7 +323,7 @@ func installHooks(worktree string) error {
 		return err
 	}
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".sh" {
+		if e.IsDir() {
 			continue
 		}
 		src := filepath.Join(srcDir, e.Name())
@@ -227,4 +337,21 @@ func installHooks(worktree string) error {
 		}
 	}
 	return nil
+}
+
+// extractFlag extracts a --flag value from args, returning the value
+// and the remaining args with the flag and its value removed.
+// Used to work around Go's flag package stopping at the first positional arg.
+func extractFlag(args []string, name string) (string, []string) {
+	flag := "--" + name
+	for i := 0; i < len(args); i++ {
+		if args[i] == flag && i+1 < len(args) {
+			val := args[i+1]
+			rest := make([]string, 0, len(args)-2)
+			rest = append(rest, args[:i]...)
+			rest = append(rest, args[i+2:]...)
+			return val, rest
+		}
+	}
+	return "", args
 }

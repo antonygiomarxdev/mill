@@ -294,3 +294,82 @@ func TestInstallHooksCreatesDirAndCopiesFiles(t *testing.T) {
 		t.Error("expected copied common to match original common.sh content")
 	}
 }
+
+func TestDelegateStaffToSrDevRejected(t *testing.T) {
+	dir := t.TempDir()
+	// Write .mill/role as staff
+	if err := os.MkdirAll(filepath.Join(dir, ".mill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".mill", "role"), []byte("staff"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+
+	fa := &fakeAdapter{}
+	buf := new(bytes.Buffer)
+	app := &App{Adapter: fa, MillDir: filepath.Join(dir, ".mill"), Out: buf, Err: buf}
+
+	err := app.Run("delegate", "41", "--role", "sr-dev-be")
+	if err == nil {
+		t.Fatal("expected delegation rejection")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "staff delegates to") {
+		t.Errorf("expected delegation chain error, got: %v", errMsg)
+	}
+	if !strings.Contains(errMsg, "not sr-dev-be") {
+		t.Errorf("expected mention of sr-dev-be, got: %v", errMsg)
+	}
+}
+
+func TestDelegateStaffToArchitectAccepted(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".mill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".mill", "role"), []byte("staff"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	fa := &fakeAdapter{
+		result: adapter.SessionResult{
+			ExitCode: 0,
+			Commits:  1,
+		},
+	}
+	buf := new(bytes.Buffer)
+	app := &App{Adapter: fa, MillDir: filepath.Join(dir, ".mill"), Out: buf, Err: buf}
+
+	err := app.Run("delegate", "390", "--role", "architect")
+	if err != nil {
+		t.Fatalf("delegate returned error: %v", err)
+	}
+
+	if !fa.dispatched {
+		t.Error("expected adapter Dispatch to be called")
+	}
+}
+
+func TestDelegateNoRoleUsesActiveRole(t *testing.T) {
+	dir := t.TempDir()
+	// No .mill/role file → defaults to staff, no delegation validation
+	fa := &fakeAdapter{
+		result: adapter.SessionResult{
+			ExitCode: 0,
+			Commits:  0,
+		},
+	}
+	buf := new(bytes.Buffer)
+	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
+
+	err := app.Run("delegate", "1")
+	if err != nil {
+		t.Fatalf("delegate returned error: %v", err)
+	}
+
+	if !fa.dispatched {
+		t.Error("expected adapter Dispatch to be called")
+	}
+}

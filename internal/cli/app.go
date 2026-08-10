@@ -87,6 +87,8 @@ func (a *App) Run(args ...string) error {
 		return a.runInit(args[1:])
 	case "status":
 		return a.runStatus(args[1:])
+	case "role":
+		return a.runRole(args[1:])
 	case "land":
 		return a.runLand(args[1:])
 	default:
@@ -101,12 +103,11 @@ func usage(w io.Writer) {
 Usage:
   mill <command> [flags]
 
-Commands:
   init [flags]       Initialize a new mill project (scaffolding)
   delegate <issue>   Delegate work to an AI agent for the given issue number
+  role <get|set>     Show or set the active role (staff or pm)
   status             Show status of all mill tasks
   land <target>      Run gates and checkout target branch in a worktree
-
 Flags:
   -h, --help         Show this help message
 `)

@@ -103,6 +103,16 @@ func (a *App) runDelegate(args []string) error {
 
 	// Install gauntlet hooks into worktree
 	wt := a.worktreePath(issueNum)
+
+	// Scaffold context files so the agent finds AGENTS.md, .omp/, roles/
+	if err := a.copyScaffold(wt); err != nil {
+		fmt.Fprintf(a.Err, "warning: failed to scaffold worktree: %v\n", err)
+	}
+	// Write .mill/role so the agent knows its role
+	roleFile := filepath.Join(wt, ".mill", "role")
+	if err := os.MkdirAll(filepath.Dir(roleFile), 0755); err == nil {
+		os.WriteFile(roleFile, []byte(targetRole), 0644)
+	}
 	if err := installHooks(wt); err != nil {
 		fmt.Fprintf(a.Err, "warning: failed to install hooks: %v\n", err)
 	}

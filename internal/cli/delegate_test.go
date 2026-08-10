@@ -373,3 +373,45 @@ func TestDelegateNoRoleUsesActiveRole(t *testing.T) {
 		t.Error("expected adapter Dispatch to be called")
 	}
 }
+
+func TestDelegateScaffoldsWorktree(t *testing.T) {
+	dir := t.TempDir()
+	fa := &fakeAdapter{
+		result: adapter.SessionResult{
+			ExitCode: 0,
+			Commits:  0,
+		},
+	}
+	buf := new(bytes.Buffer)
+	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
+
+	err := app.Run("delegate", "7")
+	if err != nil {
+		t.Fatalf("delegate returned error: %v", err)
+	}
+
+	wt := app.worktreePath(7)
+
+	// Verify scaffold files exist
+	for _, rel := range []string{
+		"AGENTS.md",
+		filepath.Join(".omp", "AGENTS.md"),
+		filepath.Join(".omp", "RULES.md"),
+		filepath.Join("roles", "COMMON.md"),
+	} {
+		p := filepath.Join(wt, rel)
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			t.Errorf("expected scaffold file %s to exist", rel)
+		}
+	}
+
+	// Verify .mill/role content
+	roleFile := filepath.Join(wt, ".mill", "role")
+	data, err := os.ReadFile(roleFile)
+	if err != nil {
+		t.Fatalf("failed to read .mill/role: %v", err)
+	}
+	if string(data) != "staff" {
+		t.Errorf("expected .mill/role to be 'staff', got %q", string(data))
+	}
+}

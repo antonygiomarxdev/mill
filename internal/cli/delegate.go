@@ -308,7 +308,8 @@ func (a *App) validateDelegation(activeRole, targetRole string) error {
 }
 
 // buildRolePrompt constructs a role-aware prompt for a given issue and target role.
-func buildRolePrompt(issueNum int, targetRole string) string {
+// When issueBody is non-empty, it is appended as context for the agent.
+func buildRolePrompt(issueNum int, targetRole string, issueBody string) string {
 	root, err := projectRoot()
 	if err != nil {
 		root = "."
@@ -316,15 +317,43 @@ func buildRolePrompt(issueNum int, targetRole string) string {
 	rolePrompt, err := role.LoadFrom(root, targetRole)
 	if err != nil {
 		// Fall back to generic prompt if role can't be loaded
-		return fmt.Sprintf(`You are mill, an agent delegation harness.
+		prompt := fmt.Sprintf(`You are mill, an agent delegation harness.
 Role: %s
 Work on GitHub issue #%d.
 
 Read the codebase, make the necessary changes, and when you are done,
 end your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.`, targetRole, issueNum)
+		if issueBody != "" {
+			prompt += fmt.Sprintf("\n\n**Issue Body:**\n%s", issueBody)
+		}
+		return prompt
 	}
 
-	return fmt.Sprintf("%s\n\n---\n\nWork on GitHub issue #%d.\n\nRead the codebase, make the necessary changes, and when you are done,\nend your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.", rolePrompt, issueNum)
+	prompt := fmt.Sprintf("%s\n\n---\n\nWork on GitHub issue #%d.\n\nRead the codebase, make the necessary changes, and when you are done,\nend your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.", rolePrompt, issueNum)
+	if issueBody != "" {
+		prompt += fmt.Sprintf("\n\n**Issue Body:**\n%s", issueBody)
+	}
+	return prompt
+}
+
+// buildReviewPrompt constructs a review prompt that asks the reviewer agent
+// to evaluate the produce agent's output against the issue body.
+func buildReviewPrompt(issueNum int, issueBody string, produceOutput string) string {
+	prompt := fmt.Sprintf(`You are a code reviewer for mill, an agent delegation harness.
+Review the following work product for GitHub issue #%d.
+
+**Issue Body:**
+%s
+
+**Work Product (produce agent output):**
+%s
+
+Evaluate whether the work product satisfies all acceptance criteria in the issue body.
+End your review by emitting EXACTLY ONE of these signals on stderr:
+- APPROVED: if the work is complete and correct
+- CHANGES_REQUESTED: if the work needs modifications
+- BLOCKED: if you cannot complete the review`, issueNum, issueBody, produceOutput)
+	return prompt
 }
 
 // modelTier maps role frontmatter model tiers to actual model names.

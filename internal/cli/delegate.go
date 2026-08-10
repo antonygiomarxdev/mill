@@ -438,6 +438,12 @@ func classifyResult(exitCode int, stderr string) domain.Classification {
 	if strings.Contains(lower, "blocked:") {
 		return domain.ClassificationBlocked
 	}
+	if strings.Contains(lower, "approved:") {
+		return domain.ClassificationOK
+	}
+	if strings.Contains(lower, "changes_requested:") || strings.Contains(lower, "changes requested:") {
+		return domain.ClassificationMaxTurns
+	}
 	if strings.Contains(lower, "not authenticated") || strings.Contains(lower, "no api key") || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "401") || strings.Contains(lower, "403") {
 		return domain.ClassificationAuth
 	}

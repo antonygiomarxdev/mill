@@ -91,6 +91,8 @@ func (a *App) Run(args ...string) error {
 		return a.runRole(args[1:])
 	case "land":
 		return a.runLand(args[1:])
+	case "watch":
+		return a.runWatch(args[1:])
 	default:
 		usage(a.Err)
 		return fmt.Errorf("unknown command: %s", args[0])

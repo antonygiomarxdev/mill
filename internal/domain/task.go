@@ -11,6 +11,7 @@ type Task struct {
 	Status    TaskStatus `json:"status"`
 	Commits   int        `json:"commits"`
 	Verdict   Verdict    `json:"verdict,omitempty"`
+	Round     int        `json:"round"`
 	StartedAt time.Time  `json:"started_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }

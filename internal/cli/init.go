@@ -34,6 +34,7 @@ func (a *App) runInit(args []string) error {
 
 	var cfg initConfig
 	var yes bool
+	var force bool
 	var target string
 
 	flagSet.StringVar(&cfg.Name, "name", "", "project name (default: current directory name)")
@@ -41,6 +42,7 @@ func (a *App) runInit(args []string) error {
 	flagSet.StringVar(&cfg.Model, "model", "laguna-free", "provider model identifier")
 	flagSet.IntVar(&cfg.MaxRounds, "max-rounds", 4, "max review rounds before REJECTED")
 	flagSet.BoolVar(&yes, "yes", false, "skip interactive prompts, use defaults/flags")
+	flagSet.BoolVar(&force, "force", false, "overwrite .mill/ without confirmation (DESTRUCTIVE)")
 	flagSet.StringVar(&target, "target", "", "target directory (default: current directory)")
 
 	if err := flagSet.Parse(args); err != nil {
@@ -62,9 +64,18 @@ func (a *App) runInit(args []string) error {
 		cfg.Name = filepath.Base(cwd)
 	}
 
+	// Create buffered input reader — reused for overwrite check and config prompts.
+	in := bufio.NewReader(a.In)
+
+	// Overwrite check — before any filesystem writes, unless --force.
+	if !force {
+		if err := promptOverwrite(target, in, a.Out); err != nil {
+			return err
+		}
+	}
+
 	// Interactive prompts (skipped with -yes)
 	if !yes {
-		in := bufio.NewReader(a.In)
 		cfg.Name = prompt(in, a.Out, "Project name", cfg.Name)
 		cfg.Provider = prompt(in, a.Out, "Provider", cfg.Provider)
 		cfg.Model = prompt(in, a.Out, "Model", cfg.Model)
@@ -106,6 +117,69 @@ func (a *App) runInit(args []string) error {
 	fmt.Fprintf(a.Out, "  3. Start delegating: just tell your agent what to build\n")
 
 	return nil
+}
+
+// promptOverwrite checks whether .mill/ exists at target and warns before overwriting.
+// It returns nil if safe to proceed, or an error if the user declines or .mill/ is a file.
+func promptOverwrite(target string, in *bufio.Reader, out io.Writer) error {
+	millPath := filepath.Join(target, ".mill")
+	entry, err := os.Stat(millPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to check %s: %w", millPath, err)
+	}
+
+	if !entry.IsDir() {
+		return fmt.Errorf(".mill/ exists but is a file, not a directory — remove it manually and retry")
+	}
+
+	fmt.Fprintf(out, "⚠ .mill/ already exists.\n")
+	fmt.Fprintf(out, "This will overwrite:\n")
+
+	// Walk .mill/ subdirectories and files to show what will be lost.
+	for _, sub := range []string{"state.json", "ledger", "worktrees", "roles", "checks", "skills", "docs"} {
+		p := filepath.Join(millPath, sub)
+		info, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		if info.IsDir() {
+			entries, _ := os.ReadDir(p)
+			count := len(entries)
+			label := "entries"
+			switch sub {
+			case "worktrees":
+				label = "worktrees"
+			}
+			fmt.Fprintf(out, "  .mill/%s/ (%d %s)\n", sub, count, label)
+		} else {
+			fmt.Fprintf(out, "  .mill/%s (%s)\n", sub, formatSize(info.Size()))
+		}
+	}
+
+	fmt.Fprintf(out, "Overwrite? [y/N]: ")
+	line, err := in.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("init aborted")
+	}
+	line = strings.TrimSpace(strings.ToLower(line))
+	if line != "y" && line != "yes" {
+		return fmt.Errorf("init aborted")
+	}
+	return nil
+}
+
+// formatSize returns a human-readable size string.
+func formatSize(n int64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%dB", n)
+	}
+	if n < 1024*1024 {
+		return fmt.Sprintf("%.1fKB", float64(n)/1024)
+	}
+	return fmt.Sprintf("%.1fMB", float64(n)/(1024*1024))
 }
 
 // prompt reads a line from in, displaying a label with a default value.

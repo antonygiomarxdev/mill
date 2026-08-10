@@ -25,7 +25,7 @@ func TestRoleGetPrintsCurrentRole(t *testing.T) {
 	}
 }
 
-func TestRoleGetNoFileShowsNone(t *testing.T) {
+func TestRoleGetNoFileDefaultsToStaff(t *testing.T) {
 	dir := t.TempDir()
 	buf := new(bytes.Buffer)
 	app := &App{MillDir: dir, Out: buf, Err: buf}
@@ -33,8 +33,8 @@ func TestRoleGetNoFileShowsNone(t *testing.T) {
 		t.Fatalf("role get: %v", err)
 	}
 
-	if got := buf.String(); got != "none\n" {
-		t.Errorf("expected %q, got %q", "none\n", got)
+	if got := buf.String(); got != "staff\n" {
+		t.Errorf("expected %q, got %q", "staff\n", got)
 	}
 }
 
@@ -206,8 +206,8 @@ func TestRoleGetEmptyFile(t *testing.T) {
 		t.Fatalf("role get: %v", err)
 	}
 
-	if got := buf.String(); got != "none\n" {
-		t.Errorf("expected %q, got %q", "none\n", got)
+	if got := buf.String(); got != "staff\n" {
+		t.Errorf("expected %q, got %q", "staff\n", got)
 	}
 }
 

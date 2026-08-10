@@ -43,14 +43,14 @@ func (a *App) roleGet() error {
 	data, err := os.ReadFile(roleFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Fprintln(a.Out, "none")
+			fmt.Fprintln(a.Out, "staff")
 			return nil
 		}
 		return fmt.Errorf("failed to read role: %w", err)
 	}
 	role := strings.TrimSpace(string(data))
 	if role == "" {
-		role = "none"
+		role = "staff"
 	}
 	fmt.Fprintln(a.Out, role)
 	return nil

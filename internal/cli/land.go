@@ -33,9 +33,63 @@ func runLand(target string, worktree string, gates []string, confirm bool) error
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("checkout failed")
+		return detectWorktreeLock(worktree, target, err)
 	}
 	return nil
+}
+
+// detectWorktreeLock checks if a checkout failure is due to another worktree
+// holding the target branch. If so, it returns a detailed error with the
+// locking worktree path and resolution suggestion. Otherwise, it returns
+// a generic "checkout failed" error.
+func detectWorktreeLock(worktree, target string, checkoutErr error) error {
+	listArgs := []string{"worktree", "list"}
+	if worktree != "" {
+		listArgs = append([]string{"-C", worktree}, listArgs...)
+	}
+	out, err := exec.Command("git", listArgs...).Output()
+	if err != nil {
+		return fmt.Errorf("checkout failed")
+	}
+
+	// Parse git worktree list output.
+	// Format: <path> <HEAD-hash> [<branch>] or <path> <HEAD-hash> (detached HEAD)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Branch tracking lines contain "[<branch>]"
+		if !strings.Contains(line, "[") || !strings.Contains(line, "]") {
+			continue
+		}
+
+		// Extract branch name between [ and ]
+		bracketStart := strings.Index(line, "[")
+		bracketEnd := strings.Index(line, "]")
+		if bracketStart < 0 || bracketEnd <= bracketStart {
+			continue
+		}
+		branch := line[bracketStart+1 : bracketEnd]
+
+		if branch != target {
+			continue
+		}
+
+		// Extract path (first whitespace-separated field)
+		parts := strings.Fields(line[:bracketStart])
+		if len(parts) < 1 {
+			continue
+		}
+		lockingPath := parts[0]
+
+		return fmt.Errorf(
+			"land: cannot checkout '%s' — locked by another worktree\n  locking worktree: %s\n  resolve: cd %s && git checkout <other-branch>",
+			target, lockingPath, lockingPath,
+		)
+	}
+
+	return fmt.Errorf("checkout failed")
 }
 
 // runLand handles the "land" command.

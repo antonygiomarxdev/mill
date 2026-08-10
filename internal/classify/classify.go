@@ -4,20 +4,10 @@
 // parsing review verdicts from text output.
 package classify
 
-import "strings"
+import (
+	"strings"
 
-// Classification is the outcome category of an agent session.
-type Classification string
-
-const (
-	OK           Classification = "OK"
-	FATAL        Classification = "FATAL"
-	MAX_TURNS    Classification = "MAX_TURNS"
-	AUTH         Classification = "AUTH"
-	NO_CREDIT    Classification = "NO_CREDIT"
-	RATE_LIMITED Classification = "RATE_LIMITED"
-	TRANSIENT    Classification = "TRANSIENT"
-	BLOCKED      Classification = "BLOCKED"
+	"github.com/antonygiomarxdev/mill/internal/domain"
 )
 
 // Classify examines an agent session's exit code and stderr output and
@@ -33,41 +23,41 @@ const (
 // If no stderr signal matches, the exit code is mapped:
 // 0 -> OK, 3 -> AUTH, 4/9/130/137/143 -> FATAL, 5 -> RATE_LIMITED,
 // 6/7 -> TRANSIENT, 8 -> MAX_TURNS, 10 -> NO_CREDIT, default -> FATAL.
-func Classify(exitCode int, stderr string) Classification {
+func Classify(exitCode int, stderr string) domain.Classification {
 	lower := strings.ToLower(stderr)
 	// Check stderr signals first (priority over exit code)
 	if strings.Contains(lower, "blocked:") {
-		return BLOCKED
+		return domain.ClassificationBlocked
 	}
 	if strings.Contains(lower, "not authenticated") || strings.Contains(lower, "no api key") || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "401") || strings.Contains(lower, "403") {
-		return AUTH
+		return domain.ClassificationAuth
 	}
 	if strings.Contains(lower, "insufficient credits") || strings.Contains(lower, "no credits") || strings.Contains(lower, "credit limit") {
-		return NO_CREDIT
+		return domain.ClassificationNoCredit
 	}
-	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "429") || strings.Contains(lower, "too many requests") {
-		return RATE_LIMITED
+	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "429") {
+		return domain.ClassificationRateLimited
 	}
 	if strings.Contains(lower, "connection refused") || strings.Contains(lower, "econnrefused") || strings.Contains(lower, "timeout") {
-		return TRANSIENT
+		return domain.ClassificationTransient
 	}
 	// Fall back to exit code
 	switch exitCode {
 	case 0:
-		return OK
+		return domain.ClassificationOK
 	case 3:
-		return AUTH
+		return domain.ClassificationAuth
 	case 4, 9, 130, 137, 143:
-		return FATAL
+		return domain.ClassificationFatal
 	case 5:
-		return RATE_LIMITED
+		return domain.ClassificationRateLimited
 	case 6, 7:
-		return TRANSIENT
+		return domain.ClassificationTransient
 	case 8:
-		return MAX_TURNS
+		return domain.ClassificationMaxTurns
 	case 10:
-		return NO_CREDIT
+		return domain.ClassificationNoCredit
 	default:
-		return FATAL
+		return domain.ClassificationFatal
 	}
 }

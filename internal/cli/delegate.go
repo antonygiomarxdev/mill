@@ -102,7 +102,7 @@ func (a *App) runDelegate(args []string) error {
 
 	// Update task status
 	taskStatus := domain.TaskDone
-	if classification != classify.OK && classification != classify.MAX_TURNS {
+	if classification != domain.ClassificationOK && classification != domain.ClassificationMaxTurns {
 		taskStatus = domain.TaskError
 	}
 	task.UpdateStatus(taskStatus, domain.VerdictApproved, result.Commits)

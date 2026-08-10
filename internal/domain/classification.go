@@ -5,12 +5,12 @@ package domain
 type Classification string
 
 const (
-	ClassificationOK           Classification = "OK"
-	ClassificationFatal        Classification = "FATAL"
-	ClassificationMaxTurns     Classification = "MAX_TURNS"
-	ClassificationAuth         Classification = "AUTH"
-	ClassificationNoCredit     Classification = "NO_CREDIT"
-	ClassificationRateLimited  Classification = "RATE_LIMITED"
-	ClassificationTransient    Classification = "TRANSIENT"
-	ClassificationBlocked      Classification = "BLOCKED"
+	ClassificationOK          Classification = "OK"
+	ClassificationFatal       Classification = "FATAL"
+	ClassificationMaxTurns    Classification = "MAX_TURNS"
+	ClassificationAuth        Classification = "AUTH"
+	ClassificationNoCredit    Classification = "NO_CREDIT"
+	ClassificationRateLimited Classification = "RATE_LIMITED"
+	ClassificationTransient   Classification = "TRANSIENT"
+	ClassificationBlocked     Classification = "BLOCKED"
 )

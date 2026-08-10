@@ -458,7 +458,7 @@ func TestClassifyResultExitCodes(t *testing.T) {
 		{name: "stderr insufficient credits signals NO_CREDIT", code: 1, stderr: "insufficient credits", want: domain.ClassificationNoCredit},
 		{name: "stderr timeout signals TRANSIENT", code: 1, stderr: "network timeout", want: domain.ClassificationTransient},
 		{name: "stderr approved: signal", code: 1, stderr: "APPROVED: all good", want: domain.ClassificationOK},
-		{name: "stderr changes_requested: signal", code: 0, stderr: "CHANGES_REQUESTED: needs work", want: domain.ClassificationMaxTurns},
+		{name: "stderr changes_requested: signal", code: 0, stderr: "CHANGES_REQUESTED: needs work", want: domain.ClassificationChangesRequested},
 	}
 
 	for _, tt := range tests {

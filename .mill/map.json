@@ -6,7 +6,7 @@
         "28": {"phase": "impl", "status": "review", "next": "Reviewer → SIGN-OFF"},
         "41": {"phase": "impl", "status": "blocked", "blocked_by": "coverage 85.5% < 90% → RESOLVED: now 93.2%"},
         "42": {"phase": "impl", "status": "review", "next": "Reviewer → SIGN-OFF"},
-        "54": {"phase": "tasks", "status": "pending", "next": "Sr Dev → IMPL"},
+        "54": {"phase": "impl", "status": "review", "next": "Reviewer → SIGN-OFF"},
         "55": {"phase": "impl", "status": "review", "next": "Reviewer → SIGN-OFF"},
         "56": {"phase": "impl", "status": "review", "next": "Reviewer → SIGN-OFF"},
         "57": {"phase": "impl", "status": "review", "next": "Reviewer → SIGN-OFF"},
@@ -31,8 +31,7 @@
         "78": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
         "79": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
       },
-      "open_questions": [],
-      "next": "Sr Dev IMPL for issues #42,#54-58 (TASKS done); #60-63 approved; #28 in review; #68-79 backlog gaps"
+      "next": "Sr Dev IMPL for issues #42,#54-58 (TASKS done); #60-63 approved; #28 in review; #68-79 backlog gaps",
       "coverage": "93.2%"
     }
   }

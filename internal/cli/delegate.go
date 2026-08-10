@@ -294,8 +294,8 @@ func (a *App) runDispatchLoop(issueNum int, taskID string, opts adapter.Dispatch
 			// Non-recoverable — exit immediately
 			goto finish
 
-		case domain.ClassificationMaxTurns:
-			// Changes requested — continue to next round
+		case domain.ClassificationChangesRequested, domain.ClassificationMaxTurns:
+			// Changes requested or max turns — continue to next round
 			continue
 
 		default:
@@ -312,6 +312,8 @@ finish:
 	switch finalClassification {
 	case domain.ClassificationOK:
 		verdict = domain.VerdictApproved
+	case domain.ClassificationChangesRequested:
+		verdict = domain.VerdictChangesRequested
 	case domain.ClassificationMaxTurns:
 		verdict = domain.VerdictChanges
 	default:
@@ -608,7 +610,7 @@ func classifyResult(exitCode int, stderr string) domain.Classification {
 		return domain.ClassificationOK
 	}
 	if strings.Contains(lower, "changes_requested:") || strings.Contains(lower, "changes requested:") {
-		return domain.ClassificationMaxTurns
+		return domain.ClassificationChangesRequested
 	}
 	if strings.Contains(lower, "not authenticated") || strings.Contains(lower, "no api key") || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "401") || strings.Contains(lower, "403") {
 		return domain.ClassificationAuth

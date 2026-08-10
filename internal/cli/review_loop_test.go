@@ -74,10 +74,10 @@ func TestReviewLoopApprovedFirstRound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state file not created: %v", err)
 	}
-	if !strings.Contains(string(data), `"status":"done"`) {
+	if !strings.Contains(string(data), `"status": "done"`) {
 		t.Error("expected task status 'done'")
 	}
-	if !strings.Contains(string(data), `"verdict":"approved"`) {
+	if !strings.Contains(string(data), `"verdict": "approved"`) {
 		t.Error("expected verdict 'approved'")
 	}
 
@@ -138,10 +138,10 @@ func TestReviewLoopChangesRequestedThenApproved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state file not created: %v", err)
 	}
-	if !strings.Contains(string(data), `"status":"done"`) {
+	if !strings.Contains(string(data), `"status": "done"`) {
 		t.Error("expected task status 'done'")
 	}
-	if !strings.Contains(string(data), `"verdict":"approved"`) {
+	if !strings.Contains(string(data), `"verdict": "approved"`) {
 		t.Error("expected verdict 'approved'")
 	}
 }
@@ -191,10 +191,10 @@ func TestReviewLoopMaxCyclesExhausted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state file not created: %v", err)
 	}
-	if !strings.Contains(string(data), `"status":"error"`) {
+	if !strings.Contains(string(data), `"status": "error"`) {
 		t.Error("expected task status 'error'")
 	}
-	if !strings.Contains(string(data), `"verdict":"changes_requested"`) {
+	if !strings.Contains(string(data), `"verdict": "changes_requested"`) {
 		t.Error("expected verdict 'changes_requested'")
 	}
 
@@ -246,10 +246,10 @@ func TestReviewLoopBlockedImmediate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state file not created: %v", err)
 	}
-	if !strings.Contains(string(data), `"status":"error"`) {
+	if !strings.Contains(string(data), `"status": "error"`) {
 		t.Error("expected task status 'error'")
 	}
-	if !strings.Contains(string(data), `"verdict":"rejected"`) {
+	if !strings.Contains(string(data), `"verdict": "rejected"`) {
 		t.Error("expected verdict 'rejected'")
 	}
 
@@ -268,9 +268,7 @@ func TestClassifyResultReviewSignals_54(t *testing.T) {
 	}{
 		{name: "APPROVED signal", code: 1, stderr: "APPROVED: looks great", want: domain.ClassificationOK},
 		{name: "BLOCKED signal", code: 0, stderr: "BLOCKED: need credentials", want: domain.ClassificationBlocked},
-		// Integration note: after classifyResult is updated to return ClassificationChangesRequested,
-		// update this to use ClassificationChangesRequested instead of ClassificationMaxTurns.
-		{name: "CHANGES_REQUESTED signal", code: 0, stderr: "CHANGES_REQUESTED: 1. Fix X", want: domain.ClassificationMaxTurns},
+		{name: "CHANGES_REQUESTED signal", code: 0, stderr: "CHANGES_REQUESTED: 1. Fix X", want: domain.ClassificationChangesRequested},
 	}
 
 	for _, tt := range tests {

@@ -43,12 +43,21 @@ graph TD
 ## What each active role can do directly
 
 | Role | Can do directly | Must delegate |
-|------|----------------|---------------|
 | **Staff** | Talk to CTO, verify results, decide merge-readiness | Everything else: specs, design, implementation, review |
 | **PM** | Talk to CTO, write product specs, prioritize | UX design, UI design, implementation |
 
-## What NEVER happens
+## Delegation paths
 
+| Path | When | Mechanism |
+|------|------|-----------|
+| Native `task()` | omp harness, agent type available | Async, auto-notify, harness-managed |
+| `mill delegate` CLI | Cascade chains, no harness, worktree needed | OS process, goroutine |
+
+## Phased workflow
+
+Every issue follows FRD(PM) → SPEC(Architect) → TASKS(Tech Lead) →
+IMPLEMENT(Sr Dev) → REVIEW(Reviewer). Mechanical gate scripts in `checks/`
+block progress between phases. See `skills/mill.md` for templates.
 ```mermaid
 graph TD
     WRONG1[❌ Staff writes code] -.-> X1[BLOCKED by pre-commit]

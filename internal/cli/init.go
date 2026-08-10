@@ -90,8 +90,12 @@ func (a *App) runInit(args []string) error {
 		return err
 	}
 
+	// Create .mill/ runtime directories
+	for _, sub := range []string{"ledger", "worktrees", "phases", "artifacts", "memory"} {
+		os.MkdirAll(filepath.Join(target, ".mill", sub), 0o755)
+	}
+
 	fmt.Fprintf(a.Out, "mill project initialized in %s\n", target)
-	fmt.Fprintf(a.Out, "Next steps:\n")
 	fmt.Fprintf(a.Out, "  1. Open this project in your harness (omp/claude/codex)\n")
 	fmt.Fprintf(a.Out, "  2. The agent loads @skills/mill.md automatically\n")
 	fmt.Fprintf(a.Out, "  3. Start delegating: just tell your agent what to build\n")

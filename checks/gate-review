@@ -2,6 +2,7 @@
 # Gate: REVIEW phase complete — review.md must exist with APPROVED verdict
 set -euo pipefail
 issue="${1:?usage: $0 <issue-number>}"
+mkdir -p ".mill/phases/${issue}"
 review=".mill/phases/${issue}/review.md"
 test -f "$review" || { echo "BLOCKED: review.md missing for #${issue}. Spawn Reviewer."; exit 1; }
 grep -q 'APPROVED' "$review" || { echo "BLOCKED: review.md does not contain APPROVED verdict"; exit 1; }

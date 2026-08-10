@@ -175,3 +175,22 @@ continue. `exit 1` is enforcement. Markdown is documentation.
 **Mechanised:** `checks/gate-{frd,spec,tasks,coverage,review}` scripts.
 Phase transitions in `skills/mill.md` reference them. Pre-push hook runs
 them. The gate is the law — no exceptions, no bypasses.
+
+---
+
+## 11. stage:dev without FRD/SPEC/TASKS is skipping the process
+
+**When:** #54-58 — new enhancement issues created by PM agents.
+
+**What happened:** Staff labeled all 5 issues as \`stage:dev\` + \`agent:sr-dev\`
+without checking if they had artifacts. None had FRD, SPEC, or TASKS.
+The gates would have blocked every one of them.
+
+**Root cause:** The process exists on paper but the habit of jumping to
+implementation is ingrained. "It's just a small enhancement" is how every
+unreviewed, undesigned, untested feature starts.
+
+**Lesson:** \`stage:dev\` is the FOURTH phase, not the first. Every issue
+starts at \`stage:spec\` (PM → FRD) or earlier. The label reflects the
+current phase, not the destination. Check the gates before labeling:
+\`test -f .mill/phases/N/frd.md || echo "needs PM"\`

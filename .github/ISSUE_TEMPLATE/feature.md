@@ -1,10 +1,11 @@
 ---
 name: Feature Request
-about: Propose a new feature or enhancement
+about: Propose a new feature (from a Discussion)
 title: "feat: "
 labels: ["enhancement", "stage:spec", "needs:pm-review"]
-assignees: []
 ---
+
+> **Source discussion:** <!-- link to the discussion this came from -->
 
 ## Problem
 
@@ -24,9 +25,8 @@ assignees: []
 
 ## Phases
 
-<!-- filled by PM after spec is written -->
-- [ ] FRD (`stage:spec`)
-- [ ] SPEC (`stage:design`)
-- [ ] TASKS (`stage:dev`)
+- [ ] FRD (`.mill/phases/N/frd.md`)
+- [ ] SPEC (`.mill/phases/N/spec.md`)
+- [ ] TASKS (`.mill/phases/N/tasks.md`)
 - [ ] IMPLEMENT
-- [ ] REVIEW
+- [ ] REVIEW (`.mill/phases/N/review.md`)

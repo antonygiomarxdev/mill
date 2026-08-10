@@ -162,6 +162,89 @@ func TestStateUsesDomainTask(t *testing.T) {
 	}
 }
 
+func TestLoadOnDirectoryReturnsError(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error when reading a directory path")
+	}
+	if os.IsNotExist(err) {
+		t.Fatalf("expected non-NotExist error, got: %v", err)
+	}
+}
+
+func TestLoadInvalidJSONReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	if err := os.WriteFile(path, []byte("{invalid"), 0o644); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestLoadEmptyJSONObjectReturnsEmptyState(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if loaded.Tasks == nil {
+		t.Fatal("expected Tasks map to be initialized, not nil")
+	}
+	if len(loaded.Tasks) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(loaded.Tasks))
+	}
+}
+
+func TestSaveFailsWhenParentIsFile(t *testing.T) {
+	dir := t.TempDir()
+	blockingFile := filepath.Join(dir, "blockingfile")
+	if err := os.WriteFile(blockingFile, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	s := New()
+	err := s.Save(filepath.Join(blockingFile, "state.json"))
+	if err == nil {
+		t.Fatal("expected error when parent path is a file")
+	}
+}
+
+func TestUpsertTaskOnZeroValueState(t *testing.T) {
+	var s State // zero value: Tasks is nil
+
+	s.UpsertTask(domain.Task{
+		ID:     "zero-val",
+		Issue:  42,
+		Status: domain.TaskPending,
+	})
+
+	if s.Tasks == nil {
+		t.Fatal("expected Tasks to be initialized after upsert")
+	}
+
+	task, ok := s.Task("zero-val")
+	if !ok {
+		t.Fatal("expected task to exist after upsert on nil map")
+	}
+	if task.Issue != 42 {
+		t.Errorf("expected issue %d, got %d", 42, task.Issue)
+	}
+}
+
 func TestStateRoundTripsTimestamps(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")

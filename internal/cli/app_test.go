@@ -158,3 +158,12 @@ func TestRunLandConfirmNo(t *testing.T) {
 		t.Errorf("expected HEAD to stay on 'feature', got %q", branch)
 	}
 }
+
+func TestAppRunLandNoArgs(t *testing.T) {
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: t.TempDir(), Out: buf, Err: buf}
+	err := app.Run("land")
+	if err == nil {
+		t.Error("expected usage error for land with no target")
+	}
+}

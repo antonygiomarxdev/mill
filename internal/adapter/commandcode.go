@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/antonygiomarxdev/mill/internal/domain"
+	"github.com/antonygiomarxdev/mill/internal/repair"
 )
 
 // CommandCodeAdapter implements the Adapter interface for the CommandCode CLI.
@@ -34,6 +35,13 @@ func (a *CommandCodeAdapter) Capabilities() Capabilities {
 // The process is started asynchronously; call Wait() on the returned
 // Session to block until completion and collect the result.
 func (a *CommandCodeAdapter) Dispatch(opts DispatchOpts) (Session, error) {
+	// Apply repair pipeline to tool call inputs before spawning.
+	input, err := json.Marshal(opts)
+	if err == nil {
+		repaired, _ := repair.Repair(input)
+		_ = json.Unmarshal(repaired, &opts)
+	}
+
 	args := buildArgs(opts)
 
 	cmd := exec.Command("cmd", args...)
@@ -43,7 +51,8 @@ func (a *CommandCodeAdapter) Dispatch(opts DispatchOpts) (Session, error) {
 		}
 		cmd.Dir = opts.Worktree
 	}
-	cmd.Stderr = os.Stderr
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -56,6 +65,7 @@ func (a *CommandCodeAdapter) Dispatch(opts DispatchOpts) (Session, error) {
 		id:        generateID(),
 		cmd:       cmd,
 		outputBuf: &out,
+		stderrBuf: &stderr,
 		startedAt: time.Now().UTC(),
 		status:    sessionStatus(domain.SessionRunning),
 	}, nil
@@ -69,7 +79,8 @@ func (a *CommandCodeAdapter) Resume(sessionID string) (Session, error) {
 	}
 
 	cmd := exec.Command("cmd", args...)
-	cmd.Stderr = os.Stderr
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -82,6 +93,7 @@ func (a *CommandCodeAdapter) Resume(sessionID string) (Session, error) {
 		id:        sessionID,
 		cmd:       cmd,
 		outputBuf: &out,
+		stderrBuf: &stderr,
 		startedAt: time.Now().UTC(),
 		status:    sessionStatus(domain.SessionRunning),
 	}, nil
@@ -105,6 +117,7 @@ type liveSession struct {
 	id        string
 	cmd       *exec.Cmd
 	outputBuf *bytes.Buffer
+	stderrBuf *bytes.Buffer
 	startedAt time.Time
 	status    string
 }
@@ -122,7 +135,7 @@ func (s *liveSession) Wait() (SessionResult, error) {
 			s.status = sessionStatus(domain.SessionError)
 		} else {
 			s.status = sessionStatus(domain.SessionError)
-			return SessionResult{ExitCode: -1}, err
+			return SessionResult{ExitCode: -1, Stderr: s.stderrBuf.String()}, err
 		}
 	} else {
 		s.status = sessionStatus(domain.SessionDone)
@@ -136,6 +149,7 @@ func (s *liveSession) Wait() (SessionResult, error) {
 		ExitCode: exitCode,
 		Commits:  commits,
 		Output:   finalText,
+		Stderr:   s.stderrBuf.String(),
 	}, nil
 }
 

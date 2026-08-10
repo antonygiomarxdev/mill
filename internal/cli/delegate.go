@@ -16,6 +16,9 @@ import (
 // runDelegate handles the "delegate <issue>" command.
 // It creates a task, dispatches an AI agent via the configured adapter,
 // waits for completion, classifies the result, and persists state + ledger entries.
+// Classification drives the retry/abort policy:
+// OK/MAX_TURNS→done, AUTH/NO_CREDIT→abort, RATE_LIMITED/TRANSIENT→backoff+retry,
+// BLOCKED→persist+stop, FATAL→retry.
 func (a *App) runDelegate(args []string) error {
 	fs := flag.NewFlagSet("delegate", flag.ContinueOnError)
 	fs.SetOutput(a.Err)
@@ -75,7 +78,7 @@ func (a *App) runDelegate(args []string) error {
 		return fmt.Errorf("failed to append ledger entry: %w", err)
 	}
 
-	// Build prompt and dispatch the agent
+	// Build prompt and dispatch opts
 	prompt := buildPrompt(issueNum)
 	opts := adapter.DispatchOpts{
 		Worktree: a.worktreePath(issueNum),
@@ -84,28 +87,64 @@ func (a *App) runDelegate(args []string) error {
 		MaxTurns: maxTurns,
 	}
 
-	session, err := a.Adapter.Dispatch(opts)
-	if err != nil {
-		a.recordError(s, issueNum, task, err, "failed to dispatch agent")
-		return fmt.Errorf("failed to dispatch agent: %w", err)
+	// Dispatch loop with classification-driven retry/abort.
+	const maxRetries = 3
+	var classification domain.Classification
+	var result adapter.SessionResult
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Dispatch the agent
+		session, err := a.Adapter.Dispatch(opts)
+		if err != nil {
+			a.recordError(s, issueNum, task, err, "failed to dispatch agent")
+			return fmt.Errorf("failed to dispatch agent: %w", err)
+		}
+
+		// Wait for the agent to finish
+		result, err = session.Wait()
+		if err != nil {
+			a.recordError(s, issueNum, task, err, "agent session failed")
+			return fmt.Errorf("agent session failed: %w", err)
+		}
+
+		// Classify the result
+		classification = classify.Classify(result.ExitCode, result.Stderr)
+
+		// Log classification decision to ledger
+		classifyEntry := ledger.Entry{
+			Timestamp:      time.Now().UTC(),
+			Issue:          issueNum,
+			Event:          "classify",
+			Status:         string(domain.TaskRunning),
+			Classification: string(classification),
+		}
+		if err := ledger.Append(a.ledgerPath(issueNum), classifyEntry); err != nil {
+			return fmt.Errorf("failed to append ledger entry: %w", err)
+		}
+
+		// Retry/abort decisions based on classification
+		switch classification {
+		case domain.ClassificationRateLimited, domain.ClassificationTransient:
+			if attempt < maxRetries {
+				time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+				continue
+			}
+		case domain.ClassificationFatal:
+			if attempt < maxRetries {
+				continue
+			}
+		}
+		break // done: OK, MAX_TURNS, AUTH, NO_CREDIT, BLOCKED, or retries exhausted
 	}
 
-	// Wait for the agent to finish
-	result, err := session.Wait()
-	if err != nil {
-		a.recordError(s, issueNum, task, err, "agent session failed")
-		return fmt.Errorf("agent session failed: %w", err)
-	}
-
-	// Classify the result
-	classification := classify.Classify(result.ExitCode, result.Output)
-
-	// Update task status
+	// Determine final task status and verdict
 	taskStatus := domain.TaskDone
+	verdict := domain.VerdictApproved
 	if classification != domain.ClassificationOK && classification != domain.ClassificationMaxTurns {
 		taskStatus = domain.TaskError
+		verdict = domain.VerdictRejected
 	}
-	task.UpdateStatus(taskStatus, domain.VerdictApproved, result.Commits)
+	task.UpdateStatus(taskStatus, verdict, result.Commits)
 
 	s.UpsertTask(task)
 	if err := s.Save(a.statePath()); err != nil {
@@ -118,14 +157,14 @@ func (a *App) runDelegate(args []string) error {
 		Issue:          issueNum,
 		Event:          "complete",
 		Status:         string(taskStatus),
-		Verdict:        string(domain.VerdictApproved),
+		Verdict:        string(verdict),
 		Classification: string(classification),
 	}
 	if err := ledger.Append(a.ledgerPath(issueNum), completeEntry); err != nil {
 		return fmt.Errorf("failed to append ledger entry: %w", err)
 	}
 
-	fmt.Fprintf(a.Out, "Delegated issue %d — verdict: %s, commits: %d\n", issueNum, domain.VerdictApproved, result.Commits)
+	fmt.Fprintf(a.Out, "Delegated issue %d — verdict: %s, commits: %d\n", issueNum, verdict, result.Commits)
 	return nil
 }
 

@@ -182,17 +182,21 @@ func TestDelegateCreatesLedgerEntry(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("expected at least 2 ledger entries, got %d", len(lines))
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 ledger entries, got %d", len(lines))
 	}
 
 	// First entry: dispatch
 	if !strings.Contains(lines[0], "dispatch") {
 		t.Errorf("expected first entry to be dispatch, got: %s", lines[0])
 	}
-	// Second entry: complete
-	if !strings.Contains(lines[1], "complete") {
-		t.Errorf("expected second entry to be complete, got: %s", lines[1])
+	// Second entry: classify
+	if !strings.Contains(lines[1], "classify") {
+		t.Errorf("expected second entry to be classify, got: %s", lines[1])
+	}
+	// Third entry: complete
+	if !strings.Contains(lines[2], "complete") {
+		t.Errorf("expected third entry to be complete, got: %s", lines[2])
 	}
 }
 

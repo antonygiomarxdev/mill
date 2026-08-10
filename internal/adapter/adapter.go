@@ -26,6 +26,7 @@ type SessionResult struct {
 	ExitCode int    `json:"exit_code"`
 	Commits  int    `json:"commits"`
 	Output   string `json:"output"`
+	Stderr   string `json:"stderr"`
 }
 
 // Session represents an in-flight or completed agent session.

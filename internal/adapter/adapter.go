@@ -4,6 +4,13 @@ package adapter
 
 import "github.com/antonygiomarxdev/mill/internal/domain"
 
+// Budget holds per-target resource constraints for agent delegation.
+type Budget struct {
+	TimeSeconds int  `json:"time_seconds"`
+	MaxTurns    int  `json:"max_turns"`
+	TokenBudget *int `json:"token_budget,omitempty"`
+}
+
 // DispatchOpts contains the options for dispatching a new agent session.
 type DispatchOpts struct {
 	// Worktree is the directory where the agent should operate.
@@ -14,6 +21,8 @@ type DispatchOpts struct {
 	Model string
 	// MaxTurns caps the conversation turns. Zero means no cap.
 	MaxTurns int
+	// Budget is the per-target resource budget (nil = unbounded).
+	Budget *Budget
 }
 
 // Capabilities describes what an adapter can do.

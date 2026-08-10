@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/antonygiomarxdev/mill/internal/adapter"
-	"github.com/antonygiomarxdev/mill/internal/classify"
 	"github.com/antonygiomarxdev/mill/internal/domain"
 	"github.com/antonygiomarxdev/mill/internal/issue"
 	"github.com/antonygiomarxdev/mill/internal/ledger"
@@ -33,8 +32,10 @@ func (a *App) runDelegate(args []string) error {
 	fs.SetOutput(a.Err)
 	var model string
 	var maxTurns int
+	var wait bool
 	fs.StringVar(&model, "model", modelFlag, "model to use (default: from config)")
 	fs.IntVar(&maxTurns, "max-turns", 100, "max conversation turns")
+	fs.BoolVar(&wait, "wait", false, "wait for agent to finish (default: async)")
 
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -124,32 +125,46 @@ func (a *App) runDelegate(args []string) error {
 		Prompt:   prompt,
 		Model:    model,
 		MaxTurns: maxTurns,
+		Budget:   cfg.Budget,
 	}
 
-	// Dispatch loop with classification-driven retry/abort.
+	if wait {
+		return a.runDispatchLoop(issueNum, taskID, opts)
+	}
+
+	// Async: fire and forget. Agent runs in background goroutine.
+	go a.runDispatchLoop(issueNum, taskID, opts)
+	fmt.Fprintf(a.Out, "Delegated issue %d — task %s (async)\n", issueNum, taskID)
+	return nil
+}
+
+// runDispatchLoop dispatches an agent, waits for completion, classifies the
+// result, retries on transient failures, and persists final state.
+func (a *App) runDispatchLoop(issueNum int, taskID string, opts adapter.DispatchOpts) error {
 	const maxRetries = 3
 	var classification domain.Classification
 	var result adapter.SessionResult
 
+	s, err := state.Load(a.statePath())
+	if err != nil {
+		return fmt.Errorf("failed to load state: %w", err)
+	}
+	task := domain.NewTask(taskID, issueNum)
+
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		// Dispatch the agent
 		session, err := a.Adapter.Dispatch(opts)
 		if err != nil {
 			a.recordError(s, issueNum, task, err, "failed to dispatch agent")
 			return fmt.Errorf("failed to dispatch agent: %w", err)
 		}
 
-		// Wait for the agent to finish
 		result, err = session.Wait()
 		if err != nil {
 			a.recordError(s, issueNum, task, err, "agent session failed")
 			return fmt.Errorf("agent session failed: %w", err)
 		}
+		classification = classifyResult(result.ExitCode, result.Stderr)
 
-		// Classify the result
-		classification = classify.Classify(result.ExitCode, result.Stderr)
-
-		// Log classification decision to ledger
 		classifyEntry := ledger.Entry{
 			Timestamp:      time.Now().UTC(),
 			Issue:          issueNum,
@@ -161,7 +176,6 @@ func (a *App) runDelegate(args []string) error {
 			return fmt.Errorf("failed to append ledger entry: %w", err)
 		}
 
-		// Retry/abort decisions based on classification
 		switch classification {
 		case domain.ClassificationRateLimited, domain.ClassificationTransient:
 			if attempt < maxRetries {
@@ -173,10 +187,9 @@ func (a *App) runDelegate(args []string) error {
 				continue
 			}
 		}
-		break // done: OK, MAX_TURNS, AUTH, NO_CREDIT, BLOCKED, or retries exhausted
+		break
 	}
 
-	// Determine final task status and verdict
 	taskStatus := domain.TaskDone
 	verdict := domain.VerdictApproved
 	if classification != domain.ClassificationOK && classification != domain.ClassificationMaxTurns {
@@ -190,7 +203,6 @@ func (a *App) runDelegate(args []string) error {
 		return fmt.Errorf("failed to save state: %w", err)
 	}
 
-	// Append completion ledger entry
 	completeEntry := ledger.Entry{
 		Timestamp:      time.Now().UTC(),
 		Issue:          issueNum,
@@ -203,9 +215,9 @@ func (a *App) runDelegate(args []string) error {
 		return fmt.Errorf("failed to append ledger entry: %w", err)
 	}
 
-	fmt.Fprintf(a.Out, "Delegated issue %d — verdict: %s, commits: %d\n", issueNum, verdict, result.Commits)
 	return nil
 }
+
 
 // recordError updates the task and ledger to reflect an agent failure.
 func (a *App) recordError(s state.State, issueNum int, task domain.Task, err error, event string) {
@@ -364,4 +376,58 @@ func extractFlag(args []string, name string) (string, []string) {
 		}
 	}
 	return "", args
+}
+
+
+// classifyResult examines an agent session's exit code and stderr output
+// and returns the corresponding domain.Classification.
+//
+// Stderr signals are checked first (priority over exit code):
+//
+//	1. "blocked:"           → BLOCKED
+//	2. auth signals         → AUTH
+//	3. no-credit signals    → NO_CREDIT
+//	4. rate-limit signals   → RATE_LIMITED
+//	5. transient signals    → TRANSIENT
+//
+// If no stderr signal matches, the exit code is mapped:
+// 0 → OK, 3 → AUTH, 4/9/130/137/143 → FATAL, 5 → RATE_LIMITED,
+// 6/7 → TRANSIENT, 8 → MAX_TURNS, 10 → NO_CREDIT, default → FATAL.
+func classifyResult(exitCode int, stderr string) domain.Classification {
+	lower := strings.ToLower(stderr)
+	// Check stderr signals first
+	if strings.Contains(lower, "blocked:") {
+		return domain.ClassificationBlocked
+	}
+	if strings.Contains(lower, "not authenticated") || strings.Contains(lower, "no api key") || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "401") || strings.Contains(lower, "403") {
+		return domain.ClassificationAuth
+	}
+	if strings.Contains(lower, "insufficient credits") || strings.Contains(lower, "no credits") || strings.Contains(lower, "credit limit") {
+		return domain.ClassificationNoCredit
+	}
+	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "429") {
+		return domain.ClassificationRateLimited
+	}
+	if strings.Contains(lower, "connection refused") || strings.Contains(lower, "econnrefused") || strings.Contains(lower, "timeout") {
+		return domain.ClassificationTransient
+	}
+	// Fall back to exit code
+	switch exitCode {
+	case 0:
+		return domain.ClassificationOK
+	case 3:
+		return domain.ClassificationAuth
+	case 4, 9, 130, 137, 143:
+		return domain.ClassificationFatal
+	case 5:
+		return domain.ClassificationRateLimited
+	case 6, 7:
+		return domain.ClassificationTransient
+	case 8:
+		return domain.ClassificationMaxTurns
+	case 10:
+		return domain.ClassificationNoCredit
+	default:
+		return domain.ClassificationFatal
+	}
 }

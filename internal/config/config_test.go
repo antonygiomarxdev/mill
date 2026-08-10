@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/antonygiomarxdev/mill/internal/adapter"
 )
 
 func TestDefault(t *testing.T) {
@@ -247,7 +249,7 @@ func TestBudgetRoundTrip(t *testing.T) {
 		Provider:  "commandcode",
 		Model:     "laguna-free",
 		MaxRounds: 4,
-		Budget: &Budget{
+		Budget: &adapter.Budget{
 			TimeSeconds: 300,
 			MaxTurns:    20,
 			TokenBudget: &tb,
@@ -285,7 +287,7 @@ func TestBudgetJSONStructure(t *testing.T) {
 
 	tb := 500000
 	c := Config{
-		Budget: &Budget{
+		Budget: &adapter.Budget{
 			TimeSeconds: 60,
 			MaxTurns:    10,
 			TokenBudget: &tb,
@@ -327,7 +329,7 @@ func TestBudgetOptionalTokenBudget(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 
 	original := Config{
-		Budget: &Budget{
+		Budget: &adapter.Budget{
 			TimeSeconds: 120,
 			MaxTurns:    15,
 		},

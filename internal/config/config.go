@@ -6,13 +6,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/antonygiomarxdev/mill/internal/adapter"
 )
-// Budget holds per-target resource constraints for agent delegation.
-type Budget struct {
-	TimeSeconds int  `json:"time_seconds"`
-	MaxTurns    int  `json:"max_turns"`
-	TokenBudget *int `json:"token_budget,omitempty"`
-}
 
 
 // Config holds the mill configuration.
@@ -20,7 +16,7 @@ type Config struct {
 	Provider  string  `json:"provider"`
 	Model     string  `json:"model"`
 	MaxRounds int     `json:"max_rounds"`
-	Budget    *Budget `json:"budget,omitempty"`
+	Budget    *adapter.Budget `json:"budget,omitempty"`
 }
 
 // Default returns the default mill configuration.

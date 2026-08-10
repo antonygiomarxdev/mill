@@ -22,7 +22,7 @@ You speak naturally. Mill handles the rest.
 
 - **Go 1.21+** — [install](https://go.dev/dl/) or `brew install go`
 - **Git** — for worktree isolation
-- **A harness** — omp, claude code, opencode, or GitHub Copilot
+- **A harness** — omp, claude code, pi, opencode, or GitHub Copilot
 
 ### Install
 

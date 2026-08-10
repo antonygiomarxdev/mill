@@ -6,6 +6,11 @@ type Classification string
 
 const (
 	ClassificationOK          Classification = "OK"
+
+	// ClassificationChangesRequested is returned when the agent's stderr
+	// contains "changes_requested:" — the reviewer requested modifications.
+	ClassificationChangesRequested Classification = "CHANGES_REQUESTED"
+
 	ClassificationFatal       Classification = "FATAL"
 	ClassificationMaxTurns    Classification = "MAX_TURNS"
 	ClassificationAuth        Classification = "AUTH"

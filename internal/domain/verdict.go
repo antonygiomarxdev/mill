@@ -8,5 +8,10 @@ type Verdict string
 const (
 	VerdictApproved Verdict = "approved"
 	VerdictChanges  Verdict = "changes"
+
+	// VerdictChangesRequested means the reviewer requested modifications
+	// but the review cycle was exhausted without approval.
+	VerdictChangesRequested Verdict = "changes_requested"
+
 	VerdictRejected Verdict = "rejected"
 )

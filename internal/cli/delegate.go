@@ -338,7 +338,24 @@ var modelTier = map[string]string{
 
 // resolveModel reads the target role's frontmatter model field and maps
 // the tier name to an actual model identifier. Falls back to config.Model.
-func (a *App) resolveModel(targetRole string, cfg config.Config) string {
+// The stageLabel (from issue labels) influences model selection:
+//
+//	stage:produce   → "laguna-free"
+//	stage:review    → "laguna-pro"
+//	stage:implement → "laguna-free"
+//
+// When stageLabel is empty, the role frontmatter's model field is used.
+func (a *App) resolveModel(targetRole string, stageLabel string, cfg config.Config) string {
+	if stageLabel != "" {
+		switch stageLabel {
+		case "stage:produce":
+			return "laguna-free"
+		case "stage:review":
+			return "laguna-pro"
+		case "stage:implement":
+			return "laguna-free"
+		}
+	}
 	root, err := projectRoot()
 	if err != nil {
 		return cfg.Model

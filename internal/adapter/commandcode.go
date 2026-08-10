@@ -120,6 +120,7 @@ type liveSession struct {
 	stderrBuf *bytes.Buffer
 	startedAt time.Time
 	status    string
+	parse     func(string) (string, string)
 }
 
 func (s *liveSession) ID() string    { return s.id }
@@ -142,7 +143,11 @@ func (s *liveSession) Wait() (SessionResult, error) {
 	}
 
 	output := s.outputBuf.String()
-	finalText, _ := parseJSONOutput(output)
+	parser := s.parse
+	if parser == nil {
+		parser = parseJSONOutput
+	}
+	finalText, _ := parser(output)
 	commits := countCommits(output)
 
 	return SessionResult{

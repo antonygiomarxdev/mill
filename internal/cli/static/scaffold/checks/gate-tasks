@@ -1,0 +1,8 @@
+#!/bin/bash
+# Gate: TASKS phase complete — tasks.md must exist with role assignments
+set -euo pipefail
+issue="${1:?usage: $0 <issue-number>}"
+tasks=".mill/phases/${issue}/tasks.md"
+test -f "$tasks" || { echo "BLOCKED: tasks.md missing for #${issue}. Spawn Tech Lead."; exit 1; }
+grep -q 'role:' "$tasks" || { echo "BLOCKED: tasks.md has no role assignments"; exit 1; }
+echo "TASKS gate passed for #${issue}"

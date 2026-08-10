@@ -1,19 +1,20 @@
-# Mill — Agent Context
+# Mill — Agent Delegation Harness
 
-You are in a Mill-managed repository.
+You are inside a Mill-managed repository. Load the Mill framework skill:
+
+@skills/mill.md
 
 ## Startup
 
-1. Read `.mill/role` to determine your active role (staff or pm).
+1. The Mill skill handles role classification, tool detection, and context delivery.
 2. Load `roles/COMMON.md` for shared rules.
 3. Load `roles/<role>/ROLE.md` for your specific instructions.
 4. Load `roles/<role>/lessons.md` for past failures (if it exists).
 
-## What you can do
+## Key commands
 
-**As Staff:** technical direction, delegation, verification.
-**As PM:** product direction, specs, priorities.
-
-Delegate work: `mill delegate <issue> --role <target>`
-Check status: `mill status`
-Land merges: `mill land <target>`
+```
+mill delegate <issue> --role <target>   Delegate work to a role
+mill status                             Show task status
+mill land <target>                      Run gates and merge
+```

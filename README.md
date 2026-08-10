@@ -1,225 +1,150 @@
 # Mill
 
-Agent delegation harness. Mill dispatches AI agents to work on GitHub issues,
-drives them through a review loop, and lands the result — all from a single
-Go binary. Like a foreman on a ranch, it routes tasks to the right worker and
-tracks progress from task dispatch to merge.
+Multi-agent delegation framework. Mill turns your AI agent into a Staff
+Engineer or Product Manager that autonomously classifies work, delegates to
+specialized subagents, orchestrates review chains, and persists state.
 
-Instead of a dozen bash scripts glued together, Mill is one CLI:
+## What Mill does
 
-```bash
-mill delegate 390    # dispatch issue #390 to an AI agent
-mill status          # show all running/done tasks
-mill land main       # run gates and checkout target branch
-```
+When you open a Mill-managed project in your harness (omp, claude code,
+opencode), your agent loads the Mill skill and becomes:
 
-Born from the agent delegation workflow described in `docs/lessons.md`.
+- **[Mill · Staff]** — for technical work: delegates to Architect → Tech
+  Lead → Sr Dev. Verifies results, declares merge-readiness.
+- **[Mill · PM]** — for product work: delegates to UX → UI → QA/Docs.
+  Writes specs, manages priorities.
 
-## Quick install
+You speak naturally. Mill handles the rest.
 
-Mill is a single static Go binary. Build it from the repository root:
+## Quick start
 
-```bash
-go build -o mill ./cmd/mill
-```
+### For a new project
 
-Put the resulting `mill` binary on your `PATH` to run it from anywhere.
-
-## Initialize a project
-
-`mill init` scaffolds a mill project: it generates `mill.yml` and copies
-starter files (roles, checks, skills, docs) from the bundled templates.
+Tell your agent: "let's use Mill." If you're the agent reading this and
+`.omp/AGENTS.md` doesn't exist yet:
 
 ```bash
-mill init              # interactive prompts with defaults
-mill init -yes         # non-interactive, use all defaults
-mill init -name myapp -provider commandcode -model laguna-free
+go install github.com/antonygiomarxdev/mill/cmd/mill@latest
+mill init
 ```
 
-Flags:
+Reload your session. Mill is active.
 
-| Flag          | Default         | Description                          |
-|---------------|-----------------|--------------------------------------|
-| `-name`       | current dir     | Project name written to `mill.yml`   |
-| `-provider`   | `commandcode`   | AI provider (commandcode\|opencode\|claude) |
-| `-model`      | `laguna-free`   | Provider model identifier            |
-| `-max-rounds` | `4`             | Max review rounds before REJECTED    |
-| `-yes`        | `false`         | Skip prompts, use defaults/flags     |
-| `-target`     | `.`             | Target directory for scaffolding    |
+### For an existing Mill project
 
-## Delegate work
+Just open the project in your harness. The agent discovers `.omp/AGENTS.md`
+and loads the skill automatically. No commands needed.
 
-`mill delegate <issue>` dispatches an AI agent to implement the given GitHub
-issue number. It creates a git worktree, starts an agent session, waits for it
-to finish, classifies the outcome, and persists state plus an append-only
-ledger entry.
+### Manual CLI (without a harness)
 
 ```bash
-mill delegate 390
-mill delegate 390 -model claude-sonnet-5 -max-turns 200
+mill delegate 42 --role sr-dev-be    # async: returns immediately
+mill delegate 42 --role sr-dev-be --wait  # sync: blocks until done
+mill status                          # show all tasks
+mill role get                        # show active role
+mill role set pm                     # switch to PM
 ```
 
-Flags:
-
-| Flag           | Default | Description                              |
-|----------------|---------|------------------------------------------|
-| `-model`       | config  | Model to use (overrides `mill.yml`)     |
-| `-max-turns`   | `100`   | Maximum conversation turns for the agent |
-
-The agent runs in an isolated worktree under `.mill/worktrees/` and writes
-output via the configured provider adapter. On completion Mill prints a
-verdict (`approved` / `changes` / `rejected`) and commit count.
-
-## Check status
-
-`mill status` loads persisted state from `.mill/state.json` and prints a
-table of all tasks:
+## How it works
 
 ```
-ID        ISSUE  STATUS  COMMITS  VERDICT
-task-390  390    done    3        approved
-task-392  392    running 0
+CTO session (omp / claude / opencode)
+  └─ [Mill · Staff]  ← skill loaded at session start
+       │
+       ├─ Classifies user message → Staff or PM
+       ├─ Detects harness → copies context to correct locations
+       ├─ Delegates via native task() or CLI fallback
+       └─ Orchestrates chain: Architect → Tech Lead → Sr Dev → QA
 ```
 
-State is reconstructed from disk every time, so it survives crashes and
-terminal closes. `mill status` always exits 0, even when no tasks exist.
-
-## Land changes
-
-`mill land <target> [gates...]` runs gate commands in a worktree and checks
-out the target branch. Gates are shell commands executed in order; if any
-gate fails, landing is aborted.
-
-```bash
-mill land main ./checks/pre-push ./checks/pre-commit
-mill land main -confirm ./checks/pre-push
-```
-
-Flags:
-
-| Flag       | Default | Description                        |
-|------------|---------|------------------------------------|
-| `-worktree`| auto    | Worktree directory to land from   |
-| `-confirm` | `false` | Prompt before merging to target   |
-
-## Roles
-
-Agent behavior is defined as configuration, not hardcoded. Each role is a
-markdown file under `roles/`:
-
-- `roles/COMMON.md` — principles and communication rules shared across all
-  roles.
-- `roles/<role>/ROLE.md` — specialization-specific instructions (e.g.
-  `sr-dev-be` for a senior backend developer).
-
-After `mill init` a default role (`sr-dev-be`) is scaffolded. The `delegate`
-command passes the role instructions to the agent along with the issue
-prompt, so agents follow consistent conventions on every run.
-
-## Pipeline stages
-
-A task moves through these stages (see `ARCHITECTURE.md` for the full model):
+### Delegation chain
 
 ```
-dispatch  ->  produce  ->  review  ->  changes?  ->  rework  ->  review
-                                               |
-                                  max rounds? -> REJECTED
-                                               |
-                              APPROVED  ->  land
+CTO → Staff → Architect → Tech Lead → Sr Dev (BE/FE/Data)
+CTO → Staff → Reviewer → QA/Docs
+CTO → Staff → PM
+CTO → PM → UX Designer → UI Designer → QA/Docs
 ```
 
-1. **dispatch** — agent starts in a fresh worktree on the issue's branch.
-2. **produce** — agent implements the feature and commits changes.
-3. **review** — outcome is classified. `OK` or `MAX_TURNS` marks the task done;
-   other classifications trigger retry or abort.
-4. **rework** — if the verdict is `changes`, the agent is re-prompted (up to
-   `max-rounds`, default 4).
-5. **land** — once `approved`, gate checks run and the worktree is merged to
-   the target branch.
+Each role has a `delegates_to` list in its frontmatter. Chain validation
+is mechanical — you can't delegate outside your authorized targets.
 
-Classifications that drive retry/abort:
+### Agent types per role
 
-| Classification   | Behavior                          |
-|------------------|-----------------------------------|
-| `OK`             | Done, proceed to review            |
-| `MAX_TURNS`      | Done, proceeding with what exists  |
-| `RATE_LIMITED`   | Backoff and retry                  |
-| `TRANSIENT`      | Backoff and retry                   |
-| `FATAL`          | Retry (up to 3 attempts)           |
-| `AUTH`           | Abort — fix credentials          |
-| `NO_CREDIT`      | Abort — insufficient credits     |
-| `BLOCKED`        | Persist and stop                   |
+Roles declare their agent type in `roles/<role>/ROLE.md` frontmatter:
 
-Review rounds use the *caro* model (`deepseek-v4-pro`); production dispatch
-uses the *barato* model (`laguna-free` or `deepseek-v4-flash`).
-
-## Example workflow
-
-```bash
-# 1. Build and initialize a project
-go build -o mill ./cmd/mill
-mill init -yes
-
-# 2. Delegate an issue to an agent
-mill delegate 390
-
-# 3. Check progress
-mill status
-
-# 4. Land after approval (runs gates, then merges to main)
-mill land main -confirm ./checks/pre-push
+```yaml
+agent: task              # full capabilities (default)
+agent: scout             # read-only: docs, verification
+agent: cavecrew-reviewer # code review, one-line findings
+agent: cavecrew-builder  # surgical 1-2 file edits
 ```
 
-## Project layout
+### Async by default
+
+`mill delegate` returns immediately. Agents run in background. Check
+progress with `mill status`. Use `--wait` when you need the result
+synchronously.
+
+### Blocked workflow
+
+When a subagent can't proceed (ambiguous requirements, missing info):
+
+1. Agent comments on the GitHub issue describing the blocker
+2. Delegator resolves the ambiguity
+3. Delegator re-spawns the agent with amplified context
+
+The issue is the handoff surface. No DMs, no polling.
+
+## Project structure
 
 ```
-.
-├── cmd/mill/                 # Go entry point (build with `go build`)
-├── internal/
-│   ├── cli/                  # mill subcommands (init, delegate, status, land)
-│   ├── adapter/              # Provider adapters (CommandCode, OpenCode, Claude)
-│   ├── classify/             # Session outcome classification
-│   ├── config/               # mill.yml / config.json loading
-│   ├── domain/               # Core types (Task, Session, Verdict, Classification)
-│   ├── issue/                # Issue number parsing
-│   ├── ledger/               # Append-only event log
-│   ├── repair/               # Tool-call input repair pipeline
-│   └── state/                # Persistent task state
-├── checks/                   # Git hooks (pre-commit, pre-push)
-├── docs/
-│   ├── lessons.md            # Lessons from RUMAI
-│   └── plans/                # Implementation plans
-├── ARCHITECTURE.md           # Design goals and interfaces
-└── go.mod
+mill.yml         — project config (models, targets, budget)
+roles/            — role definitions with YAML frontmatter
+  COMMON.md       — shared rules for all roles
+  staff/ROLE.md   — Staff: orchestrator, never writes code
+  pm/ROLE.md      — PM: product specs, design delegation
+  architect/      — Architect: system design, ADRs
+  tech-lead/      — Tech Lead: code review, decomposition
+  reviewer/       — Reviewer: spec compliance, verdict
+  sr-dev-be/      — Sr Dev Backend: implementation
+  sr-dev-fe/      — Sr Dev Frontend
+  sr-dev-data/    — Sr Dev Data
+  qa-docs/        — QA/Docs: tests, changelogs, docs
+  ux-designer/    — UX: flows, wireframes
+  ui-designer/    — UI: components, design tokens
+checks/           — git hooks (pre-commit, pre-push, role-enforce)
+skills/           — agent skills (mill.md is the framework entry point)
+docs/adr/         — Architecture Decision Records
+.mill/            — runtime state (role, state.json, ledger/, worktrees/)
 ```
 
-## Adapters
+## Configuration
 
-Mill adapts to different AI providers through an adapter layer. Each adapter
-implements `Dispatch`, `Resume`, and `Capabilities`:
+`mill.yml`:
 
-| Adapter    | Type         | Use case                     |
-|------------|--------------|------------------------------|
-| CommandCode| CLI headless | Cheap models via `cmd -p`    |
-| OpenCode   | Provider direct | Direct model access        |
-| Claude     | Anthropic API | Staff-level reasoning       |
+```yaml
+name: my-project
+models:
+  free:
+    - provider: commandcode
+      model: deepseek-v4-flash
+  paid:
+    - provider: commandcode
+      model: deepseek-v4-pro
+  pro:
+    - provider: commandcode
+      model: claude-sonnet-4-20250514
 
-Configuration lives in `.mill/config.json`:
-
-```json
-{
-  "provider": "commandcode",
-  "model": "laguna-free",
-  "max_rounds": 4
-}
+targets:
+  develop:
+    budget:
+      time_seconds: 300
+      max_turns: 50
+    gates: [lint, type-check, build]
 ```
 
-## Principles
+## Architecture Decision Records
 
-1. **State persists.** Sessions survive crashes. State is derived from
-   artifacts on disk, never from a supervisor process.
-2. **Event-driven.** The ledger records every transition; nothing polls.
-3. **Provider agnostic.** Same interface, different backends.
-4. **Roles as config.** Agent behavior is defined in `roles/`, not hardcoded.
-# test
-# test
+- [ADR 0001](docs/adr/0001-mill-as-framework.md) — Mill as framework on harness
+- [ADR 0002](docs/adr/0002-budget-enforcement.md) — Budget enforcement design

@@ -1,6 +1,7 @@
 ---
 role: sr-dev-be
 model: free→paid
+agent: task
 reviewed_by: tech-lead
 delegates_to:
   - qa-docs

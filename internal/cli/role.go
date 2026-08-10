@@ -96,3 +96,50 @@ var knownRoles = map[string]bool{
 	"ui-designer":  true,
 	"qa-docs":      true,
 }
+
+// detectRole classifies input text into a role.
+// Product keywords → "pm", technical keywords → "staff", unknown/empty → "staff".
+func detectRole(input string) string {
+	lower := strings.ToLower(input)
+
+	productKeywords := []string{"feature", "user", "design", "spec", "priority", "product", "ui", "ux"}
+	for _, kw := range productKeywords {
+		if wordMatch(lower, kw) {
+			return "pm"
+		}
+	}
+
+	techKeywords := []string{"code", "bug", "architecture", "deploy", "test", "build", "refactor", "impl", "fix"}
+	for _, kw := range techKeywords {
+		if wordMatch(lower, kw) {
+			return "staff"
+		}
+	}
+
+	return "staff"
+}
+
+// wordMatch returns true if word appears as a whole word in s.
+// A word boundary is a space, punctuation, or string start/end.
+func wordMatch(s, word string) bool {
+	i := 0
+	for {
+		idx := strings.Index(s[i:], word)
+		if idx < 0 {
+			return false
+		}
+		pos := i + idx
+		before := pos == 0 || isBoundary(s[pos-1])
+		after := pos+len(word) == len(s) || isBoundary(s[pos+len(word)])
+		if before && after {
+			return true
+		}
+		i = pos + 1
+	}
+}
+
+func isBoundary(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '.' || b == ',' ||
+		b == '!' || b == '?' || b == ':' || b == ';' || b == '-' ||
+		b == '(' || b == ')' || b == '[' || b == ']'
+}

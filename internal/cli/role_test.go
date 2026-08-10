@@ -132,3 +132,63 @@ func TestRoleUnknownSubcommand(t *testing.T) {
 		t.Fatal("expected error for unknown subcommand")
 	}
 }
+
+func TestDetectRoleProduct(t *testing.T) {
+	tests := []struct {
+		input string
+	}{
+		{"feature request"},
+		{"user story"},
+		{"design review"},
+		{"spec update"},
+		{"priority change"},
+		{"product roadmap"},
+		{"ui improvement"},
+		{"ux feedback"},
+	}
+	for _, tt := range tests {
+		if got := detectRole(tt.input); got != "pm" {
+			t.Errorf("detectRole(%q) = %q, want pm", tt.input, got)
+		}
+	}
+}
+
+func TestDetectRoleTechnical(t *testing.T) {
+	tests := []struct {
+		input string
+	}{
+		{"code review"},
+		{"bug report"},
+		{"architecture decision"},
+		{"deploy pipeline"},
+		{"test coverage"},
+		{"build failure"},
+		{"refactor module"},
+		{"impl details"},
+		{"fix the bug"},
+	}
+	for _, tt := range tests {
+		if got := detectRole(tt.input); got != "staff" {
+			t.Errorf("detectRole(%q) = %q, want staff", tt.input, got)
+		}
+	}
+}
+
+func TestDetectRoleUnknownDefaultsToStaff(t *testing.T) {
+	tests := []string{
+		"random text",
+		"hello world",
+		"something else entirely",
+	}
+	for _, input := range tests {
+		if got := detectRole(input); got != "staff" {
+			t.Errorf("detectRole(%q) = %q, want staff", input, got)
+		}
+	}
+}
+
+func TestDetectRoleEmptyInput(t *testing.T) {
+	if got := detectRole(""); got != "staff" {
+		t.Errorf("detectRole(\"\") = %q, want staff", got)
+	}
+}

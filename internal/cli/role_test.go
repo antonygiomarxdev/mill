@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -81,20 +82,30 @@ func TestRoleSetPM(t *testing.T) {
 }
 
 func TestRoleSetDelegationOnlyRoleRejected(t *testing.T) {
-	dir := t.TempDir()
-	buf := new(bytes.Buffer)
-	app := &App{MillDir: dir, Out: buf, Err: buf}
-
-	err := app.Run("role", "set", "sr-dev")
-	if err == nil {
-		t.Fatal("expected error for delegation-only role")
+	roles := []string{
+		"sr-dev", "sr-dev-be", "sr-dev-fe", "sr-dev-data",
+		"tech-lead", "architect",
+		"ux-designer", "ui-designer",
+		"reviewer", "qa-docs",
 	}
 
-	if got := err.Error(); got != "sr-dev is delegation-only, not an active role. Valid: staff, pm" {
-		t.Errorf("expected delegation-only error, got: %v", got)
-	}
+	for _, role := range roles {
+		t.Run(role, func(t *testing.T) {
+			dir := t.TempDir()
+			buf := new(bytes.Buffer)
+			app := &App{MillDir: dir, Out: buf, Err: buf}
 
-	_ = buf
+			err := app.Run("role", "set", role)
+			if err == nil {
+				t.Fatalf("expected error for delegation-only role %q", role)
+			}
+
+			want := role + " is a delegation-only role, not an active role. Valid: staff, pm"
+			if got := err.Error(); got != want {
+				t.Errorf("error mismatch\n  got:  %v\n  want: %v", got, want)
+			}
+		})
+	}
 }
 
 func TestRoleSetInvalidRoleRejected(t *testing.T) {
@@ -247,5 +258,92 @@ func TestRoleSetAlreadySet(t *testing.T) {
 	}
 	if got := string(data); got != "staff" {
 		t.Errorf("file changed: expected %q, got %q", "staff", got)
+	}
+}
+
+func TestRoleEnforceHookTestMode(t *testing.T) {
+	// Find project root to locate checks/role-enforce
+	root, err := projectRoot()
+	if err != nil {
+		t.Skipf("skipping: cannot find project root: %v", err)
+	}
+	hook := filepath.Join(root, "checks", "role-enforce")
+
+	cases := []struct {
+		role     string
+		file     string
+		wantExit int // 0 = allowed, 1 = blocked
+	}{
+		{"pm", "foo.go", 1},              // AC 6
+		{"pm", "foo.md", 0},              // AC 7
+		{"sr-dev-be", "main.go", 0},
+		{"sr-dev-be", "layout.pen", 1},
+		{"tech-lead", "main.go", 0},
+		{"tech-lead", "config.yml", 1},
+		{"qa-docs", "README.md", 0},
+		{"qa-docs", "main.go", 1},
+		{"ux-designer", "wireframe.pen", 0},
+		{"ux-designer", "main.go", 1},
+		{"architect", "adr.yml", 0},
+		{"architect", "main.go", 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.role+"/"+tc.file, func(t *testing.T) {
+			cmd := exec.Command("bash", hook, "--test", tc.role, tc.file)
+			cmd.Dir = root
+			err := cmd.Run()
+			if tc.wantExit == 0 {
+				if err != nil {
+					t.Errorf("expected exit 0 for %s committing %s, got error: %v", tc.role, tc.file, err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("expected non-zero exit for %s committing %s, got 0", tc.role, tc.file)
+				}
+			}
+		})
+	}
+}
+
+func TestRoleEnforceHookStaffBypass(t *testing.T) {
+	root, err := projectRoot()
+	if err != nil {
+		t.Skipf("skipping: cannot find project root: %v", err)
+	}
+	hook := filepath.Join(root, "checks", "role-enforce")
+
+	cmd := exec.Command("bash", hook, "--test", "staff", "anything.go")
+	cmd.Dir = root
+	if err := cmd.Run(); err != nil {
+		t.Errorf("staff should bypass enforcement for .go files, got error: %v", err)
+	}
+
+	cmd = exec.Command("bash", hook, "--test", "staff", "notes.md")
+	cmd.Dir = root
+	if err := cmd.Run(); err != nil {
+		t.Errorf("staff should bypass enforcement for .md files, got error: %v", err)
+	}
+}
+
+func TestRoleEnforceHookMissingRole(t *testing.T) {
+	root, err := projectRoot()
+	if err != nil {
+		t.Skipf("skipping: cannot find project root: %v", err)
+	}
+	hook := filepath.Join(root, "checks", "role-enforce")
+
+	dir := t.TempDir()
+	millDir := filepath.Join(dir, ".mill")
+	if err := os.MkdirAll(millDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// No .mill/role file → pre-commit mode exits 0
+	cmd := exec.Command("bash", hook)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Errorf("hook should exit 0 when .mill/role is missing, got error: %v\noutput: %s", err, string(out))
 	}
 }

@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# role-enforce — pre-commit capability enforcement.
+# Usage:
+#   checks/role-enforce              — git pre-commit hook
+#   checks/role-enforce --test <role> <file>  — test mode
+#
+# Exits 0 if allowed, 1 if blocked, 2 on usage error.
+
+set -euo pipefail
+
+ROLES_DIR=".mill/roles"
+
+# --- test mode --------------------------------------------------------------
+if [[ "${1:-}" == "--test" ]]; then
+    ROLE="${2:-}"
+    FILE="${3:-}"
+    if [[ -z "$ROLE" || -z "$FILE" ]]; then
+        echo "Usage: $0 --test <role> <file>" >&2
+        exit 2
+    fi
+
+    # staff has no enforcement
+    if [[ "$ROLE" == "staff" ]]; then
+        exit 0
+    fi
+
+    ROLE_FILE="$ROLES_DIR/$ROLE/ROLE.md"
+    if [[ ! -f "$ROLE_FILE" ]]; then
+        echo "role-enforce: unknown role '$ROLE' (no $ROLE_FILE)" >&2
+        exit 2
+    fi
+
+    # Parse allowed_files from YAML frontmatter
+    ALLOWED=$(awk '
+      /^allowed_files:/   { flag=1; gsub(/^allowed_files:\s*/, ""); gsub(/[\[\]]/, ""); gsub(/,/, " "); print; next }
+      flag && !/^  - /    { exit }
+      flag && /^  - /     { gsub(/^  - /, ""); print }
+    ' "$ROLE_FILE" | xargs)
+
+    if [[ -z "$ALLOWED" ]]; then
+        # empty allowed_files means no restrictions
+        exit 0
+    fi
+
+    # Extract extension
+    EXT=".${FILE##*.}"
+    EXT_LC=$(echo "$EXT" | tr '[:upper:]' '[:lower:]')
+
+    # Check if extension is in the allowed list
+    for a in $ALLOWED; do
+        if [[ "$a" == "$EXT_LC" ]]; then
+            exit 0
+        fi
+    done
+
+    # Build comma-separated list for error message
+    ALLOWED_LIST=$(echo "$ALLOWED" | tr ' ' ', ')
+    echo "pre-commit: BLOCKED — role '$ROLE' cannot commit $EXT_LC files." >&2
+    echo "  $ROLE can produce: $ALLOWED_LIST" >&2
+    echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
+    exit 1
+fi
+
+# --- pre-commit mode --------------------------------------------------------
+# If --no-verify was passed (git sets GIT_REFLOG_ACTION or we check args)
+for arg in "$@"; do
+    if [[ "$arg" == "--no-verify" ]]; then
+        exit 0
+    fi
+done
+
+# Read active role
+MILL_DIR=".mill"
+ROLE_FILE="$MILL_DIR/role"
+if [[ ! -f "$ROLE_FILE" ]]; then
+    exit 0
+fi
+
+ROLE=$(tr -d '[:space:]' < "$ROLE_FILE")
+if [[ -z "$ROLE" ]]; then
+    exit 0
+fi
+
+# staff has no enforcement
+if [[ "$ROLE" == "staff" ]]; then
+    exit 0
+fi
+
+ROLE_MD="$ROLES_DIR/$ROLE/ROLE.md"
+if [[ ! -f "$ROLE_MD" ]]; then
+    echo "role-enforce: WARNING — no role definition for '$ROLE' at $ROLE_MD" >&2
+    exit 0
+fi
+
+# Parse allowed_files from YAML frontmatter
+ALLOWED=$(awk '
+  /^allowed_files:/   { flag=1; gsub(/^allowed_files:\s*/, ""); gsub(/[\[\]]/, ""); gsub(/,/, " "); print; next }
+  flag && !/^  - /    { exit }
+  flag && /^  - /     { gsub(/^  - /, ""); print }
+' "$ROLE_MD" | xargs)
+
+if [[ -z "$ALLOWED" ]]; then
+    exit 0
+fi
+
+# Get staged files
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)
+if [[ -z "$STAGED" ]]; then
+    exit 0
+fi
+
+BLOCKED_FILES=""
+while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+
+    # Extract extension
+    EXT=".${f##*.}"
+    EXT_LC=$(echo "$EXT" | tr '[:upper:]' '[:lower:]')
+
+    # Check if extension is in the allowed list
+    allowed_flag=0
+    for a in $ALLOWED; do
+        if [[ "$a" == "$EXT_LC" ]]; then
+            allowed_flag=1
+            break
+        fi
+    done
+
+    if [[ $allowed_flag -eq 0 ]]; then
+        if [[ -z "$BLOCKED_FILES" ]]; then
+            BLOCKED_FILES="$f"
+        else
+            BLOCKED_FILES="$BLOCKED_FILES $f"
+        fi
+    fi
+done <<< "$STAGED"
+
+if [[ -n "$BLOCKED_FILES" ]]; then
+    # Log enforcement
+    TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    mkdir -p "$MILL_DIR"
+    echo "[$TIMESTAMP] BLOCKED $ROLE $BLOCKED_FILES" >> "$MILL_DIR/enforcement.log"
+
+    # First blocked file for error message
+    FIRST=$(echo "$BLOCKED_FILES" | cut -d' ' -f1)
+    FIRST_EXT=".${FIRST##*.}"
+    FIRST_EXT_LC=$(echo "$FIRST_EXT" | tr '[:upper:]' '[:lower:]')
+    ALLOWED_LIST=$(echo "$ALLOWED" | tr ' ' ', ')
+
+    echo "pre-commit: BLOCKED — role '$ROLE' cannot commit $FIRST_EXT_LC files." >&2
+    echo "  $ROLE can produce: $ALLOWED_LIST" >&2
+    echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
+    exit 1
+fi
+
+exit 0

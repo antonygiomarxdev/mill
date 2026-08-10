@@ -14,6 +14,21 @@ var validActiveRoles = map[string]bool{
 	"pm":    true,
 }
 
+// delegationOnlyRoles lists roles that appear as delegation targets
+// but MUST NOT be activated via `mill role set`.
+var delegationOnlyRoles = map[string]bool{
+	"sr-dev":       true,
+	"sr-dev-be":    true,
+	"sr-dev-fe":    true,
+	"sr-dev-data":  true,
+	"tech-lead":    true,
+	"architect":    true,
+	"ux-designer":  true,
+	"ui-designer":  true,
+	"reviewer":     true,
+	"qa-docs":      true,
+}
+
 // runRole handles the "role" command.
 // Subcommands: get (prints current role), set (writes .mill/role).
 func (a *App) runRole(args []string) error {
@@ -60,8 +75,11 @@ func (a *App) roleGet() error {
 func (a *App) roleSet(role string) error {
 	role = strings.ToLower(strings.TrimSpace(role))
 
+	validList := "staff, pm"
+	if delegationOnlyRoles[role] {
+		return fmt.Errorf("%s is a delegation-only role, not an active role. Valid: %s", role, validList)
+	}
 	if !validActiveRoles[role] {
-		validList := "staff, pm"
 		if _, ok := knownRoles[role]; ok {
 			return fmt.Errorf("%s is delegation-only, not an active role. Valid: %s", role, validList)
 		}

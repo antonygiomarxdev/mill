@@ -10,13 +10,34 @@ import (
 	"github.com/antonygiomarxdev/mill/internal/adapter"
 )
 
+// Concurrency controls agent dispatch parallelism.
+type Concurrency struct {
+	MaxSlots int `json:"max_slots"`
+}
+
+// CompactMode is a compaction strategy identifier.
+type CompactMode string
+
+const (
+	CompactModeFast CompactMode = "fast"
+)
+
+// CompactConfig holds the configuration for context compaction.
+type CompactConfig struct {
+	Enabled bool        `json:"enabled"`
+	Mode    CompactMode `json:"mode,omitempty"`
+}
 
 // Config holds the mill configuration.
 type Config struct {
-	Provider  string  `json:"provider"`
-	Model     string  `json:"model"`
-	MaxRounds int     `json:"max_rounds"`
-	Budget    *adapter.Budget `json:"budget,omitempty"`
+	Provider    string            `json:"provider"`
+	Model       string            `json:"model"`
+	Concurrency Concurrency       `json:"concurrency,omitempty"`
+	MaxRounds   int               `json:"max_rounds"`
+	Budget      *adapter.Budget   `json:"budget,omitempty"`
+	Compact     *CompactConfig    `json:"compact,omitempty"`
+	Models      map[string]string `json:"models"`
+	Rate        float64           `json:"rate,omitempty"`
 }
 
 // Default returns the default mill configuration.
@@ -26,9 +47,17 @@ type Config struct {
 // MaxRounds defaults to 4 (max review rounds before REJECTED).
 func Default() Config {
 	return Config{
-		Provider:  "commandcode",
-		Model:     "laguna-free",
-		MaxRounds: 4,
+		Provider:    "commandcode",
+		Model:       "laguna-free",
+		Concurrency: Concurrency{MaxSlots: 4},
+		MaxRounds:   4,
+		Compact:     &CompactConfig{Enabled: false, Mode: CompactModeFast},
+		Models: map[string]string{
+			"free": "laguna-free",
+			"paid": "laguna-pro",
+			"pro":  "laguna-ultra",
+		},
+		Rate: 0,
 	}
 }
 

@@ -38,6 +38,10 @@ targets:
       start: "stage:dev"
       review: "stage:review"
       land: "stage:qa"
+    budget:
+      time_seconds: 300
+      max_turns: 20
+      token_budget: 1000000
 
   staging:
     from: develop
@@ -53,6 +57,10 @@ targets:
       start: "stage:review"
       review: "stage:staff-review"
       land: "stage:done"
+    budget:
+      time_seconds: 600
+      max_turns: 30
+      token_budget: 2000000
 
   main:
     from: staging
@@ -70,3 +78,7 @@ targets:
       start: "stage:staff-review"
       review: null
       land: "stage:done"
+    budget:
+      time_seconds: 900
+      max_turns: 50
+      token_budget: 3200000

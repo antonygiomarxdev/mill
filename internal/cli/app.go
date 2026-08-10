@@ -12,6 +12,7 @@ import (
 	"github.com/antonygiomarxdev/mill/internal/adapter"
 	"github.com/antonygiomarxdev/mill/internal/config"
 	"github.com/antonygiomarxdev/mill/internal/issue"
+	"github.com/antonygiomarxdev/mill/internal/slots"
 )
 
 type App struct {
@@ -20,6 +21,7 @@ type App struct {
 	Out         io.Writer
 	Err         io.Writer
 	In          io.Reader
+	slots       *slots.Manager
 	IssueReader func(issueNum int) (body string, labels []string, err error)
 }
 

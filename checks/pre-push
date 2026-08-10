@@ -1,0 +1,12 @@
+#!/bin/bash
+# Mill gauntlet — pre-push. Runs before git push.
+# Medium checks (<5min). Fail = push rejected.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$DIR/common.sh"
+
+echo "mill: pre-push gauntlet"
+
+go test ./... && pass "go test" || fail "go test — run: go test ./..."
+
+echo "mill: pre-push passed"

@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# gate-route — mechanical enforcement of delegation rules
+# Usage: gate-route <from-role> <to-role>
+# Exits 0 if valid route (to is in from's delegates_to or is cto), 1 otherwise.
+
+set -euo pipefail
+
+FROM="${1:-}"
+TO="${2:-}"
+
+if [[ -z "$FROM" || -z "$TO" ]]; then
+    echo "Usage: gate-route <from-role> <to-role>" >&2
+    exit 2
+fi
+
+ROLES_DIR=".mill/roles"
+
+# CTO can delegate to anyone
+if [[ "$FROM" == "cto" ]]; then
+    echo "✅ cto → $TO (CTO delegates to anyone)"
+    exit 0
+fi
+
+ROLE_FILE="$ROLES_DIR/$FROM/ROLE.md"
+if [[ ! -f "$ROLE_FILE" ]]; then
+    echo "❌ Unknown role: $FROM" >&2
+    exit 1
+fi
+
+# Extract delegates_to from YAML frontmatter.
+# Strategy: capture from "delegates_to:" until the next top-level key
+# (line that starts with a word char, not indented, and not "- " prefixed)
+DELEGATES=$(awk '
+  /^delegates_to:/   { flag=1; next }
+  flag && !/^  - /   { exit }
+  flag && /^  - /    { sub(/^  - /, ""); print }
+' "$ROLE_FILE")
+
+if echo "$DELEGATES" | grep -qx "$TO"; then
+    echo "✅ $FROM → $TO (in delegates_to)"
+    exit 0
+fi
+
+# Invalid — show why
+echo "❌ $FROM cannot delegate to $TO" >&2
+echo "" >&2
+echo "$FROM delegates_to:" >&2
+echo "$DELEGATES" | sed 's/^/  /' >&2
+echo "" >&2
+
+# Suggest intermediate
+case "$TO" in
+    sr-dev-fe|sr-dev-be|sr-dev-data)
+        echo "Route: $FROM → architect → tech-lead → $TO" >&2 ;;
+    tech-lead)
+        echo "Route: $FROM → architect → $TO" >&2 ;;
+    ui-designer|ux-designer)
+        echo "Route: $FROM → pm → $TO" >&2 ;;
+    pm|architect|reviewer)
+        echo "These are peers — route through staff" >&2 ;;
+    *)
+        echo "Route unknown — check the org chart" >&2 ;;
+esac
+
+exit 1

@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# gate-frd — validate a PM-written FRD
+# Usage: bash checks/gate-frd <issue-number>
+# Exits 0 if valid, 1 otherwise.
+
+set -euo pipefail
+
+ISSUE="${1:-}"
+if [[ -z "$ISSUE" ]]; then
+    echo "Usage: bash checks/gate-frd <issue-number>" >&2
+    exit 2
+fi
+
+FRD=".mill/phases/${ISSUE}/frd.md"
+
+# 1. File must exist
+if [[ ! -f "$FRD" ]]; then
+    echo "FAIL: $FRD does not exist" >&2
+    exit 1
+fi
+
+# 2. Must have # FRD: header
+if ! grep -q '^# FRD:' "$FRD"; then
+    echo "FAIL: missing '# FRD:' title" >&2
+    exit 1
+fi
+
+# 3. Must have ## User need
+if ! grep -q '^## User need' "$FRD"; then
+    echo "FAIL: missing '## User need' section" >&2
+    exit 1
+fi
+
+# 4. Must have ## Functional requirements
+if ! grep -q '^## Functional requirements' "$FRD"; then
+    echo "FAIL: missing '## Functional requirements' section" >&2
+    exit 1
+fi
+
+# 5. Must have ## Out of scope
+if ! grep -q '^## Out of scope' "$FRD"; then
+    echo "FAIL: missing '## Out of scope' section" >&2
+    exit 1
+fi
+
+# 6. Must have ## Priority with P0/P1/P2
+if ! grep -qE '^## Priority' "$FRD"; then
+    echo "FAIL: missing '## Priority' section" >&2
+    exit 1
+fi
+if ! grep -qE '^\*\*P[012]\*\*' "$FRD"; then
+    echo "FAIL: Priority must be P0, P1, or P2" >&2
+    exit 1
+fi
+
+# 7. Max 9 functional requirements
+REQ_COUNT=$(grep -cE '^[0-9]+\.' "$FRD" || true)
+if [[ "$REQ_COUNT" -gt 9 ]]; then
+    echo "FAIL: $REQ_COUNT functional requirements (max 9)" >&2
+    exit 1
+fi
+
+# 8. At least 1 functional requirement
+if [[ "$REQ_COUNT" -lt 1 ]]; then
+    echo "FAIL: no numbered functional requirements found" >&2
+    exit 1
+fi
+
+# 9. User need section must have content (non-empty after heading)
+# Extract User need content until next heading
+USER_NEED_CONTENT=$(awk '/^## User need/{flag=1; next} /^##/{flag=0} flag' "$FRD" | sed '/^$/d')
+if [[ -z "$USER_NEED_CONTENT" ]]; then
+    echo "FAIL: '## User need' section is empty" >&2
+    exit 1
+fi
+
+# 10. Out of scope must have content
+SCOPE_CONTENT=$(awk '/^## Out of scope/{flag=1; next} /^##/{flag=0} flag' "$FRD" | sed '/^$/d')
+if [[ -z "$SCOPE_CONTENT" ]]; then
+    echo "FAIL: '## Out of scope' section is empty" >&2
+    exit 1
+fi
+
+echo "✅ $FRD — valid"

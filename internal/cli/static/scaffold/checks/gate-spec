@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# gate-spec — verify SPEC artifact exists for an issue
+# Usage: gate-spec <issue-number>
+# Exits 0 if .mill/phases/<issue>/spec.md exists with content, 1 otherwise.
+
+set -euo pipefail
+
+ISSUE="${1:-}"
+
+if [[ -z "$ISSUE" ]]; then
+    echo "Usage: gate-spec <issue-number>" >&2
+    exit 2
+fi
+
+SPEC=".mill/phases/$ISSUE/spec.md"
+
+if [[ ! -f "$SPEC" ]]; then
+    echo "❌ No SPEC found at $SPEC" >&2
+    exit 1
+fi
+
+LINES=$(wc -l < "$SPEC")
+if [[ "$LINES" -lt 5 ]]; then
+    echo "❌ $SPEC is too short ($LINES lines, need ≥5)" >&2
+    exit 1
+fi
+
+# Must contain architecture/design section markers
+if ! grep -qE '^(#+|## )' "$SPEC"; then
+    echo "❌ $SPEC has no section headers" >&2
+    exit 1
+fi
+
+echo "✅ $SPEC — valid ($LINES lines)"
+exit 0

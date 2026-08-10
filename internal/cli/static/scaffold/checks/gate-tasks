@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# gate-tasks — verify TASKS artifact exists for an issue
+# Usage: gate-tasks <issue-number>
+# Exits 0 if .mill/phases/<issue>/tasks.md exists with task breakdown.
+
+set -euo pipefail
+
+ISSUE="${1:-}"
+
+if [[ -z "$ISSUE" ]]; then
+    echo "Usage: gate-tasks <issue-number>" >&2
+    exit 2
+fi
+
+TASKS=".mill/phases/$ISSUE/tasks.md"
+
+if [[ ! -f "$TASKS" ]]; then
+    echo "❌ No TASKS found at $TASKS" >&2
+    exit 1
+fi
+
+LINES=$(wc -l < "$TASKS")
+if [[ "$LINES" -lt 3 ]]; then
+    echo "❌ $TASKS is too short ($LINES lines, need ≥3)" >&2
+    exit 1
+fi
+
+# Must have section markers (Wave or Task)
+SECTIONS=$(grep -cE '(Wave|## Task [0-9])' "$TASKS" || true)
+
+# Must have markdown checkboxes
+CHECKS=$(grep -c '\- \[ \]' "$TASKS" || true)
+
+# Must have role assignments
+ROLES=$(grep -c 'role:' "$TASKS" || true)
+
+if [[ "$SECTIONS" -eq 0 && "$CHECKS" -eq 0 ]]; then
+    echo "❌ $TASKS has no sections or checkboxes" >&2
+    exit 1
+fi
+
+if [[ "$ROLES" -eq 0 ]]; then
+    echo "❌ $TASKS has no role assignments" >&2
+    exit 1
+fi
+
+echo "✅ $TASKS — $CHECKS tasks, $SECTIONS sections, $ROLES role refs"
+exit 0

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# gate-review — verify REVIEW artifact exists and is approved
+# Usage: gate-review <issue-number>
+# Exits 0 if .mill/phases/<issue>/review.md exists with APPROVED verdict.
+
+set -euo pipefail
+
+ISSUE="${1:-}"
+
+if [[ -z "$ISSUE" ]]; then
+    echo "Usage: gate-review <issue-number>" >&2
+    exit 2
+fi
+
+REVIEW=".mill/phases/$ISSUE/review.md"
+
+if [[ ! -f "$REVIEW" ]]; then
+    echo "❌ No REVIEW found at $REVIEW" >&2
+    exit 1
+fi
+
+if ! grep -qi 'approved' "$REVIEW"; then
+    echo "❌ $REVIEW does not contain 'approved' verdict" >&2
+    exit 1
+fi
+
+echo "✅ $REVIEW — approved"
+exit 0

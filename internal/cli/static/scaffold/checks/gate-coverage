@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# gate-coverage — verify test coverage meets threshold
+# Usage: gate-coverage <issue-number> [threshold]
+# Default threshold: 90
+# Exits 0 if average coverage across packages ≥ threshold, 1 otherwise.
+
+set -euo pipefail
+
+ISSUE="${1:-}"
+THRESHOLD="${2:-90}"
+
+if [[ -z "$ISSUE" ]]; then
+    echo "Usage: gate-coverage <issue-number> [threshold]" >&2
+    exit 2
+fi
+
+# Collect coverage from all packages
+COVERAGES=$(go test ./... -coverprofile=/dev/null 2>/dev/null | grep -oP 'coverage: \K[0-9.]+(?=% of statements)' || echo "")
+
+if [[ -z "$COVERAGES" ]]; then
+    echo "❌ No coverage data" >&2
+    exit 1
+fi
+
+# Compute average
+SUM=0
+COUNT=0
+while IFS= read -r cov; do
+    SUM=$(echo "$SUM + $cov" | bc -l)
+    COUNT=$((COUNT + 1))
+done <<< "$COVERAGES"
+
+AVG=$(echo "scale=1; $SUM / $COUNT" | bc -l)
+
+echo "Package coverage: $(echo "$COVERAGES" | tr '\n' ' ')"
+echo "Average: ${AVG}%"
+
+if (( $(echo "$AVG >= $THRESHOLD" | bc -l) )); then
+    echo "✅ Average ${AVG}% ≥ ${THRESHOLD}%"
+    exit 0
+else
+    echo "❌ Average ${AVG}% < ${THRESHOLD}%" >&2
+    exit 1
+fi

@@ -62,7 +62,6 @@ targets:
       - build
       - diff-coverage
       - mutation-testing
-    review:
       - tech-lead
       - reviewer
       - staff

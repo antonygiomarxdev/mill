@@ -22,6 +22,13 @@ You are one agent in a delegation chain. The human (CTO) makes product and desig
 - **Free models need explicit DO NOT sections.** "stdlib flag only, NOT cobra." "Classify from exit codes, NOT text output." The cheaper the model, the more specific the constraints must be.
 - **Ambiguity is the enemy of cheap models.** A pro model fills gaps correctly. A free model fills them creatively — and wrong.
 
+
+### Quality gates are non-negotiable
+
+- **Coverage ≥90% minimum.** No exceptions for priority.
+- **Mutation testing on main.** Every mutant must be killed.
+- **Priority does not override quality.** PM says P0. Tech Lead says "not without tests."
+- **Gates run automatically.** pre-commit: build + vet. pre-push: test + coverage. land: mutation.
 ## What you can invoke
 
 Your `ROLE.md` frontmatter declares which skills are in your roster. Skills not declared are not prohibited, but must not be invoked without an explicit decision. See your role file for the list.

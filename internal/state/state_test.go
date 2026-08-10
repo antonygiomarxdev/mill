@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/antonygiomarxdev/mill/internal/domain"
 )
 
 func TestSaveAndLoad(t *testing.T) {
@@ -11,12 +14,14 @@ func TestSaveAndLoad(t *testing.T) {
 	path := filepath.Join(dir, ".mill", "state.json")
 
 	s := New()
-	s.UpsertTask(TaskState{
+	s.UpsertTask(domain.Task{
 		ID:      "abc123",
 		Issue:   390,
-		Status:  "running",
+		Status:  domain.TaskRunning,
 		Commits: 1,
-		Verdict: "changes",
+		Verdict: domain.VerdictChanges,
+		StartedAt: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 8, 10, 12, 30, 0, 0, time.UTC),
 	})
 
 	if err := s.Save(path); err != nil {
@@ -40,14 +45,14 @@ func TestSaveAndLoad(t *testing.T) {
 	if task.Issue != 390 {
 		t.Errorf("expected issue %d, got %d", 390, task.Issue)
 	}
-	if task.Status != "running" {
-		t.Errorf("expected status %q, got %q", "running", task.Status)
+	if task.Status != domain.TaskRunning {
+		t.Errorf("expected status %q, got %q", domain.TaskRunning, task.Status)
 	}
 	if task.Commits != 1 {
 		t.Errorf("expected commits %d, got %d", 1, task.Commits)
 	}
-	if task.Verdict != "changes" {
-		t.Errorf("expected verdict %q, got %q", "changes", task.Verdict)
+	if task.Verdict != domain.VerdictChanges {
+		t.Errorf("expected verdict %q, got %q", domain.VerdictChanges, task.Verdict)
 	}
 }
 
@@ -68,10 +73,10 @@ func TestLoadMissingFileReturnsEmpty(t *testing.T) {
 func TestUpsertTaskInsertsNew(t *testing.T) {
 	s := New()
 
-	s.UpsertTask(TaskState{
+	s.UpsertTask(domain.Task{
 		ID:      "t1",
 		Issue:   10,
-		Status:  "pending",
+		Status:  domain.TaskPending,
 		Commits: 0,
 	})
 
@@ -83,18 +88,18 @@ func TestUpsertTaskInsertsNew(t *testing.T) {
 func TestUpsertTaskUpdatesExisting(t *testing.T) {
 	s := New()
 
-	s.UpsertTask(TaskState{
+	s.UpsertTask(domain.Task{
 		ID:     "t1",
 		Issue:  10,
-		Status: "pending",
+		Status: domain.TaskPending,
 	})
 
-	s.UpsertTask(TaskState{
-		ID:     "t1",
-		Issue:  10,
-		Status: "done",
+	s.UpsertTask(domain.Task{
+		ID:      "t1",
+		Issue:   10,
+		Status:  domain.TaskDone,
 		Commits: 3,
-		Verdict: "approved",
+		Verdict: domain.VerdictApproved,
 	})
 
 	if len(s.Tasks) != 1 {
@@ -105,8 +110,8 @@ func TestUpsertTaskUpdatesExisting(t *testing.T) {
 	if !ok {
 		t.Fatal("expected task t1 to exist")
 	}
-	if task.Status != "done" {
-		t.Errorf("expected status %q, got %q", "done", task.Status)
+	if task.Status != domain.TaskDone {
+		t.Errorf("expected status %q, got %q", domain.TaskDone, task.Status)
 	}
 	if task.Commits != 3 {
 		t.Errorf("expected commits %d, got %d", 3, task.Commits)
@@ -133,5 +138,65 @@ func TestSaveCreatesMillDir(t *testing.T) {
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Fatal("expected .mill/state.json to be created")
+	}
+}
+
+func TestStateUsesDomainTask(t *testing.T) {
+	s := New()
+	task := domain.NewTask("task-390", 390)
+	s.UpsertTask(task)
+
+	got, ok := s.Task("task-390")
+	if !ok {
+		t.Fatal("expected task to exist")
+	}
+
+	if got.Status != domain.TaskRunning {
+		t.Errorf("expected status %q, got %q", domain.TaskRunning, got.Status)
+	}
+	if !got.StartedAt.Equal(task.StartedAt) {
+		t.Errorf("expected StartedAt %v, got %v", task.StartedAt, got.StartedAt)
+	}
+	if !got.UpdatedAt.Equal(task.UpdatedAt) {
+		t.Errorf("expected UpdatedAt %v, got %v", task.UpdatedAt, got.UpdatedAt)
+	}
+}
+
+func TestStateRoundTripsTimestamps(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	ts := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	s := State{
+		Tasks: map[string]domain.Task{
+			"task-1": {
+				ID:        "task-1",
+				Issue:     1,
+				Status:    domain.TaskDone,
+				StartedAt: ts,
+				UpdatedAt: ts,
+			},
+		},
+	}
+
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	task, ok := loaded.Task("task-1")
+	if !ok {
+		t.Fatal("expected task to exist after round-trip")
+	}
+
+	if !task.StartedAt.Equal(ts) {
+		t.Errorf("StartedAt round-trip mismatch: %v vs %v", task.StartedAt, ts)
+	}
+	if !task.UpdatedAt.Equal(ts) {
+		t.Errorf("UpdatedAt round-trip mismatch: %v vs %v", task.UpdatedAt, ts)
 	}
 }

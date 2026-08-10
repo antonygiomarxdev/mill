@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestAppendCreatesFile(t *testing.T) {
@@ -13,10 +14,10 @@ func TestAppendCreatesFile(t *testing.T) {
 	path := filepath.Join(dir, ".mill", "ledger", "390.jsonl")
 
 	entry := Entry{
-		Timestamp: "2026-08-09T10:00:00Z",
+		Timestamp: time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC),
 		Issue:     390,
 		Event:     "dispatch",
-		Status:    "pending",
+		Status:    "running",
 	}
 
 	if err := Append(path, entry); err != nil {
@@ -33,8 +34,8 @@ func TestAppendMultipleEntries(t *testing.T) {
 	path := filepath.Join(dir, ".mill", "ledger", "390.jsonl")
 
 	entries := []Entry{
-		{Timestamp: "2026-08-09T10:00:00Z", Issue: 390, Event: "dispatch", Status: "pending"},
-		{Timestamp: "2026-08-09T10:01:00Z", Issue: 390, Event: "review", Status: "done", Verdict: "approved"},
+		{Timestamp: time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC), Issue: 390, Event: "dispatch", Status: "running"},
+		{Timestamp: time.Date(2026, 8, 9, 10, 1, 0, 0, time.UTC), Issue: 390, Event: "complete", Status: "done", Verdict: "approved"},
 	}
 
 	for _, e := range entries {
@@ -43,7 +44,6 @@ func TestAppendMultipleEntries(t *testing.T) {
 		}
 	}
 
-	// Read back and verify
 	f, err := os.Open(path)
 	if err != nil {
 		t.Fatalf("open failed: %v", err)
@@ -67,8 +67,8 @@ func TestAppendMultipleEntries(t *testing.T) {
 	if got[0].Event != "dispatch" {
 		t.Errorf("expected first event %q, got %q", "dispatch", got[0].Event)
 	}
-	if got[1].Event != "review" {
-		t.Errorf("expected second event %q, got %q", "review", got[1].Event)
+	if got[1].Event != "complete" {
+		t.Errorf("expected second event %q, got %q", "complete", got[1].Event)
 	}
 	if got[1].Verdict != "approved" {
 		t.Errorf("expected verdict %q, got %q", "approved", got[1].Verdict)
@@ -79,8 +79,13 @@ func TestAppendEachEntryOnOwnLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ledger", "1.jsonl")
 
+	ts := time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC)
 	for i := 0; i < 3; i++ {
-		if err := Append(path, Entry{Issue: 1, Event: "tick"}); err != nil {
+		if err := Append(path, Entry{
+			Timestamp: ts,
+			Issue:     1,
+			Event:     "tick",
+		}); err != nil {
 			t.Fatalf("Append failed: %v", err)
 		}
 	}
@@ -107,7 +112,7 @@ func TestAppendEntryStructure(t *testing.T) {
 	path := filepath.Join(dir, "ledger", "1.jsonl")
 
 	entry := Entry{
-		Timestamp: "2026-08-09T10:00:00Z",
+		Timestamp: time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC),
 		Issue:     42,
 		Event:     "dispatch",
 		Status:    "running",
@@ -128,14 +133,12 @@ func TestAppendEntryStructure(t *testing.T) {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	expected := []string{"timestamp", "issue", "event", "status"}
-	for _, f := range expected {
+	for _, f := range []string{"timestamp", "issue", "event", "status"} {
 		if _, ok := fields[f]; !ok {
 			t.Errorf("expected field %q in entry JSON", f)
 		}
 	}
 
-	// verdict should be omitempty — present when set
 	if _, ok := fields["verdict"]; !ok {
 		t.Errorf("expected verdict field when set")
 	}
@@ -146,7 +149,7 @@ func TestAppendVerdictOmitEmpty(t *testing.T) {
 	path := filepath.Join(dir, "ledger", "1.jsonl")
 
 	entry := Entry{
-		Timestamp: "2026-08-09T10:00:00Z",
+		Timestamp: time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC),
 		Issue:     1,
 		Event:     "dispatch",
 		Status:    "pending",
@@ -168,5 +171,51 @@ func TestAppendVerdictOmitEmpty(t *testing.T) {
 
 	if _, ok := fields["verdict"]; ok {
 		t.Errorf("verdict should be omitted when empty")
+	}
+}
+
+func TestEntryTimestampIsTime(t *testing.T) {
+	ts := time.Date(2026, 8, 10, 12, 30, 0, 0, time.UTC)
+	e := Entry{
+		Timestamp: ts,
+		Issue:     1,
+		Event:     "dispatch",
+		Status:    "running",
+	}
+
+	if !e.Timestamp.Equal(ts) {
+		t.Errorf("expected timestamp %v, got %v", ts, e.Timestamp)
+	}
+
+	// Verify JSON round-trips as RFC3339
+	data, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	tsBytes, ok := raw["timestamp"]
+	if !ok {
+		t.Fatal("expected timestamp field in JSON")
+	}
+	var tsStr string
+	if err := json.Unmarshal(tsBytes, &tsStr); err != nil {
+		t.Fatalf("expected string timestamp: %v", err)
+	}
+	if _, err := time.Parse(time.RFC3339, tsStr); err != nil {
+		t.Errorf("timestamp %q is not valid RFC3339: %v", tsStr, err)
+	}
+
+	// Round-trip: unmarshal back
+	var e2 Entry
+	if err := json.Unmarshal(data, &e2); err != nil {
+		t.Fatalf("round-trip unmarshal failed: %v", err)
+	}
+	if !e2.Timestamp.Equal(ts) {
+		t.Errorf("round-trip timestamp mismatch: %v vs %v", e2.Timestamp, ts)
 	}
 }

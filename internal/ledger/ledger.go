@@ -6,15 +6,17 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Entry is a single append-only event in the session ledger.
 type Entry struct {
-	Timestamp string `json:"timestamp"`
-	Issue     int    `json:"issue"`
-	Event     string `json:"event"`
-	Status    string `json:"status"`
-	Verdict   string `json:"verdict,omitempty"`
+	Timestamp      time.Time `json:"timestamp"`
+	Issue          int       `json:"issue"`
+	Event          string    `json:"event"`
+	Status         string    `json:"status"`
+	Verdict        string    `json:"verdict,omitempty"`
+	Classification string    `json:"classification,omitempty"`
 }
 
 // Append writes a single JSON line entry to the ledger file at path.

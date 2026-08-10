@@ -1,31 +1,24 @@
 // Package state manages persistent task state for mill.
-// Task states are persisted to .mill/state.json.
+// Task states are persisted to .mill/state.json as domain.Task records.
 package state
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-)
 
-// TaskState represents the persisted state of a single mill task.
-type TaskState struct {
-	ID      string `json:"id"`
-	Issue   int    `json:"issue"`
-	Status  string `json:"status"`
-	Commits int    `json:"commits"`
-	Verdict string `json:"verdict,omitempty"`
-}
+	"github.com/antonygiomarxdev/mill/internal/domain"
+)
 
 // State holds all current task states, keyed by task ID.
 type State struct {
-	Tasks map[string]TaskState `json:"tasks"`
+	Tasks map[string]domain.Task `json:"tasks"`
 }
 
 // New returns an empty State ready for use.
 func New() State {
 	return State{
-		Tasks: make(map[string]TaskState),
+		Tasks: make(map[string]domain.Task),
 	}
 }
 
@@ -46,7 +39,7 @@ func Load(path string) (State, error) {
 	}
 
 	if s.Tasks == nil {
-		s.Tasks = make(map[string]TaskState)
+		s.Tasks = make(map[string]domain.Task)
 	}
 
 	return s, nil
@@ -68,15 +61,15 @@ func (s State) Save(path string) error {
 }
 
 // UpsertTask inserts a new task or updates an existing one by ID.
-func (s State) UpsertTask(t TaskState) {
+func (s *State) UpsertTask(t domain.Task) {
 	if s.Tasks == nil {
-		s.Tasks = make(map[string]TaskState)
+		s.Tasks = make(map[string]domain.Task)
 	}
 	s.Tasks[t.ID] = t
 }
 
 // Task looks up a task by ID.
-func (s State) Task(id string) (TaskState, bool) {
+func (s State) Task(id string) (domain.Task, bool) {
 	t, ok := s.Tasks[id]
 	return t, ok
 }

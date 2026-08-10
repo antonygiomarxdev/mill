@@ -2,6 +2,20 @@
 // AI agent sessions. Each provider (CommandCode, OpenCode, Claude) implements Adapter.
 package adapter
 
+import "github.com/antonygiomarxdev/mill/internal/domain"
+
+// DispatchOpts contains the options for dispatching a new agent session.
+type DispatchOpts struct {
+	// Worktree is the directory where the agent should operate.
+	Worktree string
+	// Prompt is the query passed to the agent via the CLI.
+	Prompt string
+	// Model is the provider model identifier (e.g. "laguna-free").
+	Model string
+	// MaxTurns caps the conversation turns. Zero means no cap.
+	MaxTurns int
+}
+
 // Capabilities describes what an adapter can do.
 type Capabilities struct {
 	Models []string `json:"models"`
@@ -11,14 +25,14 @@ type Capabilities struct {
 type SessionResult struct {
 	ExitCode int    `json:"exit_code"`
 	Commits  int    `json:"commits"`
-	Verdict  string `json:"verdict"`
+	Output   string `json:"output"`
 }
 
 // Session represents an in-flight or completed agent session.
 type Session interface {
 	ID() string
 	Status() string
-	Wait() SessionResult
+	Wait() (SessionResult, error)
 }
 
 // Adapter dispatches agent sessions for a provider.
@@ -26,7 +40,12 @@ type Session interface {
 // Resume reconnects to an existing session by ID.
 // Capabilities returns the provider's supported models.
 type Adapter interface {
-	Dispatch(worktree, prompt, model string) (Session, error)
+	Dispatch(opts DispatchOpts) (Session, error)
 	Resume(sessionID string) (Session, error)
 	Capabilities() Capabilities
+}
+
+// sessionStatus returns the domain session status as a string.
+func sessionStatus(s domain.SessionStatus) string {
+	return string(s)
 }

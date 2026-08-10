@@ -2,6 +2,8 @@ package adapter
 
 import (
 	"testing"
+
+	"github.com/antonygiomarxdev/mill/internal/domain"
 )
 
 // mockSession implements Session for testing.
@@ -9,42 +11,39 @@ type mockSession struct {
 	id     string
 	status string
 	result SessionResult
+	err    error
 }
 
 func (m *mockSession) ID() string      { return m.id }
 func (m *mockSession) Status() string  { return m.status }
-func (m *mockSession) Wait() SessionResult { return m.result }
+func (m *mockSession) Wait() (SessionResult, error) { return m.result, m.err }
 
 // mockAdapter implements Adapter for testing.
 type mockAdapter struct {
-	called       bool
-	dispatchArgs struct {
-		worktree string
-		prompt   string
-		model    string
-	}
-	resumeID string
-	caps     Capabilities
+	dispatchCalled bool
+	dispatchOpts   DispatchOpts
+	resumeCalled   bool
+	resumeID       string
+	caps           Capabilities
 }
 
-func (m *mockAdapter) Dispatch(worktree, prompt, model string) (Session, error) {
-	m.called = true
-	m.dispatchArgs.worktree = worktree
-	m.dispatchArgs.prompt = prompt
-	m.dispatchArgs.model = model
+func (m *mockAdapter) Dispatch(opts DispatchOpts) (Session, error) {
+	m.dispatchCalled = true
+	m.dispatchOpts = opts
 	return &mockSession{
 		id:     "mock-session-1",
-		status: "done",
-		result: SessionResult{ExitCode: 0, Commits: 5, Verdict: "approved"},
+		status: sessionStatus(domain.SessionDone),
+		result: SessionResult{ExitCode: 0, Commits: 5, Output: "APPROVED"},
 	}, nil
 }
 
 func (m *mockAdapter) Resume(sessionID string) (Session, error) {
+	m.resumeCalled = true
 	m.resumeID = sessionID
 	return &mockSession{
 		id:     sessionID,
-		status: "done",
-		result: SessionResult{ExitCode: 0, Commits: 3, Verdict: "changes"},
+		status: sessionStatus(domain.SessionDone),
+		result: SessionResult{ExitCode: 0, Commits: 3, Output: "Needs changes"},
 	}, nil
 }
 
@@ -52,45 +51,55 @@ func (m *mockAdapter) Capabilities() Capabilities {
 	return m.caps
 }
 
-func TestMockAdapterDispatch(t *testing.T) {
+func TestMockAdapterDispatchUsesDispatchOpts(t *testing.T) {
 	a := &mockAdapter{
 		caps: Capabilities{Models: []string{"gpt-5", "deepseek-v4-pro"}},
 	}
 
-	s, err := a.Dispatch("wt-1", "fix the bug", "gpt-5")
+	opts := DispatchOpts{
+		Worktree: "/tmp/worktree",
+		Prompt:   "fix the bug",
+		Model:    "gpt-5",
+		MaxTurns: 50,
+	}
+
+	s, err := a.Dispatch(opts)
 	if err != nil {
 		t.Fatalf("Dispatch returned error: %v", err)
 	}
 
-	if !a.called {
+	if !a.dispatchCalled {
 		t.Error("expected Dispatch to be called")
 	}
-	if a.dispatchArgs.worktree != "wt-1" {
-		t.Errorf("expected worktree %q, got %q", "wt-1", a.dispatchArgs.worktree)
+	if a.dispatchOpts.Worktree != "/tmp/worktree" {
+		t.Errorf("expected worktree %q, got %q", "/tmp/worktree", a.dispatchOpts.Worktree)
 	}
-	if a.dispatchArgs.prompt != "fix the bug" {
-		t.Errorf("expected prompt %q, got %q", "fix the bug", a.dispatchArgs.prompt)
+	if a.dispatchOpts.Prompt != "fix the bug" {
+		t.Errorf("expected prompt %q, got %q", "fix the bug", a.dispatchOpts.Prompt)
 	}
-	if a.dispatchArgs.model != "gpt-5" {
-		t.Errorf("expected model %q, got %q", "gpt-5", a.dispatchArgs.model)
+	if a.dispatchOpts.Model != "gpt-5" {
+		t.Errorf("expected model %q, got %q", "gpt-5", a.dispatchOpts.Model)
+	}
+	if a.dispatchOpts.MaxTurns != 50 {
+		t.Errorf("expected max turns %d, got %d", 50, a.dispatchOpts.MaxTurns)
 	}
 
 	if s.ID() != "mock-session-1" {
 		t.Errorf("expected session ID %q, got %q", "mock-session-1", s.ID())
 	}
-	if s.Status() != "done" {
-		t.Errorf("expected status %q, got %q", "done", s.Status())
-	}
 
-	result := s.Wait()
+	result, err := s.Wait()
+	if err != nil {
+		t.Fatalf("Wait returned error: %v", err)
+	}
 	if result.ExitCode != 0 {
 		t.Errorf("expected exit code 0, got %d", result.ExitCode)
 	}
 	if result.Commits != 5 {
 		t.Errorf("expected commits 5, got %d", result.Commits)
 	}
-	if result.Verdict != "approved" {
-		t.Errorf("expected verdict %q, got %q", "approved", result.Verdict)
+	if result.Output != "APPROVED" {
+		t.Errorf("expected output %q, got %q", "APPROVED", result.Output)
 	}
 }
 
@@ -102,6 +111,9 @@ func TestMockAdapterResume(t *testing.T) {
 		t.Fatalf("Resume returned error: %v", err)
 	}
 
+	if !a.resumeCalled {
+		t.Error("expected Resume to be called")
+	}
 	if a.resumeID != "session-123" {
 		t.Errorf("expected resumeID %q, got %q", "session-123", a.resumeID)
 	}
@@ -129,7 +141,7 @@ func TestSessionResultFields(t *testing.T) {
 	r := SessionResult{
 		ExitCode: 42,
 		Commits:  7,
-		Verdict:  "rejected",
+		Output:   "some output",
 	}
 
 	if r.ExitCode != 42 {
@@ -138,8 +150,8 @@ func TestSessionResultFields(t *testing.T) {
 	if r.Commits != 7 {
 		t.Errorf("expected commits 7, got %d", r.Commits)
 	}
-	if r.Verdict != "rejected" {
-		t.Errorf("expected verdict %q, got %q", "rejected", r.Verdict)
+	if r.Output != "some output" {
+		t.Errorf("expected output %q, got %q", "some output", r.Output)
 	}
 }
 

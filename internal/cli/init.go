@@ -14,7 +14,7 @@ import (
 	"text/template"
 )
 
-//go:embed static static/scaffold/.omp static/scaffold/.claude static/scaffold/.github
+//go:embed static static/scaffold/.omp static/scaffold/.claude static/scaffold/.github static/scaffold/.mill
 var staticFS embed.FS
 // initConfig holds the values used to render the mill.yml template.
 type initConfig struct {
@@ -95,9 +95,14 @@ func (a *App) runInit(args []string) error {
 		os.MkdirAll(filepath.Join(target, ".mill", sub), 0o755)
 	}
 
+	// Clean up empty static/ dir from embedded FS walk
+	os.Remove(filepath.Join(target, "static", "scaffold"))
+	os.Remove(filepath.Join(target, "static"))
+
 	fmt.Fprintf(a.Out, "mill project initialized in %s\n", target)
+	fmt.Fprintf(a.Out, "Next steps:\n")
 	fmt.Fprintf(a.Out, "  1. Open this project in your harness (omp/claude/codex)\n")
-	fmt.Fprintf(a.Out, "  2. The agent loads @skills/mill.md automatically\n")
+	fmt.Fprintf(a.Out, "  2. The agent loads @.mill/skills/mill.md automatically\n")
 	fmt.Fprintf(a.Out, "  3. Start delegating: just tell your agent what to build\n")
 
 	return nil

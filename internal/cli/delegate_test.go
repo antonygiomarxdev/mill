@@ -283,7 +283,7 @@ func TestInstallHooksCreatesDirAndCopiesFiles(t *testing.T) {
 	}
 
 	// Verify content matches the original.
-	originalContent, err := os.ReadFile(filepath.Join("checks", "common.sh"))
+	originalContent, err := os.ReadFile(filepath.Join(".mill", "checks", "common.sh"))
 	if err != nil {
 		t.Fatalf("failed to read original common.sh: %v", err)
 	}
@@ -394,10 +394,10 @@ func TestDelegateScaffoldsWorktree(t *testing.T) {
 
 	// Verify scaffold files exist
 	for _, rel := range []string{
-		"AGENTS.md",
+		filepath.Join(".mill", "AGENTS.md"),
 		filepath.Join(".omp", "AGENTS.md"),
 		filepath.Join(".omp", "RULES.md"),
-		filepath.Join("roles", "COMMON.md"),
+		filepath.Join(".mill", "roles", "COMMON.md"),
 	} {
 		p := filepath.Join(wt, rel)
 		if _, err := os.Stat(p); os.IsNotExist(err) {
@@ -515,7 +515,7 @@ func TestResolveModelMissingRoleFile(t *testing.T) {
 func TestResolveModelEmptyModelTier(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
-	roleDir := filepath.Join(dir, "roles", "sr-dev-be")
+	roleDir := filepath.Join(dir, ".mill", "roles", "sr-dev-be")
 	os.MkdirAll(roleDir, 0o755)
 	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte("---\nrole: sr-dev-be\nmodel:\n---\n"), 0o644)
 	origDir, _ := os.Getwd()
@@ -533,7 +533,7 @@ func TestResolveModelEmptyModelTier(t *testing.T) {
 func TestResolveModelKnownTier(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
-	roleDir := filepath.Join(dir, "roles", "sr-dev-be")
+	roleDir := filepath.Join(dir, ".mill", "roles", "sr-dev-be")
 	os.MkdirAll(roleDir, 0o755)
 	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte("---\nrole: sr-dev-be\nmodel: paid\n---\n"), 0o644)
 	origDir, _ := os.Getwd()
@@ -552,7 +552,7 @@ func TestResolveModelKnownTier(t *testing.T) {
 func TestBuildRolePromptWithSkills(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
-	roleDir := filepath.Join(dir, "roles", "sr-dev-be")
+	roleDir := filepath.Join(dir, ".mill", "roles", "sr-dev-be")
 	os.MkdirAll(roleDir, 0o755)
 	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte(
 		"---\nrole: sr-dev-be\nmodel: paid\nskills:\n  - tdd\n  - code-review\n---\n\n# Sr Dev\n",
@@ -573,7 +573,7 @@ func TestBuildRolePromptWithSkills(t *testing.T) {
 func TestBuildRolePromptNoSkills(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
-	roleDir := filepath.Join(dir, "roles", "sr-dev-be")
+	roleDir := filepath.Join(dir, ".mill", "roles", "sr-dev-be")
 	os.MkdirAll(roleDir, 0o755)
 	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte(
 		"---\nrole: sr-dev-be\nmodel: paid\n---\n\n# Sr Dev\n",

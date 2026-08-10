@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseFrontmatterStaff(t *testing.T) {
-	fm, err := ParseFrontmatter("../../roles/staff/ROLE.md")
+	fm, err := ParseFrontmatter("../../.mill/roles/staff/ROLE.md")
 	if err != nil {
 		t.Fatalf("parse staff: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestParseFrontmatterStaff(t *testing.T) {
 }
 
 func TestParseFrontmatterSrDev(t *testing.T) {
-	fm, err := ParseFrontmatter("../../roles/sr-dev-be/ROLE.md")
+	fm, err := ParseFrontmatter("../../.mill/roles/sr-dev-be/ROLE.md")
 	if err != nil {
 		t.Fatalf("parse sr-dev-be: %v", err)
 	}

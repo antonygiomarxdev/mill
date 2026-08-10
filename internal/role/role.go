@@ -26,12 +26,12 @@ func LoadFrom(root, name string) (string, error) {
 	}
 	var parts []string
 
-	common, err := os.ReadFile(filepath.Join(root, "roles", "COMMON.md"))
+	common, err := os.ReadFile(filepath.Join(root, ".mill", "roles", "COMMON.md"))
 	if err == nil {
 		parts = append(parts, string(common))
 	}
 
-	rolePath := filepath.Join(root, "roles", name, "ROLE.md")
+	rolePath := filepath.Join(root, ".mill", "roles", name, "ROLE.md")
 	roleContent, err := os.ReadFile(rolePath)
 	if err != nil {
 		return "", err

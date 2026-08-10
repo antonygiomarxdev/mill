@@ -280,7 +280,7 @@ func (a *App) validateDelegation(activeRole, targetRole string) error {
 	if err != nil {
 		return fmt.Errorf("cannot find project root: %w", err)
 	}
-	rolePath := filepath.Join(root, "roles", activeRole, "ROLE.md")
+	rolePath := filepath.Join(root, ".mill", "roles", activeRole, "ROLE.md")
 	fm, err := role.ParseFrontmatter(rolePath)
 	if err != nil {
 		return fmt.Errorf("cannot read role %s: %w", activeRole, err)
@@ -343,7 +343,7 @@ func (a *App) resolveModel(targetRole string, cfg config.Config) string {
 	if err != nil {
 		return cfg.Model
 	}
-	rolePath := filepath.Join(root, "roles", targetRole, "ROLE.md")
+	rolePath := filepath.Join(root, ".mill", "roles", targetRole, "ROLE.md")
 	fm, err := role.ParseFrontmatter(rolePath)
 	if err != nil || fm.Model == "" {
 		return cfg.Model
@@ -373,7 +373,7 @@ end your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.`, i
 
 // installHooks copies gauntlet hook scripts into the worktree's .git/hooks directory.
 func installHooks(worktree string) error {
-	srcDir := "checks"
+	srcDir := ".mill/checks"
 	hookDir := filepath.Join(worktree, ".git", "hooks")
 	if err := os.MkdirAll(hookDir, 0755); err != nil {
 		return err

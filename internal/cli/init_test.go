@@ -52,7 +52,7 @@ func TestInitCreatesDirectories(t *testing.T) {
 		t.Fatalf("init returned error: %v", err)
 	}
 
-	for _, dirName := range []string{"roles", "checks", "skills", "docs"} {
+	for _, dirName := range []string{".mill/roles", ".mill/checks", ".mill/skills", ".mill/docs"} {
 		info, err := os.Stat(filepath.Join(dir, dirName))
 		if err != nil {
 			t.Errorf("expected %s directory to be created: %v", dirName, err)
@@ -74,14 +74,14 @@ func TestInitCopiesRoleFiles(t *testing.T) {
 		t.Fatalf("init returned error: %v", err)
 	}
 
-	roleFile := filepath.Join(dir, "roles", "sr-dev-be", "ROLE.md")
+	roleFile := filepath.Join(dir, ".mill", "roles", "sr-dev-be", "ROLE.md")
 	if _, err := os.Stat(roleFile); os.IsNotExist(err) {
-		t.Error("expected roles/sr-dev-be/ROLE.md to be created")
+		t.Error("expected .mill/roles/sr-dev-be/ROLE.md to be created")
 	}
 
-	commonFile := filepath.Join(dir, "roles", "COMMON.md")
+	commonFile := filepath.Join(dir, ".mill", "roles", "COMMON.md")
 	if _, err := os.Stat(commonFile); os.IsNotExist(err) {
-		t.Error("expected roles/COMMON.md to be created")
+		t.Error("expected .mill/roles/COMMON.md to be created")
 	}
 }
 
@@ -95,7 +95,7 @@ func TestInitCopiesCheckFiles(t *testing.T) {
 		t.Fatalf("init returned error: %v", err)
 	}
 
-	for _, file := range []string{"checks/pre-commit", "checks/pre-push", "checks/common.sh"} {
+	for _, file := range []string{".mill/checks/pre-commit", ".mill/checks/pre-push", ".mill/checks/common.sh"} {
 		if _, err := os.Stat(filepath.Join(dir, file)); os.IsNotExist(err) {
 			t.Errorf("expected %s to be created", file)
 		}
@@ -143,7 +143,7 @@ func TestInitInteractiveUsesDefaults(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "mill.yml")); os.IsNotExist(err) {
 		t.Error("expected mill.yml to be created")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "roles")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, ".mill", "roles")); os.IsNotExist(err) {
 		t.Error("expected roles/ directory to be created")
 	}
 }

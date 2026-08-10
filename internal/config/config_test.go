@@ -237,3 +237,115 @@ func TestConfigJSONStructure(t *testing.T) {
 		}
 	}
 }
+
+func TestBudgetRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	tb := 1000000
+	original := Config{
+		Provider:  "commandcode",
+		Model:     "laguna-free",
+		MaxRounds: 4,
+		Budget: &Budget{
+			TimeSeconds: 300,
+			MaxTurns:    20,
+			TokenBudget: &tb,
+		},
+	}
+
+	if err := original.Save(path); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if loaded.Budget == nil {
+		t.Fatal("expected budget to be loaded, got nil")
+	}
+	if loaded.Budget.TimeSeconds != 300 {
+		t.Errorf("expected time_seconds 300, got %d", loaded.Budget.TimeSeconds)
+	}
+	if loaded.Budget.MaxTurns != 20 {
+		t.Errorf("expected max_turns 20, got %d", loaded.Budget.MaxTurns)
+	}
+	if loaded.Budget.TokenBudget == nil {
+		t.Error("expected token_budget to be set, got nil")
+	} else if *loaded.Budget.TokenBudget != 1000000 {
+		t.Errorf("expected token_budget 1000000, got %d", *loaded.Budget.TokenBudget)
+	}
+}
+
+func TestBudgetJSONStructure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	tb := 500000
+	c := Config{
+		Budget: &Budget{
+			TimeSeconds: 60,
+			MaxTurns:    10,
+			TokenBudget: &tb,
+		},
+	}
+	if err := c.Save(path); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	if _, ok := fields["budget"]; !ok {
+		t.Error("expected budget field in config JSON")
+	}
+
+	var budget map[string]json.RawMessage
+	if err := json.Unmarshal(fields["budget"], &budget); err != nil {
+		t.Fatalf("unmarshal budget failed: %v", err)
+	}
+
+	expectedBudget := []string{"time_seconds", "max_turns", "token_budget"}
+	for _, f := range expectedBudget {
+		if _, ok := budget[f]; !ok {
+			t.Errorf("expected budget field %q", f)
+		}
+	}
+}
+
+func TestBudgetOptionalTokenBudget(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	original := Config{
+		Budget: &Budget{
+			TimeSeconds: 120,
+			MaxTurns:    15,
+		},
+	}
+
+	if err := original.Save(path); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if loaded.Budget == nil {
+		t.Fatal("expected budget to be loaded, got nil")
+	}
+	if loaded.Budget.TokenBudget != nil {
+		t.Errorf("expected token_budget to be nil (omitted), got %d", *loaded.Budget.TokenBudget)
+	}
+}

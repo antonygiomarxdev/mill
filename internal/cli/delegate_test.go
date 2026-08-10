@@ -3,9 +3,9 @@ package cli
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-
 	"github.com/antonygiomarxdev/mill/internal/adapter"
 	"github.com/antonygiomarxdev/mill/internal/domain"
 	"github.com/antonygiomarxdev/mill/internal/state"
@@ -248,3 +248,49 @@ func TestDelegateModelFlagOverridesConfig(t *testing.T) {
 type assertError string
 
 func (e assertError) Error() string { return string(e) }
+
+func TestInstallHooksCreatesDirAndCopiesFiles(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectRoot := filepath.Join(origDir, "..", "..")
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origDir)
+
+	worktree := t.TempDir()
+	if err := installHooks(worktree); err != nil {
+		t.Fatalf("installHooks returned error: %v", err)
+	}
+
+	// Verify .git/hooks directory was created.
+	hookDir := filepath.Join(worktree, ".git", "hooks")
+	info, err := os.Stat(hookDir)
+	if os.IsNotExist(err) {
+		t.Fatal("expected .git/hooks directory to be created")
+	}
+	if !info.IsDir() {
+		t.Fatal("expected .git/hooks to be a directory")
+	}
+
+	// Verify common.sh was copied as "common" (extension stripped).
+	commonHook := filepath.Join(hookDir, "common")
+	if _, err := os.Stat(commonHook); os.IsNotExist(err) {
+		t.Error("expected common hook to be copied")
+	}
+
+	// Verify content matches the original.
+	originalContent, err := os.ReadFile(filepath.Join("checks", "common.sh"))
+	if err != nil {
+		t.Fatalf("failed to read original common.sh: %v", err)
+	}
+	copiedContent, err := os.ReadFile(commonHook)
+	if err != nil {
+		t.Fatalf("failed to read copied common: %v", err)
+	}
+	if !bytes.Equal(originalContent, copiedContent) {
+		t.Error("expected copied common to match original common.sh content")
+	}
+}

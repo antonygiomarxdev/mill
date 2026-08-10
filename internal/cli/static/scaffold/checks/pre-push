@@ -1,6 +1,7 @@
 #!/bin/bash
 # Mill gauntlet — pre-push. Runs before git push.
 # Medium checks (<5min). Fail = push rejected.
+# Quality gates are non-negotiable. Priority does not override them.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$DIR/common.sh"
@@ -8,5 +9,15 @@ source "$DIR/common.sh"
 echo "mill: pre-push gauntlet"
 
 go test ./... && pass "go test" || fail "go test — run: go test ./..."
+
+# Coverage gate — non-negotiable. Uses minimum coverage across all packages.
+COVERAGE=$(go test -count=1 ./... -cover 2>&1 | grep -oP 'coverage: \K[\d.]+(?=%)' | sort -n | head -1)
+if [ -z "$COVERAGE" ]; then
+  fail "coverage — could not parse coverage output"
+fi
+if awk "BEGIN {exit !($COVERAGE < 90)}"; then
+  fail "coverage ${COVERAGE}% < 90% — add tests for uncovered code"
+fi
+pass "coverage ${COVERAGE}%"
 
 echo "mill: pre-push passed"

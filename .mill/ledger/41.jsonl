@@ -1,0 +1,6 @@
+{"timestamp":"2026-08-10T05:18:29.475986637Z","issue":41,"event":"dispatch","status":"running"}
+{"timestamp":"2026-08-10T05:18:36.044466005Z","issue":41,"event":"classify","status":"running","classification":"FATAL"}
+{"timestamp":"2026-08-10T05:18:42.567679002Z","issue":41,"event":"classify","status":"running","classification":"FATAL"}
+{"timestamp":"2026-08-10T05:18:49.264559648Z","issue":41,"event":"classify","status":"running","classification":"FATAL"}
+{"timestamp":"2026-08-10T05:18:55.911621527Z","issue":41,"event":"classify","status":"running","classification":"FATAL"}
+{"timestamp":"2026-08-10T05:18:55.911926614Z","issue":41,"event":"complete","status":"error","verdict":"rejected","classification":"FATAL"}

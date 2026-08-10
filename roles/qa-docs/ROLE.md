@@ -1,7 +1,7 @@
 ---
 role: qa-docs
 model: free→paid
-reviewed_by: reviewer
+reviewed_by: delegator
 delegates_to: []
 skills:
   - writing-plans

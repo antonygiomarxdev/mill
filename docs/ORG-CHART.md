@@ -6,7 +6,7 @@
 graph TD
     CTO[👤 CTO]
     
-    CTO -->|talks to| STAFF[🤖 Staff<br/>skills: 17<br/>model: pro]
+    CTO -->|talks to| STAFF[🤖 Staff<br/>skills: 16<br/>model: pro]
     CTO -->|talks to| PM[🤖 Product Manager<br/>skills: 4<br/>model: pro]
     
     STAFF -->|delegates to| PM
@@ -24,9 +24,9 @@ graph TD
     ARCH -->|delegates to| TL[🤖 Tech Lead<br/>skills: 5<br/>model: pro]
     ARCH -->|delegates to| QA
     
-    TL -->|delegates to| FE[🤖 Sr. Dev FE<br/>skills: 4<br/>model: cheap]
-    TL -->|delegates to| BE[🤖 Sr. Dev BE<br/>skills: 4<br/>model: cheap]
-    TL -->|delegates to| DATA[🤖 Sr. Dev Data<br/>skills: 4<br/>model: cheap]
+    TL -->|delegates to| FE[🤖 Sr. Dev FE<br/>skills: 3<br/>model: cheap]
+    TL -->|delegates to| BE[🤖 Sr. Dev BE<br/>skills: 3<br/>model: cheap]
+    TL -->|delegates to| DATA[🤖 Sr. Dev Data<br/>skills: 3<br/>model: cheap]
     TL -->|delegates to| QA
     
     FE -->|delegates to| QA
@@ -54,18 +54,18 @@ graph TD
 |------|----|-----|
 | CTO | Staff | Technical direction |
 | CTO | PM | Product decisions |
-| **Staff** | **PM** | Write product specs |
-| **Staff** | **Architect** | System architecture, ADRs |
-| **Staff** | **Reviewer** | Independent code review |
+| Staff | PM | Write product specs |
+| Staff | Architect | System architecture, ADRs |
+| Staff | Reviewer | Independent code review |
 | PM | UX Designer | User flows, IA |
 | UX | UI Designer | Components, tokens |
-| **Architect** | **Tech Lead** | Per-feature specs, task decomposition |
-| **Tech Lead** | **Sr. Dev FE/BE/Data** | Implementation (THE ONLY ROLE that can) |
+| Architect | Tech Lead | Per-feature specs, task decomposition, code review |
+| Tech Lead | Sr. Dev FE/BE/Data | Implementation — THE ONLY ROLE that can |
 | Tech Lead | QA/Docs | Tests, changelog |
 | Reviewer | QA/Docs | Tests, docs |
 | Anyone | QA/Docs | Shared service |
 
-## Who reviews whom (review chain)
+## Who reviews whom
 
 ```mermaid
 graph LR
@@ -94,12 +94,12 @@ graph LR
 
 | # | Rule | Why |
 |---|------|-----|
-| 1 | **Only Tech Lead delegates to Sr. Devs** | Architect is strategic, Tech Lead is tactical |
-| 2 | **Every line of code passes through Tech Lead** | Code review is Tech Lead's job, not Staff's |
-| 3 | **Staff never reviews code** | Staff is managerial — verifies process, not implementation |
-| 4 | **Architect sits between Staff and Tech Lead** | Cross-cutting decisions before tactical decomposition |
-| 5 | **Reviewer is independent** | Second pair of eyes, different from Tech Lead |
-| 6 | **Expensive models (pro) never do cheap work** | Staff, PM, Architect delegate. Sr. Devs execute. |
+| 1 | Only Tech Lead delegates to Sr. Devs | Architect is strategic, Tech Lead is tactical |
+| 2 | Every line of code passes through Tech Lead | Code review is Tech Lead's job |
+| 3 | Staff never reviews code | Staff verifies process, not implementation |
+| 4 | Architect sits between Staff and Tech Lead | Cross-cutting decisions before tactical work |
+| 5 | Reviewer is independent second pair of eyes | Different from Tech Lead |
+| 6 | Pro models decide, cheap models execute | Staff delegates. Sr. Devs implement. |
 
 ## Full pipeline: "Add dark mode"
 
@@ -148,17 +148,13 @@ sequenceDiagram
     Staff->>CTO: ready to land
 ```
 
-## What each role costs and why delegation matters
+## Model tiers
 
-| Role | Model | Cost | Should NEVER |
-|------|-------|------|-------------|
-| Staff | deepseek-v4-pro | $0.36/session | Write code, review code, write specs |
-| PM | deepseek-v4-pro | $0.36/session | Write code, design UI, touch architecture |
-| Architect | deepseek-v4-pro | $0.36/session | Review individual PRs, implement |
-| Tech Lead | deepseek-v4-pro | $0.36/session | Write production code |
-| Reviewer | deepseek-v4-pro | $0.36/session | Fix code, design architecture |
-| UX/UI | deepseek-v4-pro | $0.36/session | Write code |
-| Sr. Devs | laguna-free | $0.00/session | Decide architecture, skip review |
-| QA/Docs | laguna-free | $0.00/session | Decide scope, skip tests |
+Models are configured in `mill.yml`, not hardcoded in docs or roles. Three tiers:
 
-**Principle:** expensive model = decisions. Cheap model = execution. Staff is the most expensive — every token spent on implementation is waste.
+| Tier | Who uses it | Purpose |
+|------|------------|---------|
+| pro | Staff, PM, Architect, Tech Lead, Reviewer, UX, UI | Decisions, review, design |
+| cheap | Sr. Devs, QA/Docs | Execution, tests, documentation |
+
+The actual model mapping (e.g., `deepseek-v4-pro` for pro, `laguna-free` for cheap) lives in `mill.yml` per project. Projects switch providers by changing config, not roles or docs.

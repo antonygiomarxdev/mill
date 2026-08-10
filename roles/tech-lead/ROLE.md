@@ -1,7 +1,7 @@
 ---
 role: tech-lead
 model: pro
-reviewed_by: staff
+reviewed_by: architect
 delegates_to:
   - sr-dev-fe
   - sr-dev-be

@@ -5,7 +5,6 @@ reviewed_by: cto
 delegates_to:
   - pm
   - architect
-  - tech-lead
   - reviewer
   - qa-docs
 skills:

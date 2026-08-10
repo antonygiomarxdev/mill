@@ -2,20 +2,21 @@ package cli
 
 import (
 	"bytes"
+	"github.com/antonygiomarxdev/mill/internal/adapter"
+	"github.com/antonygiomarxdev/mill/internal/config"
+	"github.com/antonygiomarxdev/mill/internal/domain"
+	"github.com/antonygiomarxdev/mill/internal/state"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"github.com/antonygiomarxdev/mill/internal/adapter"
-	"github.com/antonygiomarxdev/mill/internal/domain"
-	"github.com/antonygiomarxdev/mill/internal/state"
 )
 
 // fakeAdapter implements adapter.Adapter for CLI testing.
 type fakeAdapter struct {
-	dispatched bool
-	opts       adapter.DispatchOpts
-	result     adapter.SessionResult
+	dispatched  bool
+	opts        adapter.DispatchOpts
+	result      adapter.SessionResult
 	dispatchErr error
 }
 
@@ -40,8 +41,8 @@ type fakeSession struct {
 	result adapter.SessionResult
 }
 
-func (s *fakeSession) ID() string      { return "fake-session-1" }
-func (s *fakeSession) Status() string  { return "done" }
+func (s *fakeSession) ID() string     { return "fake-session-1" }
+func (s *fakeSession) Status() string { return "done" }
 func (s *fakeSession) Wait() (adapter.SessionResult, error) {
 	return s.result, nil
 }
@@ -305,7 +306,6 @@ func TestDelegateStaffToSrDevRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-
 	fa := &fakeAdapter{}
 	buf := new(bytes.Buffer)
 	app := &App{Adapter: fa, MillDir: filepath.Join(dir, ".mill"), Out: buf, Err: buf}
@@ -433,6 +433,9 @@ func TestClassifyResultExitCodes(t *testing.T) {
 		{name: "exit 10 is NO_CREDIT", code: 10, want: domain.ClassificationNoCredit},
 		{name: "unknown exit is FATAL", code: 99, want: domain.ClassificationFatal},
 		{name: "stderr blocked: overrides exit 0", code: 0, stderr: "blocked: budget exceeded", want: domain.ClassificationBlocked},
+		{name: "stderr 401 signals AUTH", code: 1, stderr: "401 Unauthorized", want: domain.ClassificationAuth},
+		{name: "stderr insufficient credits signals NO_CREDIT", code: 1, stderr: "insufficient credits", want: domain.ClassificationNoCredit},
+		{name: "stderr timeout signals TRANSIENT", code: 1, stderr: "network timeout", want: domain.ClassificationTransient},
 	}
 
 	for _, tt := range tests {
@@ -491,5 +494,112 @@ func TestDelegateBlockedExitCodeSetsTaskError(t *testing.T) {
 				t.Error("expected ledger to contain BLOCKED classification")
 			}
 		})
+	}
+}
+
+func TestResolveModelMissingRoleFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	app := &App{MillDir: dir}
+	cfg := config.Config{Model: "laguna-free"}
+	got := app.resolveModel("sr-dev-be", cfg)
+	if got != "laguna-free" {
+		t.Errorf("expected fallback to config model, got %q", got)
+	}
+}
+
+func TestResolveModelEmptyModelTier(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+	roleDir := filepath.Join(dir, "roles", "sr-dev-be")
+	os.MkdirAll(roleDir, 0o755)
+	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte("---\nrole: sr-dev-be\nmodel:\n---\n"), 0o644)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	app := &App{MillDir: dir}
+	cfg := config.Config{Model: "laguna-free"}
+	got := app.resolveModel("sr-dev-be", cfg)
+	if got != "laguna-free" {
+		t.Errorf("expected fallback to config model for empty tier, got %q", got)
+	}
+}
+
+func TestResolveModelKnownTier(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+	roleDir := filepath.Join(dir, "roles", "sr-dev-be")
+	os.MkdirAll(roleDir, 0o755)
+	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte("---\nrole: sr-dev-be\nmodel: paid\n---\n"), 0o644)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	app := &App{MillDir: dir}
+	cfg := config.Config{Model: "laguna-free"}
+	got := app.resolveModel("sr-dev-be", cfg)
+	// paid maps to deepseek/deepseek-v4-pro in modelTier
+	if got != "deepseek/deepseek-v4-pro" {
+		t.Errorf("expected modelTier mapping for 'paid', got %q", got)
+	}
+}
+
+func TestBuildRolePromptWithSkills(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+	roleDir := filepath.Join(dir, "roles", "sr-dev-be")
+	os.MkdirAll(roleDir, 0o755)
+	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte(
+		"---\nrole: sr-dev-be\nmodel: paid\nskills:\n  - tdd\n  - code-review\n---\n\n# Sr Dev\n",
+	), 0o644)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	result := buildRolePrompt(1, "sr-dev-be")
+	if !strings.Contains(result, "tdd") {
+		t.Error("expected output to contain 'tdd'")
+	}
+	if !strings.Contains(result, "code-review") {
+		t.Error("expected output to contain 'code-review'")
+	}
+}
+
+func TestBuildRolePromptNoSkills(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+	roleDir := filepath.Join(dir, "roles", "sr-dev-be")
+	os.MkdirAll(roleDir, 0o755)
+	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte(
+		"---\nrole: sr-dev-be\nmodel: paid\n---\n\n# Sr Dev\n",
+	), 0o644)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	result := buildRolePrompt(1, "sr-dev-be")
+	if !strings.Contains(result, "1") {
+		t.Error("expected output to contain issue number '1'")
+	}
+	if !strings.Contains(result, "sr-dev-be") {
+		t.Error("expected output to contain role name 'sr-dev-be'")
+	}
+}
+
+func TestReadActiveRoleError(t *testing.T) {
+	dir := t.TempDir()
+	// Create role as a directory so os.ReadFile fails
+	rolePath := filepath.Join(dir, "role")
+	os.MkdirAll(rolePath, 0o755)
+
+	app := &App{MillDir: dir}
+	got := app.readActiveRole()
+	if got != "staff" {
+		t.Errorf("expected fallback to 'staff', got %q", got)
 	}
 }

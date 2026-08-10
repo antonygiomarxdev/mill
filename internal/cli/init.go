@@ -37,7 +37,7 @@ func (a *App) runInit(args []string) error {
 	var target string
 
 	flagSet.StringVar(&cfg.Name, "name", "", "project name (default: current directory name)")
-	flagSet.StringVar(&cfg.Provider, "provider", "commandcode", "AI provider (commandcode|opencode|claude)")
+	flagSet.StringVar(&cfg.Provider, "provider", "commandcode", "AI provider (commandcode|claude)")
 	flagSet.StringVar(&cfg.Model, "model", "laguna-free", "provider model identifier")
 	flagSet.IntVar(&cfg.MaxRounds, "max-rounds", 4, "max review rounds before REJECTED")
 	flagSet.BoolVar(&yes, "yes", false, "skip interactive prompts, use defaults/flags")
@@ -92,9 +92,9 @@ func (a *App) runInit(args []string) error {
 
 	fmt.Fprintf(a.Out, "mill project initialized in %s\n", target)
 	fmt.Fprintf(a.Out, "Next steps:\n")
-	fmt.Fprintf(a.Out, "  1. Edit mill.yml to configure your provider and model\n")
-	fmt.Fprintf(a.Out, "  2. Customize roles in roles/\n")
-	fmt.Fprintf(a.Out, "  3. Run: mill delegate <issue>\n")
+	fmt.Fprintf(a.Out, "  1. Open this project in your harness (omp/claude/codex)\n")
+	fmt.Fprintf(a.Out, "  2. The agent loads @skills/mill.md automatically\n")
+	fmt.Fprintf(a.Out, "  3. Start delegating: just tell your agent what to build\n")
 
 	return nil
 }

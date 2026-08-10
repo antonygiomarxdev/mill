@@ -192,3 +192,60 @@ func TestDetectRoleEmptyInput(t *testing.T) {
 		t.Errorf("detectRole(\"\") = %q, want staff", got)
 	}
 }
+
+func TestRoleGetEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	roleFile := filepath.Join(dir, "role")
+	if err := os.WriteFile(roleFile, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf}
+	if err := app.Run("role", "get"); err != nil {
+		t.Fatalf("role get: %v", err)
+	}
+
+	if got := buf.String(); got != "none\n" {
+		t.Errorf("expected %q, got %q", "none\n", got)
+	}
+}
+
+func TestRoleSetWriteError(t *testing.T) {
+	dir := t.TempDir()
+	// Make the MillDir read-only so os.WriteFile fails.
+	if err := os.Chmod(dir, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf}
+
+	if err := app.roleSet("staff"); err == nil {
+		t.Error("expected write error, got nil")
+	}
+}
+
+func TestRoleSetAlreadySet(t *testing.T) {
+	dir := t.TempDir()
+	roleFile := filepath.Join(dir, "role")
+	if err := os.WriteFile(roleFile, []byte("staff"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf}
+
+	if err := app.roleSet("staff"); err != nil {
+		t.Fatalf("roleSet staff: %v", err)
+	}
+
+	data, err := os.ReadFile(roleFile)
+	if err != nil {
+		t.Fatalf("read role file: %v", err)
+	}
+	if got := string(data); got != "staff" {
+		t.Errorf("file changed: expected %q, got %q", "staff", got)
+	}
+}

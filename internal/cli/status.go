@@ -15,6 +15,9 @@ func (a *App) runStatus(args []string) error {
 		return fmt.Errorf("error loading state: %w", err)
 	}
 
+	role := a.readActiveRole()
+	fmt.Fprintf(a.Out, "Active role: %s\n\n", role)
+
 	w := tabwriter.NewWriter(a.Out, 0, 0, 2, ' ', 0)
 	defer w.Flush()
 

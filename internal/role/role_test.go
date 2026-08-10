@@ -63,17 +63,20 @@ func TestParseFrontmatterString(t *testing.T) {
 	content := `---
 role: test
 model: free
+agent: cavecrew-builder
 delegates_to:
   - foo
   - bar
----
-# Rest of file`
+---`
 	fm, err := ParseFrontmatterString(content)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if fm.Role != "test" {
 		t.Errorf("role: expected test, got %s", fm.Role)
+	}
+	if fm.Agent != "cavecrew-builder" {
+		t.Errorf("agent: expected cavecrew-builder, got %s", fm.Agent)
 	}
 	if len(fm.DelegatesTo) != 2 {
 		t.Fatalf("delegates_to: expected 2, got %d", len(fm.DelegatesTo))

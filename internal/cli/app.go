@@ -1,6 +1,6 @@
 // Package cli implements the mill command-line interface using only the
 // Go standard library. It wires together the domain, adapter, state,
-// ledger, and classify layers.
+// and ledger layers.
 package cli
 
 import (
@@ -104,11 +104,11 @@ Usage:
   mill <command> [flags]
 
   init [flags]       Initialize a new mill project (scaffolding)
-  delegate <issue>   Delegate work to an AI agent for the given issue number
-  role <get|set>     Show or set the active role (staff or pm)
+  delegate <issue>   Delegate work to an AI agent for the given issue
   status             Show status of all mill tasks
-  land <target>      Run gates and checkout target branch in a worktree
-Flags:
+  role <get|set>     Show or set the active role (staff|pm)
+  watch              Wait for task state changes (blocks until all settle)
+  land <target>      Run gates and merge to target branch
   -h, --help         Show this help message
 `)
 }

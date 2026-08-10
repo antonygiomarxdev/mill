@@ -167,3 +167,46 @@ func TestAppRunLandNoArgs(t *testing.T) {
 		t.Error("expected usage error for land with no target")
 	}
 }
+
+
+func TestRunLandSuccessWithGates(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: t.TempDir(), Out: buf, Err: buf}
+	err := app.Run("land", "-worktree", dir, "main", "echo ok")
+	if err != nil {
+		t.Fatalf("runLand with gates returned error: %v", err)
+	}
+	if branch := currentBranch(t, dir); branch != "main" {
+		t.Errorf("expected HEAD on 'main', got %q", branch)
+	}
+}
+
+func TestRunLandHelpFlag(t *testing.T) {
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: t.TempDir(), Out: buf, Err: buf}
+	err := app.Run("land", "-h")
+	if err != nil {
+		t.Fatalf("runLand -h should return nil, got: %v", err)
+	}
+}
+
+func TestRunLandParseError(t *testing.T) {
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: t.TempDir(), Out: buf, Err: buf}
+	err := app.Run("land", "--nonexistent")
+	if err == nil {
+		t.Fatal("expected non-nil error for --nonexistent flag")
+	}
+}
+
+func TestBuildPrompt(t *testing.T) {
+	got := buildPrompt(42)
+	if got == "" {
+		t.Fatal("buildPrompt returned empty string")
+	}
+	if !strings.Contains(got, "42") {
+		t.Errorf("buildPrompt output should contain issue number 42, got: %s", got)
+	}
+}

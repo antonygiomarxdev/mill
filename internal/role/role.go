@@ -10,6 +10,7 @@ import (
 type Frontmatter struct {
 	Role        string
 	Model       string
+	Agent       string
 	ReviewedBy  string
 	DelegatesTo []string
 	Skills      []string
@@ -113,6 +114,8 @@ func parseFrontmatter(content string) (Frontmatter, error) {
 			fm.Role = val
 		case "model":
 			fm.Model = val
+		case "agent":
+			fm.Agent = val
 		case "reviewed_by":
 			fm.ReviewedBy = val
 		case "delegates_to":

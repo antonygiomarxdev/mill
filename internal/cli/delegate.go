@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/antonygiomarxdev/mill/internal/adapter"
+	"github.com/antonygiomarxdev/mill/internal/config"
 	"github.com/antonygiomarxdev/mill/internal/domain"
 	"github.com/antonygiomarxdev/mill/internal/issue"
 	"github.com/antonygiomarxdev/mill/internal/ledger"
@@ -74,8 +75,10 @@ func (a *App) runDelegate(args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+
+	// Resolve model from role frontmatter if no --model flag
 	if model == "" {
-		model = cfg.Model
+		model = a.resolveModel(targetRole, cfg)
 	}
 
 	// Create task and persist initial state
@@ -322,6 +325,41 @@ end your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.`, t
 	}
 
 	return fmt.Sprintf("%s\n\n---\n\nWork on GitHub issue #%d.\n\nRead the codebase, make the necessary changes, and when you are done,\nend your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.", rolePrompt, issueNum)
+}
+
+// modelTier maps role frontmatter model tiers to actual model names.
+// "free→paid" starts with free and escalates on complexity.
+var modelTier = map[string]string{
+	"free":      "deepseek/deepseek-v4-flash",
+	"paid":      "deepseek/deepseek-v4-pro",
+	"pro":       "deepseek/deepseek-v4-pro",
+	"free→paid": "deepseek/deepseek-v4-flash",
+}
+
+// resolveModel reads the target role's frontmatter model field and maps
+// the tier name to an actual model identifier. Falls back to config.Model.
+func (a *App) resolveModel(targetRole string, cfg config.Config) string {
+	root, err := projectRoot()
+	if err != nil {
+		return cfg.Model
+	}
+	rolePath := filepath.Join(root, "roles", targetRole, "ROLE.md")
+	fm, err := role.ParseFrontmatter(rolePath)
+	if err != nil || fm.Model == "" {
+		return cfg.Model
+	}
+
+	// "free→paid" means start cheap, escalate on complexity.
+	// For initial dispatch, always use the first tier ("free").
+	tier := fm.Model
+	if tier == "free→paid" {
+		tier = "free"
+	}
+
+	if m, ok := modelTier[tier]; ok {
+		return m
+	}
+	return cfg.Model
 }
 
 // buildPrompt constructs the query passed to the agent for a given issue.

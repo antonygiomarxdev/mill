@@ -8,6 +8,10 @@ provider: {{.Provider}}
 model: {{.Model}}
 max-rounds: {{.MaxRounds}}
 
+# Concurrency control for agent dispatch
+concurrency:
+  max-slots: 4   # max simultaneous agent dispatches
+
 # Directory layout for project scaffolding
 directories:
   roles: roles/

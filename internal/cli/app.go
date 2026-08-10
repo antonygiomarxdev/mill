@@ -87,6 +87,8 @@ func (a *App) Run(args ...string) error {
 		return a.runInit(args[1:])
 	case "status":
 		return a.runStatus(args[1:])
+	case "land":
+		return a.runLand(args[1:])
 	default:
 		usage(a.Err)
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -103,6 +105,7 @@ Commands:
   init [flags]       Initialize a new mill project (scaffolding)
   delegate <issue>   Delegate work to an AI agent for the given issue number
   status             Show status of all mill tasks
+  land <target>      Run gates and checkout target branch in a worktree
 
 Flags:
   -h, --help         Show this help message

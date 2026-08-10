@@ -1,0 +1,13 @@
+#!/bin/bash
+# Mill gauntlet — pre-commit. Runs on every git commit.
+# Fast checks (<30s). Fail = commit rejected.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$DIR/common.sh"
+
+echo "mill: pre-commit gauntlet"
+
+go build ./... && pass "go build" || fail "go build — run: go build ./..."
+go vet ./...  && pass "go vet"   || fail "go vet — run: go vet ./..."
+
+echo "mill: pre-commit passed"

@@ -19,6 +19,7 @@ type App struct {
 	MillDir string
 	Out     io.Writer
 	Err     io.Writer
+	In      io.Reader
 }
 
 // NewApp creates a new App with defaults: .mill directory, CommandCode adapter,
@@ -57,13 +58,16 @@ func (a *App) loadConfig() (config.Config, error) {
 	return config.Load(a.configPath())
 }
 
-// normalize ensures output writers have defaults.
+// normalize ensures input/output writers have defaults.
 func (a *App) normalize() {
 	if a.Out == nil {
 		a.Out = os.Stdout
 	}
 	if a.Err == nil {
 		a.Err = os.Stderr
+	}
+	if a.In == nil {
+		a.In = os.Stdin
 	}
 }
 
@@ -79,6 +83,8 @@ func (a *App) Run(args ...string) error {
 	switch args[0] {
 	case "delegate":
 		return a.runDelegate(args[1:])
+	case "init":
+		return a.runInit(args[1:])
 	case "status":
 		return a.runStatus(args[1:])
 	default:
@@ -94,6 +100,7 @@ Usage:
   mill <command> [flags]
 
 Commands:
+  init [flags]       Initialize a new mill project (scaffolding)
   delegate <issue>   Delegate work to an AI agent for the given issue number
   status             Show status of all mill tasks
 

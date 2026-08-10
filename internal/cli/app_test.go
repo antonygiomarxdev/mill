@@ -40,6 +40,9 @@ func TestRunHelpShowsUsage(t *testing.T) {
 	if !bytes.Contains(buf.Bytes(), []byte("status")) {
 		t.Error("expected usage output to contain 'status' command")
 	}
+	if !bytes.Contains(buf.Bytes(), []byte("init")) {
+		t.Error("expected usage output to contain 'init' command")
+	}
 }
 
 func TestAppPathMethods(t *testing.T) {

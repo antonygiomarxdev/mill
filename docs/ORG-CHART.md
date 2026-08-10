@@ -6,28 +6,27 @@
 graph TD
     CTO[👤 CTO]
     
-    CTO -->|talks to| STAFF[🤖 Staff<br/>skills: 17]
-    CTO -->|talks to| PM[🤖 Product Manager<br/>skills: 4]
+    CTO -->|talks to| STAFF[🤖 Staff<br/>skills: 17<br/>model: pro]
+    CTO -->|talks to| PM[🤖 Product Manager<br/>skills: 4<br/>model: pro]
     
     STAFF -->|delegates to| PM
-    STAFF -->|delegates to| ARCH[🤖 Architect<br/>skills: 4]
-    STAFF -->|delegates to| TL[🤖 Tech Lead<br/>skills: 5]
-    STAFF -->|delegates to| REV[🤖 Reviewer<br/>skills: 2]
+    STAFF -->|delegates to| ARCH[🤖 Architect<br/>skills: 4<br/>model: pro]
+    STAFF -->|delegates to| REV[🤖 Reviewer<br/>skills: 2<br/>model: pro]
     
-    PM -->|delegates to| UX[🤖 UX Designer<br/>skills: 3]
-    PM -->|delegates to| QA[🤖 QA/Docs<br/>skills: 2]
+    PM -->|delegates to| UX[🤖 UX Designer<br/>skills: 3<br/>model: pro]
+    PM -->|delegates to| QA[🤖 QA/Docs<br/>skills: 2<br/>model: cheap]
     
-    UX -->|delegates to| UI[🤖 UI Designer<br/>skills: 2]
+    UX -->|delegates to| UI[🤖 UI Designer<br/>skills: 2<br/>model: pro]
     UX -->|delegates to| QA
     
     UI -->|delegates to| QA
     
-    ARCH -->|delegates to| TL
+    ARCH -->|delegates to| TL[🤖 Tech Lead<br/>skills: 5<br/>model: pro]
     ARCH -->|delegates to| QA
     
-    TL -->|delegates to| FE[🤖 Sr. Dev FE<br/>skills: 4]
-    TL -->|delegates to| BE[🤖 Sr. Dev BE<br/>skills: 4]
-    TL -->|delegates to| DATA[🤖 Sr. Dev Data<br/>skills: 4]
+    TL -->|delegates to| FE[🤖 Sr. Dev FE<br/>skills: 4<br/>model: cheap]
+    TL -->|delegates to| BE[🤖 Sr. Dev BE<br/>skills: 4<br/>model: cheap]
+    TL -->|delegates to| DATA[🤖 Sr. Dev Data<br/>skills: 4<br/>model: cheap]
     TL -->|delegates to| QA
     
     FE -->|delegates to| QA
@@ -36,7 +35,7 @@ graph TD
     
     REV -->|delegates to| QA
     
-    QA -.->|shared service<br/>anyone can delegate| QA
+    QA -.->|shared service<br/>any role| QA
     
     classDef human fill:#FFD700,stroke:#333,color:#000
     classDef active fill:#4CAF50,stroke:#333,color:#fff
@@ -51,40 +50,39 @@ graph TD
 
 ## What each arrow means
 
-| From | To | Example |
-|------|----|---------|
-| CTO | Staff | "necesito dark mode" |
-| CTO | PM | "cuál es la prioridad de X?" |
-| Staff | PM | "escribime la spec de esto" |
-| Staff | Tech Lead | "descomponé esta spec en tasks" |
-| Staff | Reviewer | "revisá este PR" |
-| PM | UX Designer | "diseñá el flujo de onboarding" |
-| UX | UI Designer | "creá los componentes visuales" |
-| Tech Lead | Sr. Dev FE | "implementá el componente X" |
-| Tech Lead | Sr. Dev BE | "implementá el endpoint Y" |
-| Cualquiera | QA/Docs | "escribime tests para esto" |
+| From | To | Why |
+|------|----|-----|
+| CTO | Staff | Technical direction |
+| CTO | PM | Product decisions |
+| **Staff** | **PM** | Write product specs |
+| **Staff** | **Architect** | System architecture, ADRs |
+| **Staff** | **Reviewer** | Independent code review |
+| PM | UX Designer | User flows, IA |
+| UX | UI Designer | Components, tokens |
+| **Architect** | **Tech Lead** | Per-feature specs, task decomposition |
+| **Tech Lead** | **Sr. Dev FE/BE/Data** | Implementation (THE ONLY ROLE that can) |
+| Tech Lead | QA/Docs | Tests, changelog |
+| Reviewer | QA/Docs | Tests, docs |
+| Anyone | QA/Docs | Shared service |
 
-## What each role reviews
+## Who reviews whom (review chain)
 
 ```mermaid
 graph LR
-    CTO -->|approves merge| STAFF
+    CTO -->|merge approval| STAFF
     
-    PM -->|reviews| UX
-    UX -->|reviews| UI
+    PM -->|product review| UX
+    UX -->|design review| UI
     
-    STAFF -->|reviews| ARCH
-    ARCH -->|reviews| TL
-    TL -->|reviews| FE
-    TL -->|reviews| BE
-    TL -->|reviews| DATA
+    STAFF -->|strategic review| ARCH
+    ARCH -->|architecture review| TL
     
-    STAFF -->|reviews| REV
-    REV -->|reviews| QA
+    TL -->|code review - ALWAYS| FE
+    TL -->|code review - ALWAYS| BE
+    TL -->|code review - ALWAYS| DATA
     
-    FE -->|reviews| QA
-    BE -->|reviews| QA
-    DATA -->|reviews| QA
+    TL -->|hands off to| REV
+    REV -->|spec compliance| QA
     
     classDef human fill:#FFD700,stroke:#333,color:#000
     classDef active fill:#4CAF50,stroke:#333,color:#fff
@@ -92,7 +90,18 @@ graph LR
     class STAFF,PM active
 ```
 
-## Full pipeline example: "Add dark mode"
+## Critical rules
+
+| # | Rule | Why |
+|---|------|-----|
+| 1 | **Only Tech Lead delegates to Sr. Devs** | Architect is strategic, Tech Lead is tactical |
+| 2 | **Every line of code passes through Tech Lead** | Code review is Tech Lead's job, not Staff's |
+| 3 | **Staff never reviews code** | Staff is managerial — verifies process, not implementation |
+| 4 | **Architect sits between Staff and Tech Lead** | Cross-cutting decisions before tactical decomposition |
+| 5 | **Reviewer is independent** | Second pair of eyes, different from Tech Lead |
+| 6 | **Expensive models (pro) never do cheap work** | Staff, PM, Architect delegate. Sr. Devs execute. |
+
+## Full pipeline: "Add dark mode"
 
 ```mermaid
 sequenceDiagram
@@ -101,50 +110,55 @@ sequenceDiagram
     participant PM
     participant UX
     participant UI
-    participant TechLead
-    participant SrDev
-    participant Reviewer
+    participant Arch as Architect
+    participant TL as Tech Lead
+    participant SD as Sr. Dev
+    participant Rev as Reviewer
     participant QA
     
     CTO->>Staff: add dark mode to settings
     
-    Note over Staff: Staff delegates to PM
-    Staff->>PM: spec: dark mode toggle
+    Staff->>PM: write product spec
     PM-->>Staff: spec: 8 criteria
     
-    Note over Staff: Staff delegates to UX
-    Staff->>UX: design flow for dark mode
-    UX->>UI: design dark tokens + components
-    UI-->>UX: tokens + component specs
+    Staff->>UX: design user flow
+    UX->>UI: design tokens + components
+    UI-->>UX: component specs
     UX-->>Staff: UX handoff
     
-    Note over Staff: Staff delegates to Tech Lead
-    Staff->>TechLead: decompose into tasks
-    TechLead-->>Staff: 3 tasks for sr-dev-fe
+    Staff->>Arch: define dark mode architecture
+    Arch->>TL: decompose into implementation tasks
+    TL-->>Arch: 3 atomic tasks
+    Arch-->>Staff: architecture + tasks approved
     
-    Note over Staff: Staff delegates to Sr. Dev
-    Staff->>SrDev: implement task 1
-    SrDev-->>Staff: code committed
+    Staff->>TL: implement task 1
+    TL->>SD: implement SettingsCard dark mode
+    SD-->>TL: code committed, tests pass
     
-    Note over Staff: Staff delegates to Reviewer
-    Staff->>Reviewer: review spec compliance
-    Reviewer-->>Staff: APPROVED
+    TL->>TL: code review
+    TL-->>Staff: code approved
     
-    Note over Staff: Staff delegates to QA
+    Staff->>Rev: independent review
+    Rev-->>Staff: APPROVED
+    
     Staff->>QA: write tests + changelog
-    QA-->>Staff: tests pass, changelog updated
+    QA-->>Staff: done
     
-    Note over Staff: Staff verifies 7-step checklist
+    Staff->>Staff: 7-step verification
     Staff->>CTO: ready to land
 ```
 
-## Rules that CANNOT be broken (enforced mechanically)
+## What each role costs and why delegation matters
 
-| Rule | How enforced |
-|------|-------------|
-| Staff never writes Go code | pre-commit hook |
-| PM never writes Go code | pre-commit hook |
-| Staff never delegates to Sr. Dev directly | delegation validation in `mill delegate --role` |
-| PM never delegates to Sr. Dev directly | delegation validation |
-| No role can change `.mill/role` except to staff/pm | role-enforce hook |
-| QA/Docs accepts delegation from anyone | no delegation validation for qa-docs |
+| Role | Model | Cost | Should NEVER |
+|------|-------|------|-------------|
+| Staff | deepseek-v4-pro | $0.36/session | Write code, review code, write specs |
+| PM | deepseek-v4-pro | $0.36/session | Write code, design UI, touch architecture |
+| Architect | deepseek-v4-pro | $0.36/session | Review individual PRs, implement |
+| Tech Lead | deepseek-v4-pro | $0.36/session | Write production code |
+| Reviewer | deepseek-v4-pro | $0.36/session | Fix code, design architecture |
+| UX/UI | deepseek-v4-pro | $0.36/session | Write code |
+| Sr. Devs | laguna-free | $0.00/session | Decide architecture, skip review |
+| QA/Docs | laguna-free | $0.00/session | Decide scope, skip tests |
+
+**Principle:** expensive model = decisions. Cheap model = execution. Staff is the most expensive — every token spent on implementation is waste.

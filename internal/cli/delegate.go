@@ -56,6 +56,25 @@ func (a *App) runDelegate(args []string) error {
 		return err
 	}
 
+	// Read issue body and labels from GitHub
+	issueBody, labels, err := a.IssueReader(issueNum)
+	if err != nil {
+		return fmt.Errorf("failed to read issue #%d: %w", issueNum, err)
+	}
+	stageLabel := issue.StageLabel(labels)
+	if stageLabel != "" {
+		// Warn if multiple stage:* labels exist
+		count := 0
+		for _, l := range labels {
+			if strings.HasPrefix(l, "stage:") {
+				count++
+			}
+		}
+		if count > 1 {
+			fmt.Fprintf(a.Err, "warning: multiple stage:* labels on issue #%d, using %q\n", issueNum, stageLabel)
+		}
+	}
+
 	// Determine active role from .mill/role (defaults to "staff")
 	activeRole := a.readActiveRole()
 
@@ -76,9 +95,9 @@ func (a *App) runDelegate(args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Resolve model from role frontmatter if no --model flag
+	// Resolve model from stage label, role frontmatter, or config
 	if model == "" {
-		model = a.resolveModel(targetRole, cfg)
+		model = a.resolveModel(targetRole, stageLabel, cfg)
 	}
 
 	// Create task and persist initial state
@@ -121,8 +140,8 @@ func (a *App) runDelegate(args []string) error {
 		fmt.Fprintf(a.Err, "warning: failed to install hooks: %v\n", err)
 	}
 
-	// Build role-aware prompt and dispatch opts
-	prompt := buildRolePrompt(issueNum, targetRole)
+	// Build role-aware prompt with issue body
+	prompt := buildRolePrompt(issueNum, targetRole, issueBody)
 	opts := adapter.DispatchOpts{
 		Worktree: a.worktreePath(issueNum),
 		Prompt:   prompt,
@@ -132,75 +151,148 @@ func (a *App) runDelegate(args []string) error {
 	}
 
 	if wait {
-		return a.runDispatchLoop(issueNum, taskID, opts)
+		return a.runDispatchLoop(issueNum, taskID, opts, issueBody, labels, cfg)
 	}
 
 	// Async: fire and forget. Agent runs in background goroutine.
-	go a.runDispatchLoop(issueNum, taskID, opts)
+	go a.runDispatchLoop(issueNum, taskID, opts, issueBody, labels, cfg)
 	fmt.Fprintf(a.Out, "Delegated issue %d — task %s (async)\n", issueNum, taskID)
 	return nil
 }
 
-// runDispatchLoop dispatches an agent, waits for completion, classifies the
-// result, retries on transient failures, and persists final state.
-func (a *App) runDispatchLoop(issueNum int, taskID string, opts adapter.DispatchOpts) error {
-	const maxRetries = 3
-	var classification domain.Classification
-	var result adapter.SessionResult
+// runDispatchLoop runs the produce→review cycle for a delegated issue.
+// Each round: produce phase (cheap model) → review phase (expensive model).
+// Exits on APPROVED, BLOCKED/FATAL/AUTH/NO_CREDIT/RATE_LIMITED, or after MaxRounds.
+// Persists state after each round so `mill watch` can observe progress.
+func (a *App) runDispatchLoop(issueNum int, taskID string, opts adapter.DispatchOpts, issueBody string, labels []string, cfg config.Config) error {
+	var finalClassification domain.Classification
+	var finalCommits int
 
 	s, err := state.Load(a.statePath())
 	if err != nil {
 		return fmt.Errorf("failed to load state: %w", err)
 	}
-	task := domain.NewTask(taskID, issueNum)
+	task, ok := s.Task(taskID)
+	if !ok {
+		task = domain.NewTask(taskID, issueNum)
+	}
 
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		session, err := a.Adapter.Dispatch(opts)
+	// Stage label determines produce model
+	stageLabel := issue.StageLabel(labels)
+	produceModel := a.resolveModel("", stageLabel, cfg)
+	if stageLabel == "" {
+		// No stage label: use the original model from opts
+		produceModel = opts.Model
+	}
+	reviewModel := "laguna-pro"
+
+	maxRounds := cfg.MaxRounds
+	if maxRounds <= 0 {
+		maxRounds = 4
+	}
+
+	for round := range maxRounds {
+		task.Round = round
+
+		// --- Produce phase ---
+		produceOpts := opts
+		produceOpts.Model = produceModel
+		session, err := a.Adapter.Dispatch(produceOpts)
 		if err != nil {
-			a.recordError(s, issueNum, task, err, "failed to dispatch agent")
-			return fmt.Errorf("failed to dispatch agent: %w", err)
+			a.recordError(s, issueNum, task, err, "failed to dispatch produce agent")
+			return fmt.Errorf("failed to dispatch produce agent: %w", err)
 		}
 
-		result, err = session.Wait()
+		produceResult, err := session.Wait()
 		if err != nil {
-			a.recordError(s, issueNum, task, err, "agent session failed")
-			return fmt.Errorf("agent session failed: %w", err)
+			a.recordError(s, issueNum, task, err, "produce agent session failed")
+			return fmt.Errorf("produce agent session failed: %w", err)
 		}
-		classification = classifyResult(result.ExitCode, result.Stderr)
+		finalCommits = produceResult.Commits
 
-		classifyEntry := ledger.Entry{
+		// --- Review phase ---
+		reviewPrompt := buildReviewPrompt(issueNum, issueBody, produceResult.Output)
+		reviewOpts := adapter.DispatchOpts{
+			Worktree: opts.Worktree,
+			Prompt:   reviewPrompt,
+			Model:    reviewModel,
+			MaxTurns: opts.MaxTurns,
+			Budget:   opts.Budget,
+		}
+		reviewSession, err := a.Adapter.Dispatch(reviewOpts)
+		if err != nil {
+			a.recordError(s, issueNum, task, err, "failed to dispatch review agent")
+			return fmt.Errorf("failed to dispatch review agent: %w", err)
+		}
+
+		reviewResult, err := reviewSession.Wait()
+		if err != nil {
+			a.recordError(s, issueNum, task, err, "review agent session failed")
+			return fmt.Errorf("review agent session failed: %w", err)
+		}
+
+		finalClassification = classifyResult(reviewResult.ExitCode, reviewResult.Stderr)
+
+		// Append review ledger entry with round number
+		reviewEntry := ledger.Entry{
 			Timestamp:      time.Now().UTC(),
 			Issue:          issueNum,
-			Event:          "classify",
+			Event:          "review",
 			Status:         string(domain.TaskRunning),
-			Classification: string(classification),
+			Classification: string(finalClassification),
+			Round:          round,
 		}
-		if err := ledger.Append(a.ledgerPath(issueNum), classifyEntry); err != nil {
+		if err := ledger.Append(a.ledgerPath(issueNum), reviewEntry); err != nil {
 			return fmt.Errorf("failed to append ledger entry: %w", err)
 		}
 
-		switch classification {
-		case domain.ClassificationRateLimited, domain.ClassificationTransient:
-			if attempt < maxRetries {
-				time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
-				continue
-			}
-		case domain.ClassificationFatal:
-			if attempt < maxRetries {
-				continue
-			}
+		// Persist state after each round
+		task.UpdatedAt = time.Now().UTC()
+		s.UpsertTask(task)
+		if err := s.Save(a.statePath()); err != nil {
+			return fmt.Errorf("failed to save state: %w", err)
 		}
-		break
+
+		// Decide next action based on classification
+		switch finalClassification {
+		case domain.ClassificationOK:
+			// Approved — exit loop
+			goto finish
+
+		case domain.ClassificationBlocked,
+			domain.ClassificationAuth,
+			domain.ClassificationNoCredit,
+			domain.ClassificationRateLimited,
+			domain.ClassificationFatal:
+			// Non-recoverable — exit immediately
+			goto finish
+
+		case domain.ClassificationMaxTurns:
+			// Changes requested — continue to next round
+			continue
+
+		default:
+			// Transient or unknown — continue to next round
+			continue
+		}
 	}
 
+	// Max rounds exhausted
+finish:
 	taskStatus := domain.TaskDone
 	verdict := domain.VerdictApproved
-	if classification != domain.ClassificationOK && classification != domain.ClassificationMaxTurns {
+
+	switch finalClassification {
+	case domain.ClassificationOK:
+		verdict = domain.VerdictApproved
+	case domain.ClassificationMaxTurns:
+		verdict = domain.VerdictChanges
+	default:
 		taskStatus = domain.TaskError
 		verdict = domain.VerdictRejected
 	}
-	task.UpdateStatus(taskStatus, verdict, result.Commits)
 
+	task.UpdateStatus(taskStatus, verdict, finalCommits)
 	s.UpsertTask(task)
 	if err := s.Save(a.statePath()); err != nil {
 		return fmt.Errorf("failed to save state: %w", err)
@@ -212,7 +304,8 @@ func (a *App) runDispatchLoop(issueNum int, taskID string, opts adapter.Dispatch
 		Event:          "complete",
 		Status:         string(taskStatus),
 		Verdict:        string(verdict),
-		Classification: string(classification),
+		Classification: string(finalClassification),
+		Round:          task.Round,
 	}
 	if err := ledger.Append(a.ledgerPath(issueNum), completeEntry); err != nil {
 		return fmt.Errorf("failed to append ledger entry: %w", err)

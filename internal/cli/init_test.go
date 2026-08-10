@@ -312,3 +312,242 @@ func TestRunInitCustomNameFlag(t *testing.T) {
 		t.Error("expected mill.yml to contain 'project: testproj'")
 	}
 }
+
+func TestInitOverwriteInteractiveReject(t *testing.T) {
+	dir := t.TempDir()
+	// Create .mill/ directory at target (simulating existing project).
+	millDir := filepath.Join(dir, ".mill")
+	if err := os.MkdirAll(millDir, 0o755); err != nil {
+		t.Fatalf("failed to create .mill/: %v", err)
+	}
+	// Add a file so we can verify it is NOT clobbered.
+	keepFile := filepath.Join(millDir, "keep-me.txt")
+	if err := os.WriteFile(keepFile, []byte("do not overwrite"), 0o644); err != nil {
+		t.Fatalf("failed to create keep-me.txt: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf, In: strings.NewReader("n\n")}
+
+	err := app.Run("init", "-yes", "-target", dir)
+	if err == nil {
+		t.Error("expected error when rejecting overwrite")
+	}
+	if !strings.Contains(err.Error(), "aborted") {
+		t.Errorf("expected error to contain 'aborted', got: %v", err)
+	}
+
+	// Verify .mill/ contents were NOT modified.
+	content, err := os.ReadFile(keepFile)
+	if err != nil {
+		t.Fatalf("expected keep-me.txt to still exist: %v", err)
+	}
+	if string(content) != "do not overwrite" {
+		t.Errorf("expected keep-me.txt to be unchanged, got: %q", string(content))
+	}
+}
+
+func TestInitOverwriteInteractiveAccept(t *testing.T) {
+	dir := t.TempDir()
+	millDir := filepath.Join(dir, ".mill")
+	if err := os.MkdirAll(millDir, 0o755); err != nil {
+		t.Fatalf("failed to create .mill/: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf, In: strings.NewReader("y\n\n\n\n\n")}
+
+	err := app.Run("init", "-target", dir)
+	if err != nil {
+		t.Fatalf("expected init to succeed after accepting overwrite, got: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "mill.yml")); os.IsNotExist(err) {
+		t.Error("expected mill.yml to be created after accepting overwrite")
+	}
+}
+
+func TestInitOverwriteInteractiveAcceptYes(t *testing.T) {
+	dir := t.TempDir()
+	millDir := filepath.Join(dir, ".mill")
+	if err := os.MkdirAll(millDir, 0o755); err != nil {
+		t.Fatalf("failed to create .mill/: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf, In: strings.NewReader("yes\n\n\n\n\n")}
+
+	err := app.Run("init", "-target", dir)
+	if err != nil {
+		t.Fatalf("expected init to succeed with 'yes' response, got: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "mill.yml")); os.IsNotExist(err) {
+		t.Error("expected mill.yml to be created after accepting overwrite with 'yes'")
+	}
+}
+
+func TestInitOverwriteInteractiveCaseInsensitive(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"uppercase Y", "Y\n\n\n\n\n"},
+		{"uppercase YES", "YES\n\n\n\n\n"},
+		{"mixed Yes", "Yes\n\n\n\n\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			millDir := filepath.Join(dir, ".mill")
+			if err := os.MkdirAll(millDir, 0o755); err != nil {
+				t.Fatalf("failed to create .mill/: %v", err)
+			}
+
+			buf := new(bytes.Buffer)
+			app := &App{MillDir: dir, Out: buf, Err: buf, In: strings.NewReader(tt.input)}
+
+			err := app.Run("init", "-target", dir)
+			if err != nil {
+				t.Fatalf("expected init to succeed with %q response, got: %v", tt.input, err)
+			}
+
+			if _, err := os.Stat(filepath.Join(dir, "mill.yml")); os.IsNotExist(err) {
+				t.Error("expected mill.yml to be created")
+			}
+		})
+	}
+}
+
+func TestInitOverwriteForceBypass(t *testing.T) {
+	dir := t.TempDir()
+	millDir := filepath.Join(dir, ".mill")
+	if err := os.MkdirAll(millDir, 0o755); err != nil {
+		t.Fatalf("failed to create .mill/: %v", err)
+	}
+	// Create a known file inside .mill/ to verify overwrite happens.
+	markerFile := filepath.Join(millDir, "marker.txt")
+	if err := os.WriteFile(markerFile, []byte("old"), 0o644); err != nil {
+		t.Fatalf("failed to create marker.txt: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf, In: strings.NewReader("")}
+
+	err := app.Run("init", "--force", "--yes", "-target", dir)
+	if err != nil {
+		t.Fatalf("expected init --force --yes to succeed, got: %v", err)
+	}
+
+	// Verify no overwrite prompt was shown.
+	output := buf.String()
+	if strings.Contains(output, "Overwrite?") {
+		t.Error("expected no 'Overwrite?' prompt with --force flag")
+	}
+
+	// Verify init completed.
+	if _, err := os.Stat(filepath.Join(dir, "mill.yml")); os.IsNotExist(err) {
+		t.Error("expected mill.yml to be created")
+	}
+}
+
+func TestInitOverwriteForceWithoutYes(t *testing.T) {
+	dir := t.TempDir()
+	millDir := filepath.Join(dir, ".mill")
+	if err := os.MkdirAll(millDir, 0o755); err != nil {
+		t.Fatalf("failed to create .mill/: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	// Empty stdin — prompt returns defaults on EOF, so init should succeed
+	// but the overwrite prompt must NOT appear.
+	app := &App{MillDir: dir, Out: buf, Err: buf, In: strings.NewReader("")}
+
+	err := app.Run("init", "--force", "-target", dir)
+	if err != nil {
+		t.Fatalf("expected init --force to succeed (prompts use defaults on EOF), got: %v", err)
+	}
+
+	output := buf.String()
+	if strings.Contains(output, "Overwrite?") {
+		t.Error("expected no 'Overwrite?' prompt with --force flag")
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "mill.yml")); os.IsNotExist(err) {
+		t.Error("expected mill.yml to be created")
+	}
+}
+
+func TestInitOverwriteNoMillDir(t *testing.T) {
+	dir := t.TempDir()
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf, In: strings.NewReader("")}
+
+	err := app.Run("init", "-yes", "-target", dir)
+	if err != nil {
+		t.Fatalf("expected init to succeed in clean dir, got: %v", err)
+	}
+
+	output := buf.String()
+	if strings.Contains(output, "Overwrite?") {
+		t.Error("expected no 'Overwrite?' prompt when .mill/ does not exist")
+	}
+
+	millInfo, err := os.Stat(filepath.Join(dir, ".mill"))
+	if err != nil {
+		t.Fatalf("expected .mill/ to exist after init: %v", err)
+	}
+	if !millInfo.IsDir() {
+		t.Error("expected .mill/ to be a directory")
+	}
+}
+
+func TestInitOverwriteMillDirIsFile(t *testing.T) {
+	dir := t.TempDir()
+	// Create .mill as a regular file, not a directory.
+	millPath := filepath.Join(dir, ".mill")
+	if err := os.WriteFile(millPath, []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("failed to create .mill as file: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf, In: strings.NewReader("")}
+
+	err := app.Run("init", "-yes", "-target", dir)
+	if err == nil {
+		t.Error("expected error when .mill is a file, not a directory")
+	}
+	if !strings.Contains(err.Error(), "file, not a directory") {
+		t.Errorf("expected error to mention 'file, not a directory', got: %v", err)
+	}
+}
+
+func TestInitOverwriteForceYesSkipsAllPrompts(t *testing.T) {
+	dir := t.TempDir()
+	millDir := filepath.Join(dir, ".mill")
+	if err := os.MkdirAll(millDir, 0o755); err != nil {
+		t.Fatalf("failed to create .mill/: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf, In: strings.NewReader("")}
+
+	err := app.Run("init", "--force", "--yes", "-name", "testproj", "-target", dir)
+	if err != nil {
+		t.Fatalf("expected init --force --yes -name to succeed, got: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "mill.yml"))
+	if err != nil {
+		t.Fatalf("expected mill.yml to be created: %v", err)
+	}
+	if !strings.Contains(string(content), "project: testproj") {
+		t.Error("expected mill.yml to contain 'project: testproj'")
+	}
+
+	output := buf.String()
+	if strings.Contains(output, "Overwrite?") {
+		t.Error("expected no 'Overwrite?' prompt with --force flag")
+	}
+}

@@ -12,10 +12,10 @@ import (
 	"testing"
 )
 
-// fakeAdapter implements adapter.Adapter for CLI testing.
 type fakeAdapter struct {
 	dispatched  bool
 	opts        adapter.DispatchOpts
+	allOpts     []adapter.DispatchOpts
 	result      adapter.SessionResult
 	dispatchErr error
 }
@@ -23,6 +23,7 @@ type fakeAdapter struct {
 func (f *fakeAdapter) Dispatch(opts adapter.DispatchOpts) (adapter.Session, error) {
 	f.dispatched = true
 	f.opts = opts
+	f.allOpts = append(f.allOpts, opts)
 	if f.dispatchErr != nil {
 		return nil, f.dispatchErr
 	}
@@ -47,6 +48,11 @@ func (s *fakeSession) Wait() (adapter.SessionResult, error) {
 	return s.result, nil
 }
 
+// defaultIssueReader returns a stub issue body and empty labels for testing.
+func defaultIssueReader(issueNum int) (string, []string, error) {
+	return "Test issue body content", nil, nil
+}
+
 func TestDelegateValidIssueDispatchesAndRecords(t *testing.T) {
 	dir := t.TempDir()
 	fa := &fakeAdapter{
@@ -57,7 +63,7 @@ func TestDelegateValidIssueDispatchesAndRecords(t *testing.T) {
 		},
 	}
 	buf := new(bytes.Buffer)
-	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
+	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 
 	err := app.Run("delegate", "--wait", "390")
 	if err != nil {
@@ -68,19 +74,24 @@ func TestDelegateValidIssueDispatchesAndRecords(t *testing.T) {
 	if !fa.dispatched {
 		t.Error("expected adapter Dispatch to be called")
 	}
-	if fa.opts.Prompt == "" {
-		t.Error("expected non-empty prompt")
+	if len(fa.allOpts) < 2 {
+		t.Fatalf("expected at least 2 dispatches (produce + review), got %d", len(fa.allOpts))
 	}
-	if fa.opts.Model == "" {
-		t.Error("expected model to be set")
+	// Produce prompt should be non-empty
+	if fa.allOpts[0].Prompt == "" {
+		t.Error("expected non-empty produce prompt")
 	}
-	if fa.opts.MaxTurns != 100 {
-		t.Errorf("expected max turns 100, got %d", fa.opts.MaxTurns)
+	// Review model should be laguna-pro
+	if fa.allOpts[1].Model != "laguna-pro" {
+		t.Errorf("expected review model laguna-pro, got %q", fa.allOpts[1].Model)
+	}
+	if fa.allOpts[0].MaxTurns != 100 {
+		t.Errorf("expected max turns 100, got %d", fa.allOpts[0].MaxTurns)
 	}
 
 	// Verify worktree path includes the issue number
-	if !strings.Contains(fa.opts.Worktree, "issue-390") {
-		t.Errorf("expected worktree to contain issue-390, got %q", fa.opts.Worktree)
+	if !strings.Contains(fa.allOpts[0].Worktree, "issue-390") {
+		t.Errorf("expected worktree to contain issue-390, got %q", fa.allOpts[0].Worktree)
 	}
 
 	// Verify state
@@ -101,6 +112,9 @@ func TestDelegateValidIssueDispatchesAndRecords(t *testing.T) {
 	}
 	if task.Commits != 2 {
 		t.Errorf("expected commits 2, got %d", task.Commits)
+	}
+	if task.Round != 0 {
+		t.Errorf("expected round 0, got %d", task.Round)
 	}
 
 	// Verify started/updated timestamps
@@ -138,7 +152,7 @@ func TestDelegateExitCodeErrorSetsTaskError(t *testing.T) {
 		},
 	}
 	buf := new(bytes.Buffer)
-	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
+	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 
 	err := app.Run("delegate", "--wait", "42")
 	if err != nil {
@@ -165,7 +179,7 @@ func TestDelegateCreatesLedgerEntry(t *testing.T) {
 		},
 	}
 	buf := new(bytes.Buffer)
-	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
+	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 
 	err := app.Run("delegate", "--wait", "7")
 	if err != nil {
@@ -191,9 +205,9 @@ func TestDelegateCreatesLedgerEntry(t *testing.T) {
 	if !strings.Contains(lines[0], "dispatch") {
 		t.Errorf("expected first entry to be dispatch, got: %s", lines[0])
 	}
-	// Second entry: classify
-	if !strings.Contains(lines[1], "classify") {
-		t.Errorf("expected second entry to be classify, got: %s", lines[1])
+	// Second entry: review
+	if !strings.Contains(lines[1], "review") {
+		t.Errorf("expected second entry to be review, got: %s", lines[1])
 	}
 	// Third entry: complete
 	if !strings.Contains(lines[2], "complete") {
@@ -207,7 +221,7 @@ func TestDelegateDispatchErrorRecordsError(t *testing.T) {
 		dispatchErr: assertError("binary not found"),
 	}
 	buf := new(bytes.Buffer)
-	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
+	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 
 	err := app.Run("delegate", "--wait", "99")
 	if err == nil {
@@ -234,15 +248,20 @@ func TestDelegateModelFlagOverridesConfig(t *testing.T) {
 		},
 	}
 	buf := new(bytes.Buffer)
-	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
+	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 
 	err := app.Run("delegate", "--wait", "-model", "deepseek-v4-pro", "555")
 	if err != nil {
 		t.Fatalf("delegate returned error: %v", err)
 	}
 
-	if fa.opts.Model != "deepseek-v4-pro" {
-		t.Errorf("expected model %q, got %q", "deepseek-v4-pro", fa.opts.Model)
+	// Produce dispatch uses user-specified model
+	if fa.allOpts[0].Model != "deepseek-v4-pro" {
+		t.Errorf("expected produce model %q, got %q", "deepseek-v4-pro", fa.allOpts[0].Model)
+	}
+	// Review dispatch uses laguna-pro
+	if fa.allOpts[1].Model != "laguna-pro" {
+		t.Errorf("expected review model %q, got %q", "laguna-pro", fa.allOpts[1].Model)
 	}
 }
 
@@ -308,7 +327,7 @@ func TestDelegateStaffToSrDevRejected(t *testing.T) {
 
 	fa := &fakeAdapter{}
 	buf := new(bytes.Buffer)
-	app := &App{Adapter: fa, MillDir: filepath.Join(dir, ".mill"), Out: buf, Err: buf}
+	app := &App{Adapter: fa, MillDir: filepath.Join(dir, ".mill"), Out: buf, Err: buf, IssueReader: defaultIssueReader}
 
 	err := app.Run("delegate", "41", "--role", "sr-dev-be")
 	if err == nil {
@@ -340,7 +359,7 @@ func TestDelegateStaffToArchitectAccepted(t *testing.T) {
 		},
 	}
 	buf := new(bytes.Buffer)
-	app := &App{Adapter: fa, MillDir: filepath.Join(dir, ".mill"), Out: buf, Err: buf}
+	app := &App{Adapter: fa, MillDir: filepath.Join(dir, ".mill"), Out: buf, Err: buf, IssueReader: defaultIssueReader}
 
 	err := app.Run("delegate", "--wait", "390", "--role", "architect")
 	if err != nil {
@@ -362,7 +381,7 @@ func TestDelegateNoRoleUsesActiveRole(t *testing.T) {
 		},
 	}
 	buf := new(bytes.Buffer)
-	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
+	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 
 	err := app.Run("delegate", "--wait", "1")
 	if err != nil {
@@ -383,7 +402,7 @@ func TestDelegateScaffoldsWorktree(t *testing.T) {
 		},
 	}
 	buf := new(bytes.Buffer)
-	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
+	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 
 	err := app.Run("delegate", "--wait", "7")
 	if err != nil {
@@ -436,6 +455,8 @@ func TestClassifyResultExitCodes(t *testing.T) {
 		{name: "stderr 401 signals AUTH", code: 1, stderr: "401 Unauthorized", want: domain.ClassificationAuth},
 		{name: "stderr insufficient credits signals NO_CREDIT", code: 1, stderr: "insufficient credits", want: domain.ClassificationNoCredit},
 		{name: "stderr timeout signals TRANSIENT", code: 1, stderr: "network timeout", want: domain.ClassificationTransient},
+		{name: "stderr approved: signal", code: 1, stderr: "APPROVED: all good", want: domain.ClassificationOK},
+		{name: "stderr changes_requested: signal", code: 0, stderr: "CHANGES_REQUESTED: needs work", want: domain.ClassificationMaxTurns},
 	}
 
 	for _, tt := range tests {
@@ -468,7 +489,7 @@ func TestDelegateBlockedExitCodeSetsTaskError(t *testing.T) {
 				},
 			}
 			buf := new(bytes.Buffer)
-			app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
+			app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 
 			err := app.Run("delegate", "--wait", "53")
 			if err != nil {
@@ -506,7 +527,7 @@ func TestResolveModelMissingRoleFile(t *testing.T) {
 
 	app := &App{MillDir: dir}
 	cfg := config.Config{Model: "laguna-free"}
-	got := app.resolveModel("sr-dev-be", cfg)
+	got := app.resolveModel("sr-dev-be", "", cfg)
 	if got != "laguna-free" {
 		t.Errorf("expected fallback to config model, got %q", got)
 	}
@@ -524,7 +545,7 @@ func TestResolveModelEmptyModelTier(t *testing.T) {
 
 	app := &App{MillDir: dir}
 	cfg := config.Config{Model: "laguna-free"}
-	got := app.resolveModel("sr-dev-be", cfg)
+	got := app.resolveModel("sr-dev-be", "", cfg)
 	if got != "laguna-free" {
 		t.Errorf("expected fallback to config model for empty tier, got %q", got)
 	}
@@ -542,10 +563,37 @@ func TestResolveModelKnownTier(t *testing.T) {
 
 	app := &App{MillDir: dir}
 	cfg := config.Config{Model: "laguna-free"}
-	got := app.resolveModel("sr-dev-be", cfg)
+	got := app.resolveModel("sr-dev-be", "", cfg)
 	// paid maps to deepseek/deepseek-v4-pro in modelTier
 	if got != "deepseek/deepseek-v4-pro" {
 		t.Errorf("expected modelTier mapping for 'paid', got %q", got)
+	}
+}
+
+func TestResolveModelStageLabelProduce(t *testing.T) {
+	app := &App{MillDir: "."}
+	cfg := config.Config{Model: "laguna-free"}
+	got := app.resolveModel("sr-dev-be", "stage:produce", cfg)
+	if got != "laguna-free" {
+		t.Errorf("expected stage:produce → laguna-free, got %q", got)
+	}
+}
+
+func TestResolveModelStageLabelReview(t *testing.T) {
+	app := &App{MillDir: "."}
+	cfg := config.Config{Model: "laguna-free"}
+	got := app.resolveModel("sr-dev-be", "stage:review", cfg)
+	if got != "laguna-pro" {
+		t.Errorf("expected stage:review → laguna-pro, got %q", got)
+	}
+}
+
+func TestResolveModelStageLabelImplement(t *testing.T) {
+	app := &App{MillDir: "."}
+	cfg := config.Config{Model: "laguna-free"}
+	got := app.resolveModel("sr-dev-be", "stage:implement", cfg)
+	if got != "laguna-free" {
+		t.Errorf("expected stage:implement → laguna-free, got %q", got)
 	}
 }
 
@@ -561,7 +609,7 @@ func TestBuildRolePromptWithSkills(t *testing.T) {
 	os.Chdir(dir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	result := buildRolePrompt(1, "sr-dev-be")
+	result := buildRolePrompt(1, "sr-dev-be", "")
 	if !strings.Contains(result, "tdd") {
 		t.Error("expected output to contain 'tdd'")
 	}
@@ -582,12 +630,22 @@ func TestBuildRolePromptNoSkills(t *testing.T) {
 	os.Chdir(dir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	result := buildRolePrompt(1, "sr-dev-be")
+	result := buildRolePrompt(1, "sr-dev-be", "")
 	if !strings.Contains(result, "1") {
 		t.Error("expected output to contain issue number '1'")
 	}
 	if !strings.Contains(result, "sr-dev-be") {
 		t.Error("expected output to contain role name 'sr-dev-be'")
+	}
+}
+
+func TestBuildRolePromptWithBody(t *testing.T) {
+	result := buildRolePrompt(42, "sr-dev-be", "Fix the login button")
+	if !strings.Contains(result, "**Issue Body:**") {
+		t.Error("expected prompt to contain Issue Body section")
+	}
+	if !strings.Contains(result, "Fix the login button") {
+		t.Error("expected prompt to contain the issue body text")
 	}
 }
 
@@ -601,5 +659,24 @@ func TestReadActiveRoleError(t *testing.T) {
 	got := app.readActiveRole()
 	if got != "staff" {
 		t.Errorf("expected fallback to 'staff', got %q", got)
+	}
+}
+
+func TestBuildReviewPrompt(t *testing.T) {
+	result := buildReviewPrompt(42, "Fix the login", "PATCH: done")
+	if !strings.Contains(result, "APPROVED:") {
+		t.Error("expected review prompt to mention APPROVED:")
+	}
+	if !strings.Contains(result, "CHANGES_REQUESTED:") {
+		t.Error("expected review prompt to mention CHANGES_REQUESTED:")
+	}
+	if !strings.Contains(result, "BLOCKED:") {
+		t.Error("expected review prompt to mention BLOCKED:")
+	}
+	if !strings.Contains(result, "Fix the login") {
+		t.Error("expected review prompt to contain issue body")
+	}
+	if !strings.Contains(result, "PATCH: done") {
+		t.Error("expected review prompt to contain produce output")
 	}
 }

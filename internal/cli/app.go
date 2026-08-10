@@ -11,25 +11,27 @@ import (
 
 	"github.com/antonygiomarxdev/mill/internal/adapter"
 	"github.com/antonygiomarxdev/mill/internal/config"
+	"github.com/antonygiomarxdev/mill/internal/issue"
 )
 
-// App is the mill CLI application. All paths are relative to MillDir.
 type App struct {
-	Adapter adapter.Adapter
-	MillDir string
-	Out     io.Writer
-	Err     io.Writer
-	In      io.Reader
+	Adapter     adapter.Adapter
+	MillDir     string
+	Out         io.Writer
+	Err         io.Writer
+	In          io.Reader
+	IssueReader func(issueNum int) (body string, labels []string, err error)
 }
 
 // NewApp creates a new App with defaults: .mill directory, CommandCode adapter,
 // stdout/stderr for output.
 func NewApp() *App {
 	return &App{
-		Adapter: &adapter.CommandCodeAdapter{},
-		MillDir: ".mill",
-		Out:     os.Stdout,
-		Err:     os.Stderr,
+		Adapter:     &adapter.CommandCodeAdapter{},
+		MillDir:     ".mill",
+		Out:         os.Stdout,
+		Err:         os.Stderr,
+		IssueReader: issue.ReadBody,
 	}
 }
 

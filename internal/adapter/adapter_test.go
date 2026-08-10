@@ -17,6 +17,7 @@ type mockSession struct {
 func (m *mockSession) ID() string      { return m.id }
 func (m *mockSession) Status() string  { return m.status }
 func (m *mockSession) Wait() (SessionResult, error) { return m.result, m.err }
+func (m *mockSession) ContextText() (string, error) { return "", nil }
 
 // mockAdapter implements Adapter for testing.
 type mockAdapter struct {

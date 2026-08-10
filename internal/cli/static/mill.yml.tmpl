@@ -12,6 +12,11 @@ max-rounds: {{.MaxRounds}}
 concurrency:
   max-slots: 4   # max simultaneous agent dispatches
 
+# Context compaction — trims old conversation to prevent context-window exhaustion
+compact:
+  enabled: false   # set to true to auto-compact long sessions
+  mode: fast        # compaction strategy (only "fast" currently supported)
+
 # Directory layout for project scaffolding
 directories:
   roles: roles/

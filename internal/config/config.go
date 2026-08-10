@@ -36,6 +36,7 @@ type Config struct {
 	MaxRounds   int               `json:"max_rounds"`
 	Budget      *adapter.Budget   `json:"budget,omitempty"`
 	Compact     *CompactConfig    `json:"compact,omitempty"`
+	ReviewTimeoutSeconds int               `json:"review_timeout_seconds"`
 	Models      map[string]string `json:"models"`
 	Rate        float64           `json:"rate,omitempty"`
 }
@@ -57,6 +58,7 @@ func Default() Config {
 			"paid": "laguna-pro",
 			"pro":  "laguna-ultra",
 		},
+		ReviewTimeoutSeconds: 300,
 		Rate: 0,
 	}
 }

@@ -1,0 +1,39 @@
+{
+  "maps": {
+    "mill-framework": {
+      "destination": "Mill: multi-agent delegation framework v1",
+      "issues": {
+        "28": {"phase": "impl", "status": "review", "next": "Reviewer → SIGN-OFF"},
+        "41": {"phase": "impl", "status": "blocked", "blocked_by": "coverage 85.5% < 90% → RESOLVED: now 93.2%"},
+        "42": {"phase": "tasks", "status": "pending", "next": "Sr Dev → IMPL"},
+        "54": {"phase": "tasks", "status": "pending", "next": "Sr Dev → IMPL"},
+        "55": {"phase": "impl", "status": "review", "next": "Reviewer → SIGN-OFF"},
+        "56": {"phase": "tasks", "status": "pending", "next": "Sr Dev → IMPL"},
+        "57": {"phase": "tasks", "status": "pending", "next": "Sr Dev → IMPL"},
+        "58": {"phase": "tasks", "status": "pending", "next": "Sr Dev → IMPL"},
+        "59": {"phase": "spec", "status": "pending", "next": "PM → FRD"},
+        "60": {"phase": "review", "status": "approved", "next": "Staff → VERIFY"},
+        "61": {"phase": "review", "status": "approved", "next": "Staff → VERIFY"},
+        "62": {"phase": "review", "status": "approved", "next": "Staff → VERIFY"},
+        "63": {"phase": "review", "status": "approved", "next": "Staff → VERIFY"},
+        "64": {"phase": "discussion", "status": "pending", "next": "Convert to Discussion"},
+        "65": {"phase": "spec", "status": "pending", "next": "PM → FRD"},
+        "68": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+        "69": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+        "70": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+        "71": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+        "72": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+        "73": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+        "74": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+        "75": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+        "76": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+        "77": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+        "78": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+        "79": {"phase": "backlog", "status": "pending", "next": "Architect → SPEC"},
+      },
+      "open_questions": [],
+      "next": "Sr Dev IMPL for issues #42,#54-58 (TASKS done); #60-63 approved; #28 in review; #68-79 backlog gaps"
+      "coverage": "93.2%"
+    }
+  }
+}

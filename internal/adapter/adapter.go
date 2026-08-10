@@ -43,6 +43,8 @@ type Session interface {
 	ID() string
 	Status() string
 	Wait() (SessionResult, error)
+	// ContextText returns the full NDJSON session context for compaction.
+	ContextText() (string, error)
 }
 
 // Adapter dispatches agent sessions for a provider.

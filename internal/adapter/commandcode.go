@@ -119,6 +119,11 @@ type liveSession struct {
 func (s *liveSession) ID() string     { return s.id }
 func (s *liveSession) Status() string { return s.status }
 
+// ContextText returns the full NDJSON session context for compaction.
+func (s *liveSession) ContextText() (string, error) {
+	return s.outputBuf.String(), nil
+}
+
 // Wait blocks until the session completes.
 // Zero-value budget fast-paths to cmd.Wait() for backward compatibility.
 // With a budget, it enforces a wall-clock deadline and detects analysis

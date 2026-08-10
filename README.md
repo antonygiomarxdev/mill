@@ -18,18 +18,33 @@ You speak naturally. Mill handles the rest.
 
 ## Quick start
 
-### For a new project
+### Prerequisites
 
-Tell your agent: "let's use Mill." If you're the agent reading this and
-`.omp/AGENTS.md` doesn't exist yet:
+- **Go 1.21+** — [install](https://go.dev/dl/) or `brew install go`
+- **Git** — for worktree isolation
+- **A harness** — omp, claude code, opencode, or GitHub Copilot
+
+### Install
 
 ```bash
 go install github.com/antonygiomarxdev/mill/cmd/mill@latest
+```
+
+If Go is not available, download the binary from
+[releases](https://github.com/antonygiomarxdev/mill/releases).
+
+### Initialize a project
+
+```bash
 mill init
 ```
 
-Reload your session. Mill is active.
+This scaffolds the full project: roles, skills, checks, gates, and context
+files. Then open the project in your harness. The agent discovers
+`.omp/AGENTS.md` and loads the Mill skill automatically.
 
+**You're done.** Start speaking naturally to your agent. It becomes
+[Mill · Staff] or [Mill · PM] and begins delegating.
 ### For an existing Mill project
 
 Just open the project in your harness. The agent discovers `.omp/AGENTS.md`

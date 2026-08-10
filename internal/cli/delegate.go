@@ -392,7 +392,8 @@ func extractFlag(args []string, name string) (string, []string) {
 //
 // If no stderr signal matches, the exit code is mapped:
 // 0 → OK, 3 → AUTH, 4/9/130/137/143 → FATAL, 5 → RATE_LIMITED,
-// 6/7 → TRANSIENT, 8 → MAX_TURNS, 10 → NO_CREDIT, default → FATAL.
+// 6/7 → TRANSIENT, 8 → MAX_TURNS, 10 → NO_CREDIT,
+// -1/-2 → BLOCKED (budget violation), default → FATAL.
 func classifyResult(exitCode int, stderr string) domain.Classification {
 	lower := strings.ToLower(stderr)
 	// Check stderr signals first
@@ -427,6 +428,8 @@ func classifyResult(exitCode int, stderr string) domain.Classification {
 		return domain.ClassificationMaxTurns
 	case 10:
 		return domain.ClassificationNoCredit
+	case -1, -2:
+		return domain.ClassificationBlocked
 	default:
 		return domain.ClassificationFatal
 	}

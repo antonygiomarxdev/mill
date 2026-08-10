@@ -58,7 +58,7 @@ func TestDelegateValidIssueDispatchesAndRecords(t *testing.T) {
 	buf := new(bytes.Buffer)
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
 
-	err := app.Run("delegate", "390")
+	err := app.Run("delegate", "--wait", "390")
 	if err != nil {
 		t.Fatalf("delegate returned error: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestDelegateExitCodeErrorSetsTaskError(t *testing.T) {
 	buf := new(bytes.Buffer)
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
 
-	err := app.Run("delegate", "42")
+	err := app.Run("delegate", "--wait", "42")
 	if err != nil {
 		t.Fatalf("delegate returned error: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestDelegateCreatesLedgerEntry(t *testing.T) {
 	buf := new(bytes.Buffer)
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
 
-	err := app.Run("delegate", "7")
+	err := app.Run("delegate", "--wait", "7")
 	if err != nil {
 		t.Fatalf("delegate returned error: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestDelegateDispatchErrorRecordsError(t *testing.T) {
 	buf := new(bytes.Buffer)
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
 
-	err := app.Run("delegate", "99")
+	err := app.Run("delegate", "--wait", "99")
 	if err == nil {
 		t.Fatal("expected error from dispatch failure")
 	}
@@ -235,7 +235,7 @@ func TestDelegateModelFlagOverridesConfig(t *testing.T) {
 	buf := new(bytes.Buffer)
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
 
-	err := app.Run("delegate", "-model", "deepseek-v4-pro", "555")
+	err := app.Run("delegate", "--wait", "-model", "deepseek-v4-pro", "555")
 	if err != nil {
 		t.Fatalf("delegate returned error: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestDelegateStaffToArchitectAccepted(t *testing.T) {
 	buf := new(bytes.Buffer)
 	app := &App{Adapter: fa, MillDir: filepath.Join(dir, ".mill"), Out: buf, Err: buf}
 
-	err := app.Run("delegate", "390", "--role", "architect")
+	err := app.Run("delegate", "--wait", "390", "--role", "architect")
 	if err != nil {
 		t.Fatalf("delegate returned error: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestDelegateNoRoleUsesActiveRole(t *testing.T) {
 	buf := new(bytes.Buffer)
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
 
-	err := app.Run("delegate", "1")
+	err := app.Run("delegate", "--wait", "1")
 	if err != nil {
 		t.Fatalf("delegate returned error: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestDelegateScaffoldsWorktree(t *testing.T) {
 	buf := new(bytes.Buffer)
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
 
-	err := app.Run("delegate", "7")
+	err := app.Run("delegate", "--wait", "7")
 	if err != nil {
 		t.Fatalf("delegate returned error: %v", err)
 	}
@@ -413,5 +413,83 @@ func TestDelegateScaffoldsWorktree(t *testing.T) {
 	}
 	if string(data) != "staff" {
 		t.Errorf("expected .mill/role to be 'staff', got %q", string(data))
+	}
+}
+
+func TestClassifyResultExitCodes(t *testing.T) {
+	tests := []struct {
+		name   string
+		code   int
+		stderr string
+		want   domain.Classification
+	}{
+		{name: "exit 0 is OK", code: 0, want: domain.ClassificationOK},
+		{name: "exit 3 is AUTH", code: 3, want: domain.ClassificationAuth},
+		{name: "exit -1 is BLOCKED", code: -1, want: domain.ClassificationBlocked},
+		{name: "exit -2 is BLOCKED", code: -2, want: domain.ClassificationBlocked},
+		{name: "exit 4 is FATAL", code: 4, want: domain.ClassificationFatal},
+		{name: "exit 5 is RATE_LIMITED", code: 5, want: domain.ClassificationRateLimited},
+		{name: "exit 8 is MAX_TURNS", code: 8, want: domain.ClassificationMaxTurns},
+		{name: "exit 10 is NO_CREDIT", code: 10, want: domain.ClassificationNoCredit},
+		{name: "unknown exit is FATAL", code: 99, want: domain.ClassificationFatal},
+		{name: "stderr blocked: overrides exit 0", code: 0, stderr: "blocked: budget exceeded", want: domain.ClassificationBlocked},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyResult(tt.code, tt.stderr)
+			if got != tt.want {
+				t.Errorf("classifyResult(%d, %q) = %q, want %q", tt.code, tt.stderr, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDelegateBlockedExitCodeSetsTaskError(t *testing.T) {
+	tests := []struct {
+		name     string
+		exitCode int
+	}{
+		{name: "exit -1 budget_time", exitCode: -1},
+		{name: "exit -2 budget_turns", exitCode: -2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			fa := &fakeAdapter{
+				result: adapter.SessionResult{
+					ExitCode: tt.exitCode,
+					Commits:  0,
+					Output:   "BLOCKED — budget exceeded",
+				},
+			}
+			buf := new(bytes.Buffer)
+			app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf}
+
+			err := app.Run("delegate", "--wait", "53")
+			if err != nil {
+				t.Fatalf("delegate returned error: %v", err)
+			}
+
+			s, _ := state.Load(app.statePath())
+			task, ok := s.Task("task-53")
+			if !ok {
+				t.Fatal("expected task-53 to exist")
+			}
+			if task.Status != domain.TaskError {
+				t.Errorf("expected status %q, got %q", domain.TaskError, task.Status)
+			}
+
+			// Verify ledger classifies as BLOCKED
+			ledgerFile := app.ledgerPath(53)
+			content, err := os.ReadFile(ledgerFile)
+			if err != nil {
+				t.Fatalf("failed to read ledger: %v", err)
+			}
+			if !strings.Contains(string(content), string(domain.ClassificationBlocked)) {
+				t.Error("expected ledger to contain BLOCKED classification")
+			}
+		})
 	}
 }

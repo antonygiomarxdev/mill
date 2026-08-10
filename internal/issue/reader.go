@@ -44,7 +44,7 @@ func ReadBody(issueNum int) (body string, labels []string, err error) {
 	return result.Body, labels, nil
 }
 
-// stageLabel returns the first stage:* label found, or empty string.
+// StageLabel returns the first stage:* label found, or empty string.
 // If multiple stage:* labels exist, only the first is used.
 func StageLabel(labels []string) string {
 	for _, l := range labels {
@@ -53,4 +53,102 @@ func StageLabel(labels []string) string {
 		}
 	}
 	return ""
+}
+
+// ExtractAcceptanceCriteria scans an issue body for acceptance criteria.
+// It detects three patterns:
+//  1. Checkbox lists: "- [ ]" or "- [x]" items
+//  2. Numbered bold criteria: "1. **Label**"
+//  3. Section headers: "## Acceptance Criteria" / "## Acceptance criteria"
+//     followed by list items until the next heading
+//
+// Returns a deduplicated, ordered list of criterion strings.
+// Returns nil if no criteria matched.
+func ExtractAcceptanceCriteria(body string) []string {
+	if body == "" {
+		return nil
+	}
+
+	var criteria []string
+	seen := make(map[string]bool)
+	lines := strings.Split(body, "\n")
+	inSection := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		// Track section headers: "## Acceptance Criteria" (case-insensitive)
+		if strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "## ") && !strings.HasPrefix(trimmed, "### ") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ") {
+			heading := strings.TrimPrefix(trimmed, "## ")
+			heading = strings.TrimPrefix(heading, "### ")
+			heading = strings.TrimSpace(heading)
+			if strings.EqualFold(heading, "Acceptance Criteria") {
+				inSection = true
+				continue
+			} else {
+				inSection = false
+				continue
+			}
+		}
+
+		// If we're in an acceptance criteria section, collect list items
+		if inSection {
+			if strings.HasPrefix(trimmed, "- [ ] ") || strings.HasPrefix(trimmed, "- [x] ") || strings.HasPrefix(trimmed, "- [X] ") {
+				item := trimmed[6:]
+				if item != "" && !seen[item] {
+					seen[item] = true
+					criteria = append(criteria, item)
+				}
+			} else if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+				item := strings.TrimPrefix(trimmed, "- ")
+				item = strings.TrimPrefix(item, "* ")
+				item = strings.TrimSpace(item)
+				if item != "" && !seen[item] {
+					seen[item] = true
+					criteria = append(criteria, item)
+				}
+			} else if len(trimmed) > 0 && trimmed[0] >= '0' && trimmed[0] <= '9' {
+				if idx := strings.Index(trimmed, ". "); idx > 0 {
+					item := strings.TrimSpace(trimmed[idx+2:])
+					if item != "" && !seen[item] {
+						seen[item] = true
+						criteria = append(criteria, item)
+					}
+				}
+			}
+			continue
+		}
+
+		// Pattern 1: Checkbox lists
+		if strings.HasPrefix(trimmed, "- [ ] ") || strings.HasPrefix(trimmed, "- [x] ") || strings.HasPrefix(trimmed, "- [X] ") {
+			item := trimmed[6:]
+			if item != "" && !seen[item] {
+				seen[item] = true
+				criteria = append(criteria, item)
+			}
+			continue
+		}
+
+		// Pattern 2: Numbered bold criteria: "1. **Label**"
+		if len(trimmed) > 0 && trimmed[0] >= '0' && trimmed[0] <= '9' {
+			if idx := strings.Index(trimmed, ". **"); idx > 0 {
+				rest := trimmed[idx+4:]
+				if end := strings.Index(rest, "**"); end >= 0 {
+					item := strings.TrimSpace(rest[:end])
+					if item != "" && !seen[item] {
+						seen[item] = true
+						criteria = append(criteria, item)
+					}
+				}
+			}
+		}
+	}
+
+	return criteria
 }

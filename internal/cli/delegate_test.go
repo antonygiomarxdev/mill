@@ -48,6 +48,8 @@ func (s *fakeSession) Wait() (adapter.SessionResult, error) {
 	return s.result, nil
 }
 
+func (s *fakeSession) ContextText() (string, error) { return "", nil }
+
 // defaultIssueReader returns a stub issue body and empty labels for testing.
 func defaultIssueReader(issueNum int) (string, []string, error) {
 	return "Test issue body content", nil, nil

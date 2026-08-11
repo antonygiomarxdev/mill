@@ -29,6 +29,23 @@ func TestCommandCodeCapabilities(t *testing.T) {
 			t.Errorf("expected model %q in capabilities", want)
 		}
 	}
+
+	// Verify ReadTool capabilities are populated
+	if caps.ReadTool.LineCeiling != 2000 {
+		t.Errorf("expected LineCeiling 2000, got %d", caps.ReadTool.LineCeiling)
+	}
+	if caps.ReadTool.ByteCeiling != 128*1024 {
+		t.Errorf("expected ByteCeiling 131072, got %d", caps.ReadTool.ByteCeiling)
+	}
+	if caps.ReadTool.CharCeiling != 500 {
+		t.Errorf("expected CharCeiling 500, got %d", caps.ReadTool.CharCeiling)
+	}
+	if !caps.ReadTool.HasSelectorSupport {
+		t.Error("expected HasSelectorSupport true")
+	}
+	if !caps.ReadTool.HasRecoveryNotes {
+		t.Error("expected HasRecoveryNotes true")
+	}
 }
 
 func TestBuildArgs(t *testing.T) {

@@ -14,21 +14,6 @@ var validActiveRoles = map[string]bool{
 	"pm":    true,
 }
 
-// delegationOnlyRoles lists roles that appear as delegation targets
-// but MUST NOT be activated via `mill role set`.
-var delegationOnlyRoles = map[string]bool{
-	"sr-dev":       true,
-	"sr-dev-be":    true,
-	"sr-dev-fe":    true,
-	"sr-dev-data":  true,
-	"tech-lead":    true,
-	"architect":    true,
-	"ux-designer":  true,
-	"ui-designer":  true,
-	"reviewer":     true,
-	"qa-docs":      true,
-}
-
 // runRole handles the "role" command.
 // Subcommands: get (prints current role), set (writes .mill/role).
 func (a *App) runRole(args []string) error {
@@ -67,6 +52,9 @@ func (a *App) roleGet() error {
 	if role == "" {
 		role = "staff"
 	}
+	if !validActiveRoles[role] {
+		return fmt.Errorf("invalid role %q in .mill/role: only staff and pm are valid active roles; correct the file or run 'mill role set staff'", role)
+	}
 	fmt.Fprintln(a.Out, role)
 	return nil
 }
@@ -75,15 +63,8 @@ func (a *App) roleGet() error {
 func (a *App) roleSet(role string) error {
 	role = strings.ToLower(strings.TrimSpace(role))
 
-	validList := "staff, pm"
-	if delegationOnlyRoles[role] {
-		return fmt.Errorf("%s is a delegation-only role, not an active role. Valid: %s", role, validList)
-	}
 	if !validActiveRoles[role] {
-		if _, ok := knownRoles[role]; ok {
-			return fmt.Errorf("%s is delegation-only, not an active role. Valid: %s", role, validList)
-		}
-		return fmt.Errorf("unknown role: %s. Valid: %s", role, validList)
+		return fmt.Errorf("role '%s' is delegation-only. Use mill delegate to dispatch work to this role.", role)
 	}
 
 	roleFile := filepath.Join(a.MillDir, "role")
@@ -96,23 +77,6 @@ func (a *App) roleSet(role string) error {
 
 	fmt.Fprintf(a.Out, "mill: switched to %s\n", role)
 	return nil
-}
-
-// knownRoles is the set of all roles defined in the org chart.
-// Used to distinguish "delegation-only" from "unknown" in error messages.
-var knownRoles = map[string]bool{
-	"staff":        true,
-	"pm":           true,
-	"architect":    true,
-	"tech-lead":    true,
-	"reviewer":     true,
-	"sr-dev":       true,
-	"sr-dev-be":    true,
-	"sr-dev-fe":    true,
-	"sr-dev-data":  true,
-	"ux-designer":  true,
-	"ui-designer":  true,
-	"qa-docs":      true,
 }
 
 // detectRole classifies input text into a role.

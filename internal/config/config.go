@@ -30,28 +30,27 @@ type CompactConfig struct {
 
 // Config holds the mill configuration.
 type Config struct {
-	Provider    string            `json:"provider"`
-	Model       string            `json:"model"`
-	Concurrency Concurrency       `json:"concurrency,omitempty"`
-	MaxRounds   int               `json:"max_rounds"`
-	Budget      *adapter.Budget   `json:"budget,omitempty"`
-	Compact     *CompactConfig    `json:"compact,omitempty"`
+	Provider             string            `json:"provider"`
+	Model                string            `json:"model"`
+	Concurrency          Concurrency       `json:"concurrency,omitempty"`
+	MaxRounds            int               `json:"max_rounds"`
+	MaxRetries           int               `json:"max_retries"`
+	Budget               *adapter.Budget   `json:"budget,omitempty"`
+	Compact              *CompactConfig    `json:"compact,omitempty"`
 	ReviewTimeoutSeconds int               `json:"review_timeout_seconds"`
-	Models      map[string]string `json:"models"`
-	Rate        float64           `json:"rate,omitempty"`
+	Models               map[string]string `json:"models"`
+	Rate                 float64           `json:"rate,omitempty"`
 }
 
 // Default returns the default mill configuration.
 //
-// Provider defaults to "commandcode" (CommandCode CLI headless adapter).
-// Model defaults to "laguna-free" (the *barato* model for production dispatch).
-// MaxRounds defaults to 4 (max review rounds before REJECTED).
 func Default() Config {
 	return Config{
 		Provider:    "commandcode",
 		Model:       "laguna-free",
 		Concurrency: Concurrency{MaxSlots: 4},
 		MaxRounds:   4,
+		MaxRetries:  4,
 		Compact:     &CompactConfig{Enabled: false, Mode: CompactModeFast},
 		Models: map[string]string{
 			"free": "laguna-free",
@@ -59,7 +58,7 @@ func Default() Config {
 			"pro":  "laguna-ultra",
 		},
 		ReviewTimeoutSeconds: 300,
-		Rate: 0,
+		Rate:                  0,
 	}
 }
 

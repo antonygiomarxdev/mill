@@ -5,7 +5,9 @@ agent: task
 reviewed_by: ux-designer
 delegates_to:
   - qa-docs
-allowed_files: [.md, .pen]
+allowed_files:
+  - .md
+  - .pen
 skills:
   - prototype
   - domain-modeling

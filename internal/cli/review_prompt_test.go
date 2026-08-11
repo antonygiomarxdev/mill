@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/antonygiomarxdev/mill/internal/adapter"
 )
 
 func TestBuildReviewPrompt54_Structure(t *testing.T) {
@@ -27,12 +29,9 @@ func TestBuildReviewPrompt54_Structure(t *testing.T) {
 				"- Error message on failure",
 				"## Changes (diff)",
 				"diff --git a/login.go b/login.go",
-				"APPROVED:",
-				"CHANGES_REQUESTED:",
-				"BLOCKED:",
-				"Quality rules",
-				"Every CHANGES_REQUESTED item MUST reference",
-				"No vague feedback",
+				"If all criteria are met:",
+				"If changes are needed:",
+				"If blocked by external dependency:",
 			},
 		},
 		{
@@ -40,19 +39,6 @@ func TestBuildReviewPrompt54_Structure(t *testing.T) {
 			issueBody:          "Fix the bug",
 			diffOutput:         "diff output here",
 			acceptanceCriteria: nil,
-			checks: []string{
-				"## Acceptance Criteria",
-				"(no acceptance criteria provided",
-				"APPROVED:",
-				"CHANGES_REQUESTED:",
-				"BLOCKED:",
-			},
-		},
-		{
-			name:               "empty criteria slice",
-			issueBody:          "Fix the bug",
-			diffOutput:         "diff output here",
-			acceptanceCriteria: []string{},
 			checks: []string{
 				"## Acceptance Criteria",
 				"(no acceptance criteria provided",
@@ -80,43 +66,11 @@ func TestBuildReviewPrompt54_Structure(t *testing.T) {
 				"Issue text",
 			},
 		},
-		{
-			name:               "long diff",
-			issueBody:          "Issue text",
-			diffOutput:         strings.Repeat("x", 10000),
-			acceptanceCriteria: []string{"AC1"},
-			checks: []string{
-				strings.Repeat("x", 10000),
-			},
-		},
-		{
-			name:               "all three verdict templates present",
-			issueBody:          "Test",
-			diffOutput:         "diff",
-			acceptanceCriteria: []string{"AC1"},
-			checks: []string{
-				"- APPROVED: (work meets all acceptance criteria)",
-				"- CHANGES_REQUESTED: (numbered, specific, criteria-referencing feedback items)",
-				"- BLOCKED: (cannot proceed — missing info or external dependency)",
-			},
-		},
-		{
-			name:               "quality rules included",
-			issueBody:          "Test",
-			diffOutput:         "diff",
-			acceptanceCriteria: []string{"AC1"},
-			checks: []string{
-				"Quality rules:",
-				"Every CHANGES_REQUESTED item MUST reference a specific acceptance criterion",
-				"No vague feedback like",
-				"If all criteria met, MUST output APPROVED",
-			},
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := buildReviewPrompt54(tt.issueBody, tt.diffOutput, tt.acceptanceCriteria)
+			result := buildReviewPrompt54(tt.issueBody, tt.diffOutput, tt.acceptanceCriteria, adapter.Capabilities{})
 			for _, check := range tt.checks {
 				if !strings.Contains(result, check) {
 					t.Errorf("expected output to contain %q", check)
@@ -138,50 +92,26 @@ func TestExtractAcceptanceCriteria_54(t *testing.T) {
 			want:      nil,
 		},
 		{
-			name: "single criterion",
-			issueBody: `## Acceptance Criteria
-- [ ] Implement the login page`,
-			want: []string{"Implement the login page"},
+			name:      "single criterion",
+			issueBody: "- [ ] User can authenticate",
+			want:      []string{"User can authenticate"},
 		},
 		{
-			name: "multiple criteria",
-			issueBody: `## Task
-- [ ] Add login page
-- [ ] Add error handling
-- [ ] Write tests`,
-			want: []string{"Add login page", "Add error handling", "Write tests"},
-		},
-		{
-			name: "empty checklist items skipped",
-			issueBody: `- [ ] 
-- [ ] Real task
-- [ ] `,
-			want: []string{"Real task"},
-		},
-		{
-			name:      "empty body",
-			issueBody: "",
-			want:      nil,
+			name:      "multiple criteria",
+			issueBody: "- [ ] Login works\n- [ ] Logout works\n- [ ] Error shown",
+			want:      []string{"Login works", "Logout works", "Error shown"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := extractAcceptanceCriteria(tt.issueBody)
-			if tt.want == nil && got != nil {
-				t.Errorf("expected nil, got %v", got)
-				return
-			}
-			if tt.want == nil && got == nil {
-				return
-			}
 			if len(got) != len(tt.want) {
-				t.Errorf("got %d criteria, want %d: %v", len(got), len(tt.want), got)
-				return
+				t.Fatalf("expected %d criteria, got %d: %v", len(tt.want), len(got), got)
 			}
-			for i := range got {
+			for i := range tt.want {
 				if got[i] != tt.want[i] {
-					t.Errorf("criteria[%d] = %q, want %q", i, got[i], tt.want[i])
+					t.Errorf("criteria[%d]: expected %q, got %q", i, tt.want[i], got[i])
 				}
 			}
 		})

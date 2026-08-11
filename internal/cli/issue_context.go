@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/antonygiomarxdev/mill/internal/adapter"
 	"github.com/antonygiomarxdev/mill/internal/issue"
 	"github.com/antonygiomarxdev/mill/internal/role"
 )
@@ -35,8 +36,7 @@ func resolveRepoRef() string {
 
 // buildIssueContextPrompt constructs a role-aware prompt for a given issue and target role.
 // The prompt includes the full issue body, extracted acceptance criteria, and
-// a reference to the spec file when it exists.
-func buildIssueContextPrompt(issueNum int, body string, ac []string, targetRole string) string {
+func buildIssueContextPrompt(issueNum int, body string, ac []string, targetRole string, caps adapter.Capabilities) string {
 	root, err := projectRoot()
 	if err != nil {
 		root = "."
@@ -92,7 +92,66 @@ func buildIssueContextPrompt(issueNum int, body string, ac []string, targetRole 
 		parts = append(parts, "", "## Role", rolePrompt)
 	}
 
+
+	// Read Tool Capabilities (when non-zero)
+	if caps.ReadTool != (adapter.ReadToolCapabilities{}) {
+		parts = append(parts, "", "## Read Tool Capabilities", buildReadToolCapSection(caps.ReadTool))
+	}
 	return strings.Join(parts, "\n")
+}
+
+// buildReadToolCapSection builds the capabilities prompt section.
+// When caps is non-zero, it produces guidance for the agent about
+// the read tool's limits and features.
+func buildReadToolCapSection(caps adapter.ReadToolCapabilities) string {
+	var lines []string
+
+	lines = append(lines, "Your harness provides a read tool with the following features:")
+	lines = append(lines, "")
+
+	if caps.LineCeiling > 0 {
+		lines = append(lines, fmt.Sprintf("- **Line ceiling:** %d lines per read. Files longer than this are truncated.", caps.LineCeiling))
+	}
+	if caps.ByteCeiling > 0 {
+		kb := caps.ByteCeiling / 1024
+		if caps.ByteCeiling%1024 != 0 {
+			lines = append(lines, fmt.Sprintf("- **Byte ceiling:** %d bytes per read.", caps.ByteCeiling))
+		} else {
+			lines = append(lines, fmt.Sprintf("- **Byte ceiling:** %dKB per read.", kb))
+		}
+	}
+	if caps.CharCeiling > 0 {
+		lines = append(lines, fmt.Sprintf("- **Char ceiling:** %d chars per displayed line. Longer lines are truncated mid-display.", caps.CharCeiling))
+	}
+	if caps.HasSelectorSupport {
+		lines = append(lines, "- **Selectors:** Supported. Append `:<range>` to file paths to read specific portions:")
+		lines = append(lines, "  - `path:50-200` — lines 50 through 200 (inclusive)")
+		lines = append(lines, "  - `path:50` — line 50 only")
+		lines = append(lines, "  - `path:50-` — from line 50 to end")
+		lines = append(lines, "  - `path:50+150` — 150 lines starting at line 50")
+		lines = append(lines, "  - `path:raw` — verbatim output (no line numbers)")
+		lines = append(lines, "  - `path:50-200:raw` — combined selector + raw mode")
+	}
+	if caps.HasRecoveryNotes {
+		lines = append(lines, "- **Recovery notes:** YES — when output is truncated, the harness appends a note like")
+		lines = append(lines, "  `[TRUNCATED: 1200 lines omitted — re-read with a narrower selector]`.")
+		lines = append(lines, "  If you see a recovery note, narrow your selector range and re-read.")
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, "**Guidance:**")
+	if caps.HasSelectorSupport {
+		lines = append(lines, "- Prefer reading specific ranges with selectors over whole-file reads.")
+	}
+	if caps.HasRecoveryNotes {
+		lines = append(lines, "- When recovery notes indicate truncation, re-read with a narrower selector.")
+	}
+	if !caps.HasSelectorSupport && (caps.LineCeiling > 0 || caps.ByteCeiling > 0) {
+		lines = append(lines, "- Be aware that large files may be truncated. If a file appears incomplete, focus on specific sections.")
+	}
+	lines = append(lines, "- Re-read a file before writing it to ensure you have the latest version.")
+
+	return strings.Join(lines, "\n")
 }
 
 // readIssueWithFallback reads an issue body and returns body, labels, and extracted

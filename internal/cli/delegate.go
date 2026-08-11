@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,12 +62,18 @@ func (a *App) runDelegate(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Validate mill.yml and capture concurrency settings.
+	myml, err := config.LoadAndValidate("mill.yml")
+	if err != nil {
+		return err
+	}
 
 	// Read issue body and labels from GitHub
 	issueBody, labels, err := a.IssueReader(issueNum)
 	if err != nil {
 		return fmt.Errorf("failed to read issue #%d: %w", issueNum, err)
 	}
+	ac := issue.ExtractAcceptanceCriteria(issueBody)
 	stageLabel := issue.StageLabel(labels)
 	if stageLabel != "" {
 		// Warn if multiple stage:* labels exist
@@ -100,9 +108,24 @@ func (a *App) runDelegate(args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Initialize slot manager if not already set (from config concurrency settings).
+	// Validate required binaries before proceeding
+	if err := validateDelegateBinaries(cfg); err != nil {
+		return err
+	}
+
+	// Query adapter capabilities before side effects (spec: eager, before worktree)
+	caps := a.Adapter.Capabilities()
+	fmt.Fprintf(a.Err, "delegate: adapter capabilities — models=%d selectors=%v recovery=%v line_ceiling=%d byte_ceiling=%d\n",
+		len(caps.Models), caps.ReadTool.HasSelectorSupport, caps.ReadTool.HasRecoveryNotes,
+		caps.ReadTool.LineCeiling, caps.ReadTool.ByteCeiling)
+
+	// Initialize slot manager if not already set.
+	// mill.yml's concurrency.max-slots takes precedence over config.json.
 	if a.slots == nil {
 		maxSlots := MaxSlotsFromConfig(cfg)
+		if myml.Concurrency.MaxSlots > 0 {
+			maxSlots = myml.Concurrency.MaxSlots
+		}
 		a.slots = slots.NewManager(maxSlots)
 	}
 
@@ -111,10 +134,9 @@ func (a *App) runDelegate(args []string) error {
 		return err
 	}
 
-	// Resolve model from stage label, role frontmatter, or config
-	if model == "" {
-		model = a.resolveModel(targetRole, stageLabel, cfg)
-	}
+	modelOverride := model
+
+	// Resolve adapter capabilities for prompt generation
 
 	// Create task and persist initial state
 	taskID := fmt.Sprintf("task-%d", issueNum)
@@ -139,12 +161,23 @@ func (a *App) runDelegate(args []string) error {
 	if err := ledger.Append(a.ledgerPath(issueNum), dispatchEntry); err != nil {
 		return fmt.Errorf("failed to append ledger entry: %w", err)
 	}
+	// Create a real git worktree for branch isolation.
+	wt, err := a.createWorktree(issueNum)
+	if err != nil {
+		return fmt.Errorf("failed to create worktree for issue #%d: %w", issueNum, err)
+	}
 
-	// Install gauntlet hooks into worktree
-	wt := a.worktreePath(issueNum)
+	// Deferred cleanup: if the agent fails irrecoverably (FATAL/AUTH/NO_CREDIT),
+	// remove the worktree and prune the branch. Best-effort.
+	irrecoverable := false
+	defer func() {
+		if irrecoverable {
+			a.cleanupWorktree(issueNum)
+		}
+	}()
 
 	// Scaffold context files so the agent finds AGENTS.md, .omp/, roles/
-	if err := a.copyScaffold(wt); err != nil {
+	if err := a.copyScaffold(wt, initConfig{}, false); err != nil {
 		fmt.Fprintf(a.Err, "warning: failed to scaffold worktree: %v\n", err)
 	}
 	// Write .mill/role so the agent knows its role
@@ -152,14 +185,22 @@ func (a *App) runDelegate(args []string) error {
 	if err := os.MkdirAll(filepath.Dir(roleFile), 0755); err == nil {
 		os.WriteFile(roleFile, []byte(targetRole), 0644)
 	}
+	// Write .mill/agent_id so the pre-commit hook knows the dispatch phase
+	agentIDFile := filepath.Join(wt, ".mill", "agent_id")
+	if err := os.MkdirAll(filepath.Dir(agentIDFile), 0755); err == nil {
+		os.WriteFile(agentIDFile, []byte("produce"), 0644)
+	}
 	if err := installHooks(wt); err != nil {
 		fmt.Fprintf(a.Err, "warning: failed to install hooks: %v\n", err)
 	}
+	if err := installRoleEnforceHook(wt); err != nil {
+		fmt.Fprintf(a.Err, "warning: failed to install role-enforce hook: %v\n", err)
+	}
 
-	// Build role-aware prompt with issue body
-	prompt := buildRolePrompt(issueNum, targetRole, issueBody)
+	// Build issue context prompt with full body, acceptance criteria, and role
+	prompt := buildIssueContextPrompt(issueNum, issueBody, ac, targetRole, caps)
 	opts := adapter.DispatchOpts{
-		Worktree: a.worktreePath(issueNum),
+		Worktree: wt,
 		Prompt:   prompt,
 		Model:    model,
 		MaxTurns: maxTurns,
@@ -169,180 +210,104 @@ func (a *App) runDelegate(args []string) error {
 	// Acquire slot before dispatching (blocks if all slots occupied).
 	ctx := context.Background()
 	maxSlots := MaxSlotsFromConfig(cfg)
+	if myml.Concurrency.MaxSlots > 0 {
+		maxSlots = myml.Concurrency.MaxSlots
+	}
 	if _, err := AcquireSlot(ctx, a.slots, a.Err, issueNum, targetRole, priority, maxSlots); err != nil {
 		return fmt.Errorf("slot acquisition failed: %w", err)
 	}
 
 	if wait {
 		defer a.slots.Release()
-		return a.runDispatchLoop(issueNum, taskID, opts, issueBody, labels, cfg)
+		classification, err := runDispatchLoop54(a, issueNum, taskID, targetRole, modelOverride, opts, issueBody, labels, cfg, caps)
+		if isIrrecoverable(classification) {
+			irrecoverable = true
+		}
+		return err
 	}
 
 	// Async: fire and forget. Agent runs in background goroutine.
 	go func() {
 		defer a.slots.Release()
-		a.runDispatchLoop(issueNum, taskID, opts, issueBody, labels, cfg)
+		classification, _ := runDispatchLoop54(a, issueNum, taskID, targetRole, modelOverride, opts, issueBody, labels, cfg, caps)
+		if isIrrecoverable(classification) {
+			a.cleanupWorktree(issueNum)
+		}
 	}()
 	fmt.Fprintf(a.Out, "Delegated issue %d — task %s (async)\n", issueNum, taskID)
 	return nil
 }
 
-// runDispatchLoop runs the produce→review cycle for a delegated issue.
-// Each round: produce phase (cheap model) → review phase (expensive model).
-// Exits on APPROVED, BLOCKED/FATAL/AUTH/NO_CREDIT/RATE_LIMITED, or after MaxRounds.
-// Persists state after each round so `mill watch` can observe progress.
-func (a *App) runDispatchLoop(issueNum int, taskID string, opts adapter.DispatchOpts, issueBody string, labels []string, cfg config.Config) error {
-	var finalClassification domain.Classification
-	var finalCommits int
 
-	s, err := state.Load(a.statePath())
-	if err != nil {
-		return fmt.Errorf("failed to load state: %w", err)
-	}
-	task, ok := s.Task(taskID)
-	if !ok {
-		task = domain.NewTask(taskID, issueNum)
-	}
 
-	// Stage label determines produce model
-	stageLabel := issue.StageLabel(labels)
-	produceModel := a.resolveModel("", stageLabel, cfg)
-	if stageLabel == "" {
-		// No stage label: use the original model from opts
-		produceModel = opts.Model
-	}
-	reviewModel := "laguna-pro"
-
-	maxRounds := cfg.MaxRounds
-	if maxRounds <= 0 {
-		maxRounds = 4
-	}
-
-	for round := range maxRounds {
-		task.Round = round
-
-		// --- Produce phase ---
-		produceOpts := opts
-		produceOpts.Model = produceModel
-		session, err := a.Adapter.Dispatch(produceOpts)
-		if err != nil {
-			a.recordError(s, issueNum, task, err, "failed to dispatch produce agent")
-			return fmt.Errorf("failed to dispatch produce agent: %w", err)
-		}
-
-		produceResult, err := session.Wait()
-		if err != nil {
-			a.recordError(s, issueNum, task, err, "produce agent session failed")
-			return fmt.Errorf("produce agent session failed: %w", err)
-		}
-		finalCommits = produceResult.Commits
-
-		// --- Review phase ---
-		reviewPrompt := buildReviewPrompt(issueNum, issueBody, produceResult.Output)
-		reviewOpts := adapter.DispatchOpts{
-			Worktree: opts.Worktree,
-			Prompt:   reviewPrompt,
-			Model:    reviewModel,
-			MaxTurns: opts.MaxTurns,
-			Budget:   opts.Budget,
-		}
-		reviewSession, err := a.Adapter.Dispatch(reviewOpts)
-		if err != nil {
-			a.recordError(s, issueNum, task, err, "failed to dispatch review agent")
-			return fmt.Errorf("failed to dispatch review agent: %w", err)
-		}
-
-		reviewResult, err := reviewSession.Wait()
-		if err != nil {
-			a.recordError(s, issueNum, task, err, "review agent session failed")
-			return fmt.Errorf("review agent session failed: %w", err)
-		}
-
-		finalClassification = classifyResult(reviewResult.ExitCode, reviewResult.Stderr)
-
-		// Append review ledger entry with round number
-		reviewEntry := ledger.Entry{
-			Timestamp:      time.Now().UTC(),
-			Issue:          issueNum,
-			Event:          "review",
-			Status:         string(domain.TaskRunning),
-			Classification: string(finalClassification),
-			Round:          round,
-		}
-		if err := ledger.Append(a.ledgerPath(issueNum), reviewEntry); err != nil {
-			return fmt.Errorf("failed to append ledger entry: %w", err)
-		}
-
-		// Persist state after each round
-		task.UpdatedAt = time.Now().UTC()
-		s.UpsertTask(task)
-		if err := s.Save(a.statePath()); err != nil {
-			return fmt.Errorf("failed to save state: %w", err)
-		}
-
-		// Decide next action based on classification
-		switch finalClassification {
-		case domain.ClassificationOK:
-			// Approved — exit loop
-			goto finish
-
-		case domain.ClassificationBlocked,
-			domain.ClassificationAuth,
-			domain.ClassificationNoCredit,
-			domain.ClassificationRateLimited,
-			domain.ClassificationFatal:
-			// Non-recoverable — exit immediately
-			goto finish
-
-		case domain.ClassificationChangesRequested, domain.ClassificationMaxTurns:
-			// Changes requested or max turns — continue to next round
-			continue
-
-		default:
-			// Transient or unknown — continue to next round
-			continue
-		}
-	}
-
-	// Max rounds exhausted
-finish:
-	taskStatus := domain.TaskDone
-	verdict := domain.VerdictApproved
-
-	switch finalClassification {
-	case domain.ClassificationOK:
-		verdict = domain.VerdictApproved
-	case domain.ClassificationChangesRequested:
-		verdict = domain.VerdictChangesRequested
-	case domain.ClassificationMaxTurns:
-		verdict = domain.VerdictChanges
-	default:
-		taskStatus = domain.TaskError
-		verdict = domain.VerdictRejected
-	}
-
-	task.UpdateStatus(taskStatus, verdict, finalCommits)
-	s.UpsertTask(task)
-	if err := s.Save(a.statePath()); err != nil {
-		return fmt.Errorf("failed to save state: %w", err)
-	}
-
-	completeEntry := ledger.Entry{
-		Timestamp:      time.Now().UTC(),
-		Issue:          issueNum,
-		Event:          "complete",
-		Status:         string(taskStatus),
-		Verdict:        string(verdict),
-		Classification: string(finalClassification),
-		Round:          task.Round,
-	}
-	if err := ledger.Append(a.ledgerPath(issueNum), completeEntry); err != nil {
-		return fmt.Errorf("failed to append ledger entry: %w", err)
-	}
-
-	return nil
+// isIrrecoverable reports whether a classification indicates the worktree
+// should be cleaned up (FATAL, AUTH, or NO_CREDIT).
+func isIrrecoverable(c domain.Classification) bool {
+	return c == domain.ClassificationFatal ||
+		c == domain.ClassificationAuth ||
+		c == domain.ClassificationNoCredit
 }
 
+// createWorktree creates a real git worktree at .mill/worktrees/issue-N
+// on branch agent/N, rooted at the current HEAD. If the worktree directory
+// already exists (e.g. from a prior crash), it calls cleanupWorktree first
+// (idempotent retry), then creates fresh. After creation, it writes a PID
+// file at .mill/worktrees/issue-N/.mill/agent.pid. Returns the worktree path.
+func (a *App) createWorktree(issueNum int) (string, error) {
+	if _, err := exec.LookPath("git"); err != nil {
+		return "", fmt.Errorf("git not found in PATH; git is required for worktree isolation")
+	}
+
+	wt := a.worktreePath(issueNum)
+	branch := a.worktreeBranch(issueNum)
+
+	// Idempotent retry: if worktree directory already exists from a prior
+	// crash, clean it up first, then create fresh.
+	if info, err := os.Stat(wt); err == nil && info.IsDir() {
+		a.cleanupWorktree(issueNum)
+	}
+
+	cmd := exec.Command("git", "worktree", "add", "-b", branch, wt)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git worktree add failed: %w\n%s", err, out)
+	}
+
+	// Write PID file for #70 stale-lock detection.
+	pidDir := filepath.Join(wt, ".mill")
+	if err := os.MkdirAll(pidDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create .mill dir in worktree: %w", err)
+	}
+	pidFile := filepath.Join(pidDir, "agent.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
+		return "", fmt.Errorf("failed to write PID file: %w", err)
+	}
+
+	return wt, nil
+}
+
+// cleanupWorktree removes the git worktree and prunes its branch.
+// It is best-effort: errors are logged to a.Err, not propagated.
+// Used as deferred cleanup when an agent session fails irrecoverably.
+func (a *App) cleanupWorktree(issueNum int) {
+	wt := a.worktreePath(issueNum)
+	branch := a.worktreeBranch(issueNum)
+
+	// Remove PID file.
+	pidFile := filepath.Join(wt, ".mill", "agent.pid")
+	os.Remove(pidFile)
+
+	// Remove the worktree.
+	cmd := exec.Command("git", "worktree", "remove", "--force", wt)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(a.Err, "cleanup: git worktree remove failed: %v\n%s\n", err, out)
+	}
+
+	// Prune the branch.
+	cmd = exec.Command("git", "branch", "-D", branch)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(a.Err, "cleanup: git branch -D failed: %v\n%s\n", err, out)
+	}
+}
 
 // recordError updates the task and ledger to reflect an agent failure.
 func (a *App) recordError(s state.State, issueNum int, task domain.Task, err error, event string) {
@@ -356,6 +321,82 @@ func (a *App) recordError(s state.State, issueNum int, task domain.Task, err err
 		Event:     event,
 		Status:    string(domain.TaskError),
 	})
+}
+
+// maxRetries is the maximum number of retry attempts for transient failures.
+const maxRetries = 4
+
+// retryDispatch wraps Adapter.Dispatch + session.Wait + classifyResult with
+// exponential backoff retry on transient failures.
+// Backoff: 1s → 2s → 4s → 8s (max 4 retries).
+// Non-transient classifications (FATAL, AUTH, NO_CREDIT, BLOCKED, RATE_LIMITED)
+// bypass retry and return immediately.
+func (a *App) retryDispatch(
+	opts adapter.DispatchOpts,
+	phase string,
+	issueNum int,
+	task domain.Task,
+	cfg config.Config,
+) (adapter.SessionResult, domain.Classification, error) {
+	retryLimit := cfg.MaxRetries
+	if retryLimit <= 0 {
+		retryLimit = maxRetries
+	}
+
+	for retry := 0; retry <= retryLimit; retry++ {
+		if retry > 0 {
+			backoff := time.Duration(1<<(retry-1)) * time.Second
+			sleep := a.Backoff
+			if sleep == nil {
+				sleep = time.Sleep
+			}
+			sleep(backoff)
+		}
+
+		session, err := a.Adapter.Dispatch(opts)
+		if err != nil {
+			if isTransientError(err) && retry < retryLimit {
+				continue
+			}
+			return adapter.SessionResult{}, "", fmt.Errorf("%s dispatch failed: %w", phase, err)
+		}
+
+		result, err := session.Wait()
+		if err != nil {
+			if isTransientError(err) && retry < retryLimit {
+				continue
+			}
+			return adapter.SessionResult{}, "", fmt.Errorf("%s session failed: %w", phase, err)
+		}
+
+		// Auto-compact session context if enabled and near threshold.
+		a.maybeAutoCompactSession(session, opts.Model, issueNum, opts.Worktree, cfg)
+
+		class := classifyResult(result.ExitCode, result.Stderr)
+		if class == domain.ClassificationTransient && retry < retryLimit {
+			continue
+		}
+		if class != domain.ClassificationTransient {
+			return result, class, nil
+		}
+		// Last retry and still transient — let loop exit and return error
+	}
+
+	return adapter.SessionResult{}, "", fmt.Errorf("%s: max retries (%d) exceeded", phase, retryLimit)
+}
+
+// isTransientError reports whether an error from Adapter.Dispatch or
+// session.Wait is likely transient (network-related) and worth retrying.
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "econnrefused") ||
+		strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "temporary failure") ||
+		strings.Contains(errStr, "network")
 }
 
 // readActiveRole reads the current active role from .mill/role.
@@ -458,78 +499,6 @@ end your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.`, t
 	return prompt
 }
 
-// buildReviewPrompt constructs a review prompt that asks the reviewer agent
-// to evaluate the produce agent's output against the issue body.
-func buildReviewPrompt(issueNum int, issueBody string, produceOutput string) string {
-	prompt := fmt.Sprintf(`You are a code reviewer for mill, an agent delegation harness.
-Review the following work product for GitHub issue #%d.
-
-**Issue Body:**
-%s
-
-**Work Product (produce agent output):**
-%s
-
-Evaluate whether the work product satisfies all acceptance criteria in the issue body.
-End your review by emitting EXACTLY ONE of these signals on stderr:
-- APPROVED: if the work is complete and correct
-- CHANGES_REQUESTED: if the work needs modifications
-- BLOCKED: if you cannot complete the review`, issueNum, issueBody, produceOutput)
-	return prompt
-}
-
-// modelTier maps role frontmatter model tiers to actual model names.
-// "free→paid" starts with free and escalates on complexity.
-var modelTier = map[string]string{
-	"free":      "deepseek/deepseek-v4-flash",
-	"paid":      "deepseek/deepseek-v4-pro",
-	"pro":       "deepseek/deepseek-v4-pro",
-	"free→paid": "deepseek/deepseek-v4-flash",
-}
-
-// resolveModel reads the target role's frontmatter model field and maps
-// the tier name to an actual model identifier. Falls back to config.Model.
-// The stageLabel (from issue labels) influences model selection:
-//
-//	stage:produce   → "laguna-free"
-//	stage:review    → "laguna-pro"
-//	stage:implement → "laguna-free"
-//
-// When stageLabel is empty, the role frontmatter's model field is used.
-func (a *App) resolveModel(targetRole string, stageLabel string, cfg config.Config) string {
-	if stageLabel != "" {
-		switch stageLabel {
-		case "stage:produce":
-			return "laguna-free"
-		case "stage:review":
-			return "laguna-pro"
-		case "stage:implement":
-			return "laguna-free"
-		}
-	}
-	root, err := projectRoot()
-	if err != nil {
-		return cfg.Model
-	}
-	rolePath := filepath.Join(root, ".mill", "roles", targetRole, "ROLE.md")
-	fm, err := role.ParseFrontmatter(rolePath)
-	if err != nil || fm.Model == "" {
-		return cfg.Model
-	}
-
-	// "free→paid" means start cheap, escalate on complexity.
-	// For initial dispatch, always use the first tier ("free").
-	tier := fm.Model
-	if tier == "free→paid" {
-		tier = "free"
-	}
-
-	if m, ok := modelTier[tier]; ok {
-		return m
-	}
-	return cfg.Model
-}
-
 // buildPrompt constructs the query passed to the agent for a given issue.
 // Deprecated: use buildRolePrompt for role-aware prompts.
 func buildPrompt(issueNum int) string {
@@ -539,31 +508,145 @@ Read the codebase, make the necessary changes, and when you are done,
 end your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.`, issueNum)
 }
 
-// installHooks copies gauntlet hook scripts into the worktree's .git/hooks directory.
+// preCommitHookScript is the generated pre-commit dispatcher installed
+// into worktree .git/hooks/. It runs go build + go vet, then any
+// additional gate scripts found in .mill/checks/*.sh.
+const preCommitHookScript = `#!/bin/bash
+# Mill gauntlet — pre-commit. Runs on every git commit.
+# Fast checks (<30s). Fail = commit rejected.
+set -euo pipefail
+
+echo "mill: pre-commit gauntlet"
+
+go build ./... && echo "PASS go build" || { echo "FAIL go build — run: go build ./..."; exit 1; }
+go vet ./...  && echo "PASS go vet"   || { echo "FAIL go vet — run: go vet ./..."; exit 1; }
+
+# --- Version conflict detection ---
+# Find project root by walking up to the main .git directory
+PROJECT_ROOT=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+if [ -n "$PROJECT_ROOT" ] && [ "${PROJECT_ROOT##*/}" = ".git" ]; then
+    PROJECT_ROOT=$(dirname "$PROJECT_ROOT")
+fi
+
+# Determine issue number from worktree path
+ISSUE_NUM=""
+WT_DIR=$(pwd)
+if [[ "$WT_DIR" =~ issue-([0-9]+) ]]; then
+    ISSUE_NUM="${BASH_REMATCH[1]}"
+fi
+
+LEDGER_FILE=""
+if [ -n "$PROJECT_ROOT" ] && [ -n "$ISSUE_NUM" ]; then
+    LEDGER_FILE="$PROJECT_ROOT/.mill/ledger/$ISSUE_NUM.jsonl"
+fi
+
+# Read agent identity
+AGENT_ID="unknown"
+if [ -f .mill/agent_id ]; then
+    AGENT_ID=$(cat .mill/agent_id)
+fi
+
+# Version conflict check for each staged file
+if [ -n "$LEDGER_FILE" ] && [ -f "$LEDGER_FILE" ]; then
+    # Get list of staged files (relative to worktree root)
+    STAGED=$(git diff --cached --name-only 2>/dev/null || true)
+    for FILE in $STAGED; do
+        # Find latest file_read version for this file by this agent
+        LATEST_READ=$(grep "file_read" "$LEDGER_FILE" 2>/dev/null | grep "\"file\":\"$FILE\"" | grep "\"agent_id\":\"$AGENT_ID\"" | tail -1 | grep -o '"version":[0-9]*' | grep -o '[0-9]*$' || echo "")
+        if [ -z "$LATEST_READ" ]; then
+            # No read tracked — first write is always allowed
+            continue
+        fi
+
+        # Find latest file_write version for this file by any agent
+        LATEST_WRITE_LINE=$(grep "file_write" "$LEDGER_FILE" 2>/dev/null | grep "\"file\":\"$FILE\"" | tail -1 || echo "")
+        if [ -z "$LATEST_WRITE_LINE" ]; then
+            LATEST_WRITE=0
+            LATEST_WRITER=""
+        else
+            LATEST_WRITE=$(echo "$LATEST_WRITE_LINE" | grep -o '"version":[0-9]*' | grep -o '[0-9]*$' || echo "0")
+            LATEST_WRITER=$(echo "$LATEST_WRITE_LINE" | grep -o '"agent_id":"[^"]*"' | cut -d'"' -f4 || echo "")
+        fi
+
+        # Conflict detection
+        CONFLICT=0
+        if [ "$LATEST_WRITE" -gt "$LATEST_READ" ] 2>/dev/null; then
+            CONFLICT=1
+        elif [ "$LATEST_WRITE" = "$LATEST_READ" ] && [ "$LATEST_WRITER" != "$AGENT_ID" ] && [ -n "$LATEST_WRITER" ]; then
+            CONFLICT=1
+        fi
+
+        if [ "$CONFLICT" = "1" ]; then
+            echo "BLOCKED: version conflict on $FILE (read v$LATEST_READ, current v$LATEST_WRITE by $LATEST_WRITER)" >&2
+            mkdir -p .mill
+            echo -e "BLOCKED\t$FILE\tread v$LATEST_READ\tcurrent v$LATEST_WRITE\tby $LATEST_WRITER" >> .mill/enforcement.log
+            exit 1
+        fi
+    done
+fi
+# --- End version conflict detection ---
+
+# Run additional gate scripts if present
+for gate in .mill/checks/*.sh; do
+    if [ -x "$gate" ]; then
+        echo "Running gate: $(basename "$gate")"
+        sh "$gate" || { echo "FAIL $(basename "$gate")"; exit 1; }
+    fi
+done
+
+echo "mill: pre-commit passed"
+`
+
+// installHooks installs the gauntlet pre-commit hook for the worktree.
+// It first verifies the target is a real git worktree (worktree/.git is
+// a file containing "gitdir:"), then creates a .mill/hooks/ directory
+// inside the worktree, configures core.hooksPath to point there, and
+// writes the pre-commit dispatcher with 0755 permissions.
 func installHooks(worktree string) error {
-	srcDir := ".mill/checks"
-	hookDir := filepath.Join(worktree, ".git", "hooks")
+	// 1. Verify this is a real git worktree
+	gitFile := filepath.Join(worktree, ".git")
+	info, err := os.Stat(gitFile)
+	if err != nil {
+		return fmt.Errorf("worktree is not a git worktree: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("worktree has .git directory, not a git worktree file. " +
+			"Run 'git worktree add' to create a proper worktree")
+	}
+	data, err := os.ReadFile(gitFile)
+	if err != nil {
+		return fmt.Errorf("cannot read worktree .git file: %w", err)
+	}
+	if !strings.HasPrefix(string(data), "gitdir:") {
+		return fmt.Errorf("worktree .git is not a valid git worktree reference")
+	}
+
+	// 2. Create hooks directory inside the worktree and configure git
+	hookDir := filepath.Join(worktree, ".mill", "hooks")
 	if err := os.MkdirAll(hookDir, 0755); err != nil {
+		return fmt.Errorf("cannot create hooks directory: %w", err)
+	}
+	// Set core.hooksPath so git finds hooks in this worktree-local directory
+	setHook := exec.Command("git", "-C", worktree, "config", "core.hooksPath", hookDir)
+	if out, err := setHook.CombinedOutput(); err != nil {
+		return fmt.Errorf("cannot configure core.hooksPath: %w\n%s", err, out)
+	}
+
+	// 3. Install pre-commit dispatcher with 0755
+	preCommitPath := filepath.Join(hookDir, "pre-commit")
+	if err := os.WriteFile(preCommitPath, []byte(preCommitHookScript), 0755); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(srcDir)
+
+	// 4. Verify pre-commit is executable post-install
+	info, err = os.Stat(preCommitPath)
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		src := filepath.Join(srcDir, e.Name())
-		dst := filepath.Join(hookDir, strings.TrimSuffix(e.Name(), ".sh"))
-		data, err := os.ReadFile(src)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(dst, data, 0755); err != nil {
-			return err
-		}
+	if info.Mode()&0111 == 0 {
+		return fmt.Errorf("hook pre-commit is not executable after install")
 	}
+
 	return nil
 }
 
@@ -645,4 +728,34 @@ func classifyResult(exitCode int, stderr string) domain.Classification {
 	default:
 		return domain.ClassificationFatal
 	}
+}
+
+// providerBinary maps provider names to their CLI binary names.
+// This is an extensible map — add entries for new providers.
+var providerBinary = map[string]string{
+	"commandcode": "cmd",
+}
+
+// validateDelegateBinaries checks that required toolchain and provider
+// binaries are on PATH before delegation begins. It checks git, go,
+// and the configured provider's CLI binary. The check runs BEFORE
+// worktree creation so the user gets a fast, clear error.
+func validateDelegateBinaries(cfg config.Config) error {
+	if _, err := exec.LookPath("git"); err != nil {
+		return fmt.Errorf("git not found in PATH. Install git to continue.")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		return fmt.Errorf("go not found in PATH. Install Go to continue.")
+	}
+	if cfg.Provider == "" {
+		return nil
+	}
+	binary, ok := providerBinary[cfg.Provider]
+	if !ok {
+		binary = cfg.Provider
+	}
+	if _, err := exec.LookPath(binary); err != nil {
+		return fmt.Errorf("provider binary %q not found in PATH", binary)
+	}
+	return nil
 }

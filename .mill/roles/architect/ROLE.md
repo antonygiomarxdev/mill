@@ -6,7 +6,10 @@ reviewed_by: staff
 delegates_to:
   - tech-lead
   - qa-docs
-allowed_files: [.md, .yml, .yaml]
+allowed_files:
+  - .md
+  - .yml
+  - .yaml
 skills:
   - codebase-design
   - domain-modeling

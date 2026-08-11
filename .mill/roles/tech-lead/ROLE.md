@@ -8,7 +8,9 @@ delegates_to:
   - sr-dev-be
   - sr-dev-data
   - qa-docs
-allowed_files: [.md, .go]
+allowed_files:
+  - .md
+  - .go
 skills:
   - code-review
   - codebase-design

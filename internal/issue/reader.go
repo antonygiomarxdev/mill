@@ -44,6 +44,27 @@ func ReadBody(issueNum int) (body string, labels []string, err error) {
 	return result.Body, labels, nil
 }
 
+// AddLabel adds a label to a GitHub issue via `gh issue edit --add-label`.
+// Returns an error if gh is not found or the command fails.
+func AddLabel(issueNum int, label string) error {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return fmt.Errorf("gh CLI not found — install github.com/cli/cli")
+	}
+
+	args := []string{
+		"issue", "edit",
+		strconv.Itoa(issueNum),
+		"--add-label", label,
+	}
+
+	cmd := exec.Command("gh", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh issue edit %d --add-label %s: %w\n%s", issueNum, label, err, out)
+	}
+	return nil
+}
+
 // StageLabel returns the first stage:* label found, or empty string.
 // If multiple stage:* labels exist, only the first is used.
 func StageLabel(labels []string) string {

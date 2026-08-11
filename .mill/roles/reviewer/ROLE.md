@@ -5,7 +5,8 @@ agent: cavecrew-reviewer
 reviewed_by: staff
 delegates_to:
   - qa-docs
-allowed_files: [.md]
+allowed_files:
+  - .md
 skills:
   - code-review
   - verification-before-completion

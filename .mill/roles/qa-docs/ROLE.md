@@ -4,7 +4,9 @@ model: free→paid
 agent: scout
 reviewed_by: delegator
 delegates_to: []
-allowed_files: [.md, .yml]
+allowed_files:
+  - .md
+  - .yml
 skills:
   - writing-plans
   - verification-before-completion

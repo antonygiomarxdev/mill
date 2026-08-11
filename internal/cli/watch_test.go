@@ -132,7 +132,7 @@ func TestRunWatchProgressOutput(t *testing.T) {
 	app := &App{MillDir: dir, Out: buf, Err: buf}
 	// Since the task never becomes terminal, this will run until timeout.
 	// Use --timeout 1 to exit quickly.
-	err := app.Run("watch", "--timeout", "1")
+	err := app.Run("watch", "--timeout", "1s")
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -173,7 +173,7 @@ func TestRunWatchTimeout(t *testing.T) {
 	}
 
 	app := &App{MillDir: dir, Out: buf, Err: buf}
-	err := app.Run("watch", "--timeout", "1")
+	err := app.Run("watch", "--timeout", "1s")
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -215,7 +215,7 @@ func TestRunWatchInterval(t *testing.T) {
 
 	app := &App{MillDir: dir, Out: buf, Err: buf}
 	// --interval 1 --timeout 1 should work without panicking.
-	err := app.Run("watch", "--interval", "1", "--timeout", "1")
+	err := app.Run("watch", "--interval", "1", "--timeout", "1s")
 
 	var ce *CommandError
 	if !errors.As(err, &ce) {
@@ -319,5 +319,27 @@ func TestRunWatchRouting(t *testing.T) {
 	}
 	if !strings.Contains(output, "No tasks to watch") {
 		t.Errorf("expected 'No tasks to watch', got: %q", output)
+	}
+}
+
+func TestCommandErrorError(t *testing.T) {
+	e := &CommandError{Code: 42, Msg: "something went wrong"}
+	if e.Error() != "something went wrong" {
+		t.Errorf("Error() = %q, want %q", e.Error(), "something went wrong")
+	}
+}
+
+func TestRunWatchDoubleDashHelp(t *testing.T) {
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: t.TempDir(), Out: buf, Err: buf}
+
+	err := app.runWatch([]string{"--help"})
+	if err != nil {
+		t.Fatalf("runWatch with --help returned error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "mill watch") {
+		t.Errorf("expected help text to contain 'mill watch', got: %q", output)
 	}
 }

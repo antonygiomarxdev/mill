@@ -7,7 +7,8 @@ delegates_to:
   - ux-designer
   - ui-designer
   - qa-docs
-allowed_files: [.md]
+allowed_files:
+  - .md
 skills:
   - wayfinder
   - grilling
@@ -47,6 +48,7 @@ See `roles/COMMON.md`.
 - **Issues flow through pipeline stages.** `stage:spec` → `stage:design` → `stage:dev` → ...
 - **Labels reflect real state.** If work started → issue reflects it. If blocked → `needs:` label.
 - **Priority is a conversation with the CTO.** You recommend. CTO decides.
+- **You own the issue tracker.** Close duplicates, update labels, re-scope, re-prioritize, add status comments. Backlog hygiene is your job — act, don't ask.
 
 ### Collaboration
 - **CTO + PM decide scope and priorities.** You bring data and recommendations. CTO brings vision.

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -100,7 +101,7 @@ func TestRoleSetDelegationOnlyRoleRejected(t *testing.T) {
 				t.Fatalf("expected error for delegation-only role %q", role)
 			}
 
-			want := role + " is a delegation-only role, not an active role. Valid: staff, pm"
+			want := "role '" + role + "' is delegation-only. Use mill delegate to dispatch work to this role."
 			if got := err.Error(); got != want {
 				t.Errorf("error mismatch\n  got:  %v\n  want: %v", got, want)
 			}
@@ -117,7 +118,7 @@ func TestRoleSetInvalidRoleRejected(t *testing.T) {
 		t.Fatal("expected error for invalid role")
 	}
 
-	if got := err.Error(); got != "unknown role: invalid. Valid: staff, pm" {
+	if got := err.Error(); got != "role 'invalid' is delegation-only. Use mill delegate to dispatch work to this role." {
 		t.Errorf("expected unknown role error, got: %v", got)
 	}
 }
@@ -222,6 +223,26 @@ func TestRoleGetEmptyFile(t *testing.T) {
 	}
 }
 
+func TestRoleGetInvalidFileContent(t *testing.T) {
+	dir := t.TempDir()
+	roleFile := filepath.Join(dir, "role")
+	if err := os.WriteFile(roleFile, []byte("architect"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf}
+	err := app.Run("role", "get")
+	if err == nil {
+		t.Fatal("expected error for invalid role in .mill/role")
+	}
+
+	want := `invalid role "architect" in .mill/role: only staff and pm are valid active roles; correct the file or run 'mill role set staff'`
+	if got := err.Error(); got != want {
+		t.Errorf("error mismatch\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
 func TestRoleSetWriteError(t *testing.T) {
 	dir := t.TempDir()
 	// Make the MillDir read-only so os.WriteFile fails.
@@ -306,23 +327,25 @@ func TestRoleEnforceHookTestMode(t *testing.T) {
 	}
 }
 
-func TestRoleEnforceHookStaffBypass(t *testing.T) {
+func TestRoleEnforceHookStaffBlockedOnGo(t *testing.T) {
 	root, err := projectRoot()
 	if err != nil {
 		t.Skipf("skipping: cannot find project root: %v", err)
 	}
 	hook := filepath.Join(root, "checks", "role-enforce")
 
+	// Staff is BLOCKED from writing .go files (role contract enforcement #25)
 	cmd := exec.Command("bash", hook, "--test", "staff", "anything.go")
 	cmd.Dir = root
-	if err := cmd.Run(); err != nil {
-		t.Errorf("staff should bypass enforcement for .go files, got error: %v", err)
+	if err := cmd.Run(); err == nil {
+		t.Error("staff should be blocked from committing .go files")
 	}
 
+	// Staff is ALLOWED to write .md files
 	cmd = exec.Command("bash", hook, "--test", "staff", "notes.md")
 	cmd.Dir = root
 	if err := cmd.Run(); err != nil {
-		t.Errorf("staff should bypass enforcement for .md files, got error: %v", err)
+		t.Errorf("staff should be allowed for .md files, got error: %v", err)
 	}
 }
 
@@ -345,5 +368,19 @@ func TestRoleEnforceHookMissingRole(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Errorf("hook should exit 0 when .mill/role is missing, got error: %v\noutput: %s", err, string(out))
+	}
+}
+
+func TestRoleNoArgs(t *testing.T) {
+	dir := t.TempDir()
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf}
+
+	err := app.runRole(nil)
+	if err == nil {
+		t.Fatal("expected error for no args")
+	}
+	if !strings.Contains(err.Error(), "usage: mill role") {
+		t.Errorf("expected usage error, got: %v", err)
 	}
 }

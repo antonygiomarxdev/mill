@@ -133,3 +133,33 @@ func TestSlotsNilManager(t *testing.T) {
 		t.Fatalf("expected 'No active slot manager' in output, got: %s", output)
 	}
 }
+
+func TestSlotsLimit(t *testing.T) {
+	buf := new(bytes.Buffer)
+	app := &App{Out: buf, Err: buf}
+	app.slots = slots.NewManager(8)
+
+	err := app.runSlots([]string{"limit"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "8") {
+		t.Errorf("expected '8' in output, got: %s", output)
+	}
+}
+
+func TestSlotsUnknownSubcommand(t *testing.T) {
+	buf := new(bytes.Buffer)
+	app := &App{Out: buf, Err: buf}
+	app.slots = slots.NewManager(4)
+
+	err := app.runSlots([]string{"unknown"})
+	if err == nil {
+		t.Fatal("expected error for unknown subcommand")
+	}
+	if !strings.Contains(err.Error(), "unknown slots subcommand") {
+		t.Errorf("expected 'unknown slots subcommand', got: %v", err)
+	}
+}

@@ -3,7 +3,9 @@
 package ledger
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,6 +19,12 @@ type Entry struct {
 	Verdict        string    `json:"verdict,omitempty"`
 	Classification string    `json:"classification,omitempty"`
 	Round          int       `json:"round"`
+	// File is the worktree-relative path for file_read/file_write events.
+	File string `json:"file,omitempty"`
+	// Version is the per-file monotonic counter for file_read/file_write events.
+	Version int `json:"version,omitempty"`
+	// AgentID is the dispatch phase ("produce" or "review") for file events.
+	AgentID string `json:"agent_id,omitempty"`
 }
 
 // Append writes a single JSON line entry to the ledger file at path.
@@ -42,4 +50,39 @@ func Append(path string, entry Entry) error {
 
 	_, err = f.Write(data)
 	return err
+}
+
+// ReadEntries reads and parses all JSONL entries from a ledger file.
+// Malformed lines are skipped with a warning to stderr.
+// If the file does not exist, returns an empty slice with no error.
+func ReadEntries(path string) ([]Entry, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ledger: cannot read version data from %s: %w — conflict detection disabled", path, err)
+	}
+	defer f.Close()
+
+	var entries []Entry
+	scanner := bufio.NewScanner(f)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		var e Entry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			fmt.Fprintf(os.Stderr, "ledger: skipping malformed line %d in %s: %v\n", lineNum, path, err)
+			continue
+		}
+		entries = append(entries, e)
+	}
+	if err := scanner.Err(); err != nil {
+		return entries, fmt.Errorf("ledger: error reading %s: %w", path, err)
+	}
+	return entries, nil
 }

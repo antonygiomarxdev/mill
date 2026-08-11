@@ -1,13 +1,15 @@
 ---
 role: staff
 model: pro
+agent: task
 reviewed_by: cto
 delegates_to:
   - pm
   - architect
   - reviewer
   - qa-docs
-allowed_files: []
+allowed_files:
+  - .md
 skills:
   - wayfinder
   - brainstorming

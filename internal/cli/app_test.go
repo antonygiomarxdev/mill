@@ -91,8 +91,17 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+func init() {
+	modelAvailableFn = func(string) bool { return true }
+}
+
+
 func setupTestGitRepo(t *testing.T, dir string) {
 	t.Helper()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	runGit(t, dir, "init")
 	runGit(t, dir, "config", "user.email", "test@test.com")
 	runGit(t, dir, "config", "user.name", "Test")
@@ -119,7 +128,7 @@ func currentBranch(t *testing.T, dir string) string {
 func TestRunLandEmptyGates(t *testing.T) {
 	dir := t.TempDir()
 	setupTestGitRepo(t, dir)
-	err := runLand("main", dir, []string{}, false)
+	err := runLand("main", dir, []string{}, false, false)
 	if err != nil {
 		t.Fatalf("runLand with empty gates returned error: %v", err)
 	}
@@ -130,7 +139,7 @@ func TestRunLandEmptyGates(t *testing.T) {
 
 func TestRunLandGateFailure(t *testing.T) {
 	dir := t.TempDir()
-	err := runLand("main", dir, []string{"exit 1"}, false)
+	err := runLand("main", dir, []string{"exit 1"}, false, false)
 	if err == nil {
 		t.Fatal("expected error for failing gate")
 	}
@@ -149,7 +158,7 @@ func TestRunLandConfirmNo(t *testing.T) {
 	w.Close()
 	defer func() { os.Stdin = origStdin }()
 
-	err := runLand("main", dir, []string{}, true)
+	err := runLand("main", dir, []string{}, true, false)
 	if err != nil {
 		t.Fatalf("runLand with confirm=no should return nil, got: %v", err)
 	}
@@ -208,5 +217,46 @@ func TestBuildPrompt(t *testing.T) {
 	}
 	if !strings.Contains(got, "42") {
 		t.Errorf("buildPrompt output should contain issue number 42, got: %s", got)
+	}
+}
+
+func TestVersionPrintsSomething(t *testing.T) {
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: t.TempDir(), Out: buf, Err: buf}
+	if err := app.Run("version"); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(buf.String())
+	if got == "" {
+		t.Fatal("version printed nothing")
+	}
+}
+
+func TestVersionLdflagOverride(t *testing.T) {
+	orig := Version
+	Version = "v2.0.0"
+	defer func() { Version = orig }()
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: t.TempDir(), Out: buf, Err: buf}
+	if err := app.Run("version"); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(buf.String())
+	if got != "v2.0.0" {
+		t.Errorf("expected v2.0.0, got %s", got)
+	}
+}
+
+func TestResolveVersionFallsBackToDev(t *testing.T) {
+	// In a non-git dir, resolveVersion should return "dev".
+	td := t.TempDir()
+	origDir, _ := os.Getwd()
+	os.Chdir(td)
+	defer func() { os.Chdir(origDir) }()
+
+	got := resolveVersion()
+	if got != "dev" {
+		t.Errorf("expected dev in non-git dir, got %s", got)
 	}
 }

@@ -35,7 +35,7 @@ func (a *App) runWatch(args []string) error {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(a.Err)
 	interval := fs.Int("interval", 2, "polling interval in seconds")
-	timeout := fs.Int("timeout", 0, "maximum wait time in seconds (0 = no timeout)")
+	timeout := fs.Duration("timeout", 0, "maximum wait time (0 = no timeout)")
 
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -62,7 +62,7 @@ func (a *App) runWatch(args []string) error {
 
 	var deadline <-chan time.Time
 	if *timeout > 0 {
-		timer := time.NewTimer(time.Duration(*timeout) * time.Second)
+		timer := time.NewTimer(*timeout)
 		defer timer.Stop()
 		deadline = timer.C
 	}
@@ -98,10 +98,10 @@ func (a *App) runWatch(args []string) error {
 
 // printWatchUsage writes the watch subcommand help text to w.
 func printWatchUsage(w interface{ Write([]byte) (int, error) }) {
-	fmt.Fprint(w, `Usage: mill watch [--interval <seconds>] [--timeout <seconds>]
+	fmt.Fprint(w, `Usage: mill watch [--interval <seconds>] [--timeout <duration>]
 
 --interval: polling interval in seconds (default: 2)
---timeout: maximum wait time in seconds (default: 0 = no timeout)
+--timeout: maximum wait duration (default: 0 = no timeout). Examples: 30s, 5m, 1h
 
 Exit codes:
   0 — all tasks completed successfully
@@ -110,6 +110,7 @@ Exit codes:
   124 — timeout reached with tasks still running
 `)
 }
+
 
 // isTerminal returns true when a task has reached a terminal state.
 func isTerminal(t domain.Task) bool {

@@ -29,7 +29,7 @@ func TestResolveModel56EscalationFreeToPaid(t *testing.T) {
 	cfg := config.Config{Models: map[string]string{
 		"free": "free-model", "paid": "paid-model", "pro": "pro-model",
 	}}
-	got, err := app.resolveModel56("sr-dev-be", "", "", cfg)
+	got, err := app.resolveModel("sr-dev-be", "", cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestResolveModel56EscalationPaidToPro(t *testing.T) {
 	cfg := config.Config{Models: map[string]string{
 		"free": "free-model", "paid": "paid-model", "pro": "pro-model",
 	}}
-	got, err := app.resolveModel56("sr-dev-be", "", "", cfg)
+	got, err := app.resolveModel("sr-dev-be", "", cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestResolveModel56EscalationProError(t *testing.T) {
 	cfg := config.Config{Models: map[string]string{
 		"free": "free-model", "paid": "paid-model", "pro": "pro-model",
 	}}
-	_, err := app.resolveModel56("architect", "", "", cfg)
+	_, err := app.resolveModel("architect", "", cfg)
 	if err == nil {
 		t.Fatal("expected error when pro is unavailable")
 	}
@@ -112,7 +112,7 @@ func TestResolveModel56NeverDowngrades(t *testing.T) {
 	cfg := config.Config{Models: map[string]string{
 		"free": "free-model", "paid": "paid-model", "pro": "pro-model",
 	}}
-	got, err := app.resolveModel56("sr-dev-be", "", "", cfg)
+	got, err := app.resolveModel("sr-dev-be", "", cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestResolveModel56TierFromConfig(t *testing.T) {
 		"paid": "custom-paid-v2",
 		"pro":  "laguna-ultra",
 	}}
-	got, err := app.resolveModel56("sr-dev-be", "", "", cfg)
+	got, err := app.resolveModel("sr-dev-be", "", cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestResolveModel56FlagOverride(t *testing.T) {
 		"paid": "laguna-pro",
 		"pro":  "laguna-ultra",
 	}}
-	got, err := app.resolveModel56("", "pro", "", cfg)
+	got, err := app.resolveModel("", "pro", cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestResolveModelLegacyBridge(t *testing.T) {
 		"paid": "laguna-pro",
 		"pro":  "laguna-ultra",
 	}}
-	got := app.resolveModelLegacy("sr-dev-be", "", cfg)
+	got := app.resolveModelLegacy("sr-dev-be", cfg)
 	if got != "laguna-pro" {
 		t.Errorf("expected laguna-pro via legacy bridge, got %q", got)
 	}
@@ -298,4 +298,307 @@ func TestLogCost56AppendsMultiple(t *testing.T) {
 	data, _ := os.ReadFile(app.costsPath())
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 2 { t.Errorf("expected 2 lines, got %d", len(lines)) }
+}
+
+func TestStageLabelToModelProduce(t *testing.T) {
+	got := stageLabelToModel("stage:produce")
+	if got != "laguna-free" {
+		t.Errorf("expected 'laguna-free' for stage:produce, got %q", got)
+	}
+}
+
+func TestStageLabelToModelReview(t *testing.T) {
+	got := stageLabelToModel("stage:review")
+	if got != "laguna-pro" {
+		t.Errorf("expected 'laguna-pro' for stage:review, got %q", got)
+	}
+}
+
+func TestStageLabelToModelImplement(t *testing.T) {
+	got := stageLabelToModel("stage:implement")
+	if got != "laguna-free" {
+		t.Errorf("expected 'laguna-free' for stage:implement, got %q", got)
+	}
+}
+
+func TestStageLabelToModelUnknown(t *testing.T) {
+	got := stageLabelToModel("stage:unknown")
+	if got != "laguna-free" {
+		t.Errorf("expected 'laguna-free' fallback for unknown, got %q", got)
+	}
+}
+
+func TestResolveModelProjectRootError(t *testing.T) {
+	// Change to a directory where projectRoot fails (no go.mod).
+	// resolveModelLegacy wraps resolveModel and falls back to cfg.Model on error.
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	app := &App{MillDir: dir}
+	cfg := config.Config{Model: "fallback-model"}
+	got := app.resolveModelLegacy("sr-dev-be", cfg)
+	if got != "fallback-model" {
+		t.Errorf("expected fallback model, got %q", got)
+	}
+}
+
+func TestResolveModelEscalateTierFromRole(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+	roleDir := filepath.Join(dir, ".mill", "roles", "sr-dev-be")
+	os.MkdirAll(roleDir, 0o755)
+	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte("---\nrole: sr-dev-be\nmodel: free\n---\n"), 0o644)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	origFn := modelAvailableFn
+	defer func() { modelAvailableFn = origFn }()
+	modelAvailableFn = func(model string) bool { return true }
+
+	app := &App{MillDir: dir}
+	// free tier not in Models map → escalateTier to paid
+	cfg := config.Config{Models: map[string]string{"paid": "paid-model", "pro": "pro-model"}}
+	got, err := app.resolveModel("sr-dev-be", "", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "paid-model" {
+		t.Errorf("expected 'paid-model' after escalation, got %q", got)
+	}
+}
+
+func TestResolveModel56Legacy(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+	roleDir := filepath.Join(dir, ".mill", "roles", "sr-dev-be")
+	os.MkdirAll(roleDir, 0o755)
+	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte("---\nrole: sr-dev-be\nmodel: free\n---\n"), 0o644)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	origFn := modelAvailableFn
+	defer func() { modelAvailableFn = origFn }()
+	modelAvailableFn = func(model string) bool { return true }
+
+	app := &App{MillDir: dir}
+	cfg := config.Config{Model: "legacy-model", Models: map[string]string{"free": "free-model", "paid": "paid-model"}}
+	got := app.resolveModelLegacy("sr-dev-be", cfg)
+	if got != "free-model" {
+		t.Errorf("expected 'free-model', got %q", got)
+	}
+}
+
+func TestResolveModel56EmptyModelInRole(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+	roleDir := filepath.Join(dir, ".mill", "roles", "sr-dev-be")
+	os.MkdirAll(roleDir, 0o755)
+	// Model field is empty in frontmatter
+	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte("---\nrole: sr-dev-be\nmodel:\n---\n"), 0o644)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	origFn := modelAvailableFn
+	defer func() { modelAvailableFn = origFn }()
+	modelAvailableFn = func(model string) bool { return true }
+
+	app := &App{MillDir: dir}
+	cfg := config.Config{Models: map[string]string{"paid": "paid-model", "pro": "pro-model"}}
+	got, err := app.resolveModel("sr-dev-be", "", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "paid-model" {
+		t.Errorf("expected 'paid-model' when model is empty in role, got %q", got)
+	}
+}
+
+func TestResolveModelLegacyErrorFallback(t *testing.T) {
+	app := &App{MillDir: t.TempDir()}
+	// resolveModel56 will fail because projectRoot can't find go.mod
+	// and there's no valid cfg.Model
+	cfg := config.Config{Model: "fallback-model"}
+	got := app.resolveModelLegacy("sr-dev-be", cfg)
+	if got != "fallback-model" {
+		t.Errorf("expected 'fallback-model' on error, got %q", got)
+	}
+}
+
+func TestResolveModel56BrokenRoleFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+	roleDir := filepath.Join(dir, ".mill", "roles", "sr-dev-be")
+	os.MkdirAll(roleDir, 0o755)
+	// Invalid frontmatter (no closing ---)
+	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte("garbage content"), 0o644)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	origFn := modelAvailableFn
+	defer func() { modelAvailableFn = origFn }()
+	modelAvailableFn = func(model string) bool { return true }
+
+	app := &App{MillDir: dir}
+	cfg := config.Config{Models: map[string]string{"paid": "paid-model", "pro": "pro-model"}}
+	got, err := app.resolveModel("sr-dev-be", "", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "paid-model" {
+		t.Errorf("expected 'paid-model' when role file is broken, got %q", got)
+	}
+}
+
+// --- Category override tests (AC 1-3) ---
+
+func TestResolveModelReviewCategoryOverride(t *testing.T) {
+	// AC 2: models.review set → Reviewer role uses that model
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	t.Cleanup(func() { modelAvailableFn = origFn })
+
+	app := &App{MillDir: "."}
+	cfg := config.Config{
+		Models: map[string]string{
+			"free":   "laguna-free",
+			"paid":   "laguna-pro",
+			"pro":    "laguna-ultra",
+			"review": "laguna-mega",
+		},
+	}
+	got, err := app.resolveModel("reviewer", "", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "laguna-mega" {
+		t.Errorf("expected 'laguna-mega' from review category override, got %q", got)
+	}
+}
+
+func TestResolveModelImplementCategoryOverride(t *testing.T) {
+	// AC 3: models.implement set → Sr Dev roles use that model
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	t.Cleanup(func() { modelAvailableFn = origFn })
+
+	app := &App{MillDir: "."}
+	cfg := config.Config{
+		Models: map[string]string{
+			"free":      "laguna-free",
+			"paid":      "laguna-pro",
+			"pro":       "laguna-ultra",
+			"implement": "laguna-cheap",
+		},
+	}
+	got, err := app.resolveModel("sr-dev-be", "", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "laguna-cheap" {
+		t.Errorf("expected 'laguna-cheap' from implement category override, got %q", got)
+	}
+}
+
+func TestResolveModelImplementCategorySrDevFe(t *testing.T) {
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	t.Cleanup(func() { modelAvailableFn = origFn })
+
+	app := &App{MillDir: "."}
+	cfg := config.Config{
+		Models: map[string]string{"free": "laguna-free", "paid": "laguna-pro", "implement": "laguna-cheap"},
+	}
+	got, err := app.resolveModel("sr-dev-fe", "", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "laguna-cheap" {
+		t.Errorf("expected 'laguna-cheap' for sr-dev-fe, got %q", got)
+	}
+}
+
+func TestResolveModelCategoryFallthroughWhenKeyMissing(t *testing.T) {
+	// When review key is missing, fall through to tier-based resolution
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
+	roleDir := filepath.Join(dir, ".mill", "roles", "reviewer")
+	os.MkdirAll(roleDir, 0o755)
+	os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte("---\nrole: reviewer\nmodel: paid\n---\n"), 0o644)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	t.Cleanup(func() { modelAvailableFn = origFn })
+
+	app := &App{MillDir: dir}
+	cfg := config.Config{
+		Models: map[string]string{"free": "laguna-free", "paid": "laguna-pro", "pro": "laguna-ultra"},
+	}
+	// No "review" key → uses tier from ROLE.md (paid)
+	got, err := app.resolveModel("reviewer", "", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "laguna-pro" {
+		t.Errorf("expected 'laguna-pro' from tier fallthrough, got %q", got)
+	}
+}
+
+func TestResolveModelFlagOverridesCategoryOverride(t *testing.T) {
+	// --model flag takes priority over category override
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	t.Cleanup(func() { modelAvailableFn = origFn })
+
+	app := &App{MillDir: "."}
+	cfg := config.Config{
+		Models: map[string]string{
+			"free":   "laguna-free",
+			"paid":   "laguna-pro",
+			"pro":    "laguna-ultra",
+			"review": "laguna-mega",
+		},
+	}
+	// Flag override "pro" takes priority over review category
+	got, err := app.resolveModel("reviewer", "pro", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "laguna-ultra" {
+		t.Errorf("expected 'laguna-ultra' from flag override, got %q", got)
+	}
+}
+
+func TestResolveModelCategoryUnavailableEscalates(t *testing.T) {
+	// When category override model is unavailable, escalate tier
+	origFn := modelAvailableFn
+	defer func() { modelAvailableFn = origFn }()
+	modelAvailableFn = func(model string) bool { return model != "laguna-cheap" }
+
+	app := &App{MillDir: "."}
+	cfg := config.Config{
+		Models: map[string]string{
+			"free":      "laguna-free",
+			"paid":      "laguna-pro",
+			"implement": "laguna-cheap",
+		},
+	}
+	// "laguna-cheap" unavailable → tierKeyForModel returns "implement" (custom key)
+	// → escalateTier("implement") → error → fallback to cfg.Model
+	cfg.Model = "laguna-free"
+	got, err := app.resolveModel("sr-dev-be", "", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "laguna-free" {
+		t.Errorf("expected fallback to cfg.Model, got %q", got)
+	}
 }

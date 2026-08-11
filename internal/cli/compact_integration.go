@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/antonygiomarxdev/mill/internal/adapter"
@@ -26,7 +28,20 @@ func resolveCompactMode(configFlag string, cfg config.Config) compact.Mode {
 	return ""
 }
 
-func (a *App) compactSession(session adapter.Session, model string, issueNum int, mode compact.Mode) {
+// maybeAutoCompactSession checks config and conditionally compacts the session
+// context. Called from the dispatch loop after each produce/review phase.
+func (a *App) maybeAutoCompactSession(session adapter.Session, model string, issueNum int, worktree string, cfg config.Config) {
+	if cfg.Compact == nil || !cfg.Compact.Enabled {
+		return
+	}
+	mode := compact.Mode(cfg.Compact.Mode)
+	if mode == "" {
+		mode = compact.ModeFast
+	}
+	a.compactSession(session, model, issueNum, mode, worktree)
+}
+
+func (a *App) compactSession(session adapter.Session, model string, issueNum int, mode compact.Mode, worktree string) {
 	ctx, err := session.ContextText()
 	if err != nil || ctx == "" {
 		return
@@ -40,7 +55,16 @@ func (a *App) compactSession(session adapter.Session, model string, issueNum int
 
 	compacted, event := compact.Compact(ctx, tier, issueNum)
 	event.Trigger = "auto"
-	_ = compacted
+
+	millDir := filepath.Join(worktree, ".mill")
+	if werr := os.MkdirAll(millDir, 0755); werr != nil {
+		fmt.Fprintf(a.Err, "warning: failed to create .mill dir: %v\n", werr)
+		return
+	}
+	sessionPath := filepath.Join(millDir, "session.ndjson")
+	if werr := os.WriteFile(sessionPath, []byte(compacted), 0644); werr != nil {
+		fmt.Fprintf(a.Err, "warning: failed to write compacted session: %v\n", werr)
+	}
 
 	if err := compact.WriteLog(event); err != nil {
 		fmt.Fprintf(a.Err, "warning: failed to write compaction log: %v\n", err)

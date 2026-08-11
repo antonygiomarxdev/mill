@@ -27,6 +27,13 @@ func (a *CommandCodeAdapter) Capabilities() Capabilities {
 			"deepseek-v4-flash",
 			"gpt-5",
 		},
+		ReadTool: ReadToolCapabilities{
+			LineCeiling:         2000,
+			ByteCeiling:         128 * 1024, // 128KB
+			CharCeiling:         500,
+			HasSelectorSupport:  true,
+			HasRecoveryNotes:    true,
+		},
 	}
 }
 

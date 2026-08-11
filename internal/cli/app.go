@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/antonygiomarxdev/mill/internal/adapter"
 	"github.com/antonygiomarxdev/mill/internal/config"
@@ -23,6 +24,9 @@ type App struct {
 	In          io.Reader
 	slots       *slots.Manager
 	IssueReader func(issueNum int) (body string, labels []string, err error)
+	// Backoff is the sleep function for retry backoff. If nil, time.Sleep is used.
+	// Override in tests to avoid real delays.
+	Backoff func(time.Duration)
 }
 
 // NewApp creates a new App with defaults: .mill directory, CommandCode adapter,
@@ -55,6 +59,11 @@ func (a *App) ledgerPath(issue int) string {
 // worktreePath returns the worktree directory for the given issue.
 func (a *App) worktreePath(issue int) string {
 	return filepath.Join(a.MillDir, "worktrees", fmt.Sprintf("issue-%d", issue))
+}
+
+// worktreeBranch returns the branch name for a delegated issue's worktree.
+func (a *App) worktreeBranch(issueNum int) string {
+	return fmt.Sprintf("agent/%d", issueNum)
 }
 
 // loadConfig loads the mill configuration, returning defaults if the file is missing.
@@ -97,10 +106,14 @@ func (a *App) Run(args ...string) error {
 		return a.runLand(args[1:])
 	case "watch":
 		return a.runWatch(args[1:])
+	case "clean":
+		return a.runClean(args[1:])
 	case "slots":
 		return a.runSlots(args[1:])
 	case "compact":
 		return a.runCompact(args[1:])
+	case "version":
+		return a.runVersion(args[1:])
 	default:
 		usage(a.Err)
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -119,6 +132,8 @@ Usage:
   role <get|set>     Show or set the active role (staff|pm)
   watch              Wait for task state changes (blocks until all settle)
   compact [--dry-run]  Compact session context to save tokens
+  clean [--all]      Remove completed/failed worktrees (--all for factory reset)
   slots              Show slot/concurrency status
+  version            Print mill version
 `)
 }

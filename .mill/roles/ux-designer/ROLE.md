@@ -6,7 +6,9 @@ reviewed_by: pm
 delegates_to:
   - ui-designer
   - qa-docs
-allowed_files: [.md, .pen]
+allowed_files:
+  - .md
+  - .pen
 skills:
   - prototype
   - domain-modeling

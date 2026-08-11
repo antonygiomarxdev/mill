@@ -25,9 +25,34 @@ type DispatchOpts struct {
 	Budget *Budget
 }
 
+// ReadToolCapabilities describes the forwarder harness's read tool.
+type ReadToolCapabilities struct {
+	// LineCeiling is the maximum number of lines the read tool returns
+	// in a single call. 0 means unlimited.
+	LineCeiling int `json:"line_ceiling"`
+
+	// ByteCeiling is the maximum total bytes the read tool returns
+	// in a single call. 0 means unlimited.
+	ByteCeiling int `json:"byte_ceiling"`
+
+	// CharCeiling is the maximum characters per displayed line before
+	// the tool truncates a line mid-display. 0 means unlimited.
+	CharCeiling int `json:"char_ceiling"`
+
+	// HasSelectorSupport is true when the read tool accepts line-range
+	// selectors (e.g. :50-200, :raw, :50+150, :conflicts).
+	HasSelectorSupport bool `json:"has_selector_support"`
+
+	// HasRecoveryNotes is true when the read tool emits truncation
+	// indicators (e.g. "[TRUNCATED: 1200 lines omitted]") instead of
+	// silently dropping content.
+	HasRecoveryNotes bool `json:"has_recovery_notes"`
+}
+
 // Capabilities describes what an adapter can do.
 type Capabilities struct {
-	Models []string `json:"models"`
+	Models   []string            `json:"models"`
+	ReadTool ReadToolCapabilities `json:"read_tool"`
 }
 
 // SessionResult is the outcome of a completed session.

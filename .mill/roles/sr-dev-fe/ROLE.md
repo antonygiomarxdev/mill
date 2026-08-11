@@ -5,7 +5,14 @@ agent: task
 reviewed_by: tech-lead
 delegates_to:
   - qa-docs
-allowed_files: [.go, .md, .yml, .yaml, .json]
+allowed_files:
+  - .go
+  - .md
+  - .yml
+  - .yaml
+  - .json
+forbidden_patterns:
+  - ROLE.md
 skills:
   - tdd
   - systematic-debugging

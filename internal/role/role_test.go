@@ -147,6 +147,61 @@ func TestLoadRoleNotFound(t *testing.T) {
 	}
 }
 
+func TestParseAllRoleFiles(t *testing.T) {
+	roleDirs := []string{
+		"architect", "pm", "qa-docs", "reviewer",
+		"sr-dev-be", "sr-dev-data", "sr-dev-fe",
+		"staff", "tech-lead", "ui-designer", "ux-designer",
+	}
+
+	if len(roleDirs) != 11 {
+		t.Fatalf("expected 11 roles, got %d", len(roleDirs))
+	}
+
+	for _, name := range roleDirs {
+		path := filepath.Join("../../.mill/roles", name, "ROLE.md")
+		fm, err := ParseFrontmatter(path)
+		if err != nil {
+			t.Errorf("parse %s: %v", name, err)
+			continue
+		}
+
+		if fm.Role == "" {
+			t.Errorf("%s: role is empty", name)
+		}
+		if fm.Role != name {
+			t.Errorf("%s: role mismatch: expected %s, got %s", name, name, fm.Role)
+		}
+
+		// Verify allowed_files parsed correctly for roles that have entries
+		switch name {
+		case "staff":
+			if len(fm.AllowedFiles) != 1 {
+				t.Errorf("%s: expected 1 allowed_file, got %d", name, len(fm.AllowedFiles))
+			}
+		case "sr-dev-be", "sr-dev-data", "sr-dev-fe":
+			if len(fm.AllowedFiles) != 5 {
+				t.Errorf("%s: expected 5 allowed_files, got %d: %v", name, len(fm.AllowedFiles), fm.AllowedFiles)
+			}
+			if len(fm.ForbiddenPatterns) != 1 || fm.ForbiddenPatterns[0] != "ROLE.md" {
+				t.Errorf("%s: expected forbidden_patterns [ROLE.md], got %v", name, fm.ForbiddenPatterns)
+			}
+		case "architect":
+			if len(fm.AllowedFiles) != 3 {
+				t.Errorf("%s: expected 3 allowed_files, got %d", name, len(fm.AllowedFiles))
+			}
+		case "pm", "reviewer":
+			if len(fm.AllowedFiles) != 1 {
+				t.Errorf("%s: expected 1 allowed_file, got %d", name, len(fm.AllowedFiles))
+			}
+		case "qa-docs", "tech-lead", "ui-designer", "ux-designer":
+			if len(fm.AllowedFiles) != 2 {
+				t.Errorf("%s: expected 2 allowed_files, got %d", name, len(fm.AllowedFiles))
+			}
+		}
+	}
+}
+
 func findRepoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()

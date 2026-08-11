@@ -115,7 +115,7 @@ The issue is the handoff surface. No DMs, no polling.
 
 ```
 mill.yml         — project config (models, targets, budget)
-roles/            — role definitions with YAML frontmatter
+.mill/roles/            — role definitions with YAML frontmatter
   COMMON.md       — shared rules for all roles
   staff/ROLE.md   — Staff: orchestrator, never writes code
   pm/ROLE.md      — PM: product specs, design delegation
@@ -128,9 +128,9 @@ roles/            — role definitions with YAML frontmatter
   qa-docs/        — QA/Docs: tests, changelogs, docs
   ux-designer/    — UX: flows, wireframes
   ui-designer/    — UI: components, design tokens
-checks/           — git hooks (pre-commit, pre-push, role-enforce)
-skills/           — agent skills (mill.md is the framework entry point)
-docs/adr/         — Architecture Decision Records
+checks/           — gate validation scripts (7: gate-tasks, gate-spec, gate-review, gate-frd, gate-coverage, gate-route, role-enforce)
+.mill/skills/           — agent skills (mill.md is the framework entry point)
+.mill/docs/adr/         — Architecture Decision Records
 .mill/            — runtime state (role, state.json, ledger/, worktrees/)
 ```
 
@@ -161,5 +161,5 @@ targets:
 
 ## Architecture Decision Records
 
-- [ADR 0001](docs/adr/0001-mill-as-framework.md) — Mill as framework on harness
-- [ADR 0002](docs/adr/0002-budget-enforcement.md) — Budget enforcement design
+- [ADR 0001](.mill/docs/adr/0001-mill-as-framework.md) — Mill as framework on harness
+- [ADR 0002](.mill/docs/adr/0002-budget-enforcement.md) — Budget enforcement design

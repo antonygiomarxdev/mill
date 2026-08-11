@@ -8,12 +8,14 @@ import (
 
 // Frontmatter holds the parsed YAML frontmatter from a ROLE.md file.
 type Frontmatter struct {
-	Role        string
-	Model       string
-	Agent       string
-	ReviewedBy  string
-	DelegatesTo []string
-	Skills      []string
+	Role              string
+	Model             string
+	Agent             string
+	ReviewedBy        string
+	DelegatesTo       []string
+	AllowedFiles      []string
+	ForbiddenPatterns []string
+	Skills            []string
 }
 
 // Load reads roles/COMMON.md + roles/<name>/ROLE.md and returns the
@@ -121,6 +123,12 @@ func parseFrontmatter(content string) (Frontmatter, error) {
 		case "delegates_to":
 			fm.DelegatesTo = []string{}
 			currentList = &fm.DelegatesTo
+		case "allowed_files":
+			fm.AllowedFiles = []string{}
+			currentList = &fm.AllowedFiles
+		case "forbidden_patterns":
+			fm.ForbiddenPatterns = []string{}
+			currentList = &fm.ForbiddenPatterns
 		case "skills":
 			fm.Skills = []string{}
 			currentList = &fm.Skills

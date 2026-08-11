@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -281,5 +282,193 @@ func TestStateRoundTripsTimestamps(t *testing.T) {
 	}
 	if !task.UpdatedAt.Equal(ts) {
 		t.Errorf("UpdatedAt round-trip mismatch: %v vs %v", task.UpdatedAt, ts)
+	}
+}
+
+func TestSaveAtomicNoTempFileLeft(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	s := New()
+	s.UpsertTask(domain.Task{ID: "t1", Issue: 1, Status: domain.TaskDone})
+
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Temp file must not exist after atomic rename.
+	tmpPath := path + ".tmp"
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Errorf("temp file %s should not exist after atomic save", tmpPath)
+	}
+
+	// File must be valid JSON.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read state file: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("state file is empty")
+	}
+}
+
+func TestSaveBackupRotation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	for i := 1; i <= 4; i++ {
+		s := New()
+		s.UpsertTask(domain.Task{ID: "t" + string(rune('0'+i)), Issue: i, Status: domain.TaskDone})
+		if err := s.Save(path); err != nil {
+			t.Fatalf("Save %d failed: %v", i, err)
+		}
+	}
+
+	// After 4 saves: primary + .1 + .2 exist, .3 does not.
+	for _, ext := range []string{"", ".1", ".2"} {
+		if _, err := os.Stat(path + ext); os.IsNotExist(err) {
+			t.Errorf("expected backup %s to exist", path+ext)
+		}
+	}
+
+	if _, err := os.Stat(path + ".3"); !os.IsNotExist(err) {
+		t.Error("backup .3 should not exist (max 3 copies)")
+	}
+}
+
+func TestLoadFallbackToBackup1(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	// Save valid state twice — second save creates primary and shifts first to .1.
+	s1 := New()
+	s1.UpsertTask(domain.Task{ID: "from-backup", Issue: 1, Status: domain.TaskDone})
+	if err := s1.Save(path); err != nil {
+		t.Fatalf("Save 1 failed: %v", err)
+	}
+
+	s2 := New()
+	s2.UpsertTask(domain.Task{ID: "from-primary", Issue: 2, Status: domain.TaskDone})
+	if err := s2.Save(path); err != nil {
+		t.Fatalf("Save 2 failed: %v", err)
+	}
+
+	// Corrupt primary.
+	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
+		t.Fatalf("failed to corrupt primary: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load should fall back to .1: %v", err)
+	}
+
+	if _, ok := loaded.Task("from-backup"); !ok {
+		t.Error("expected task from backup .1 to be loaded")
+	}
+}
+
+func TestLoadFallbackToBackup2(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	// Save 3 times: oldest in .2, middle in .1, newest in primary.
+	for i := 1; i <= 3; i++ {
+		s := New()
+		s.UpsertTask(domain.Task{ID: "v" + string(rune('0'+i)), Issue: i, Status: domain.TaskDone})
+		if err := s.Save(path); err != nil {
+			t.Fatalf("Save %d failed: %v", i, err)
+		}
+	}
+
+	// Corrupt primary and .1.
+	if err := os.WriteFile(path, []byte("bad"), 0o644); err != nil {
+		t.Fatalf("failed to corrupt primary: %v", err)
+	}
+	if err := os.WriteFile(path+".1", []byte("bad"), 0o644); err != nil {
+		t.Fatalf("failed to corrupt .1: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load should fall back to .2: %v", err)
+	}
+
+	if _, ok := loaded.Task("v1"); !ok {
+		t.Error("expected task from backup .2 to exist")
+	}
+}
+
+func TestLoadAllCorruptReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	// Corrupt all three files.
+	for _, ext := range []string{"", ".1", ".2"} {
+		if err := os.WriteFile(path+ext, []byte("bad json {{{"), 0o644); err != nil {
+			t.Fatalf("failed to write %s: %v", path+ext, err)
+		}
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error when all files are corrupt")
+	}
+}
+
+func TestLoadMissingBackupsNotError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	// Primary is corrupt, no backups exist.
+	if err := os.WriteFile(path, []byte("corrupt"), 0o644); err != nil {
+		t.Fatalf("failed to write corrupt primary: %v", err)
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error when primary corrupt and no backups exist")
+	}
+}
+
+func TestSaveBackupContentMatchesSaveOrder(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	// Save 1: task "first"
+	s1 := New()
+	s1.UpsertTask(domain.Task{ID: "first", Issue: 1, Status: domain.TaskDone})
+	if err := s1.Save(path); err != nil {
+		t.Fatalf("Save 1 failed: %v", err)
+	}
+
+	// Save 2: task "second"
+	s2 := New()
+	s2.UpsertTask(domain.Task{ID: "second", Issue: 2, Status: domain.TaskRunning})
+	if err := s2.Save(path); err != nil {
+		t.Fatalf("Save 2 failed: %v", err)
+	}
+
+	// .1 should contain "first"
+	data, err := os.ReadFile(path + ".1")
+	if err != nil {
+		t.Fatalf("cannot read .1: %v", err)
+	}
+	var b1 State
+	if err := json.Unmarshal(data, &b1); err != nil {
+		t.Fatalf("cannot parse .1: %v", err)
+	}
+	if _, ok := b1.Task("first"); !ok {
+		t.Error(".1 should contain task 'first'")
+	}
+	if _, ok := b1.Task("second"); ok {
+		t.Error(".1 should NOT contain task 'second'")
+	}
+
+	// Primary should contain "second"
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load primary failed: %v", err)
+	}
+	if _, ok := loaded.Task("second"); !ok {
+		t.Error("primary should contain task 'second'")
 	}
 }

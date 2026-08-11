@@ -16,8 +16,13 @@ import (
 
 func TestDelegateAcquiresSlot(t *testing.T) {
 	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
 	fa := &fakeAdapter{result: adapter.SessionResult{ExitCode: 0}}
 	buf := new(bytes.Buffer)
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	defer func() { modelAvailableFn = origFn }()
+
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 	app.slots = slots.NewManager(2)
 
@@ -34,8 +39,14 @@ func TestDelegateAcquiresSlot(t *testing.T) {
 
 func TestDelegateReleasesSlotOnCompletion(t *testing.T) {
 	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
 	fa := &fakeAdapter{result: adapter.SessionResult{ExitCode: 0}}
 	buf := new(bytes.Buffer)
+
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	defer func() { modelAvailableFn = origFn }()
+
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 	app.slots = slots.NewManager(2)
 
@@ -52,8 +63,14 @@ func TestDelegateReleasesSlotOnCompletion(t *testing.T) {
 
 func TestDelegateReleasesSlotOnError(t *testing.T) {
 	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
 	fa := &fakeAdapter{result: adapter.SessionResult{ExitCode: 1}}
 	buf := new(bytes.Buffer)
+
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	defer func() { modelAvailableFn = origFn }()
+
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 	app.slots = slots.NewManager(2)
 
@@ -70,8 +87,14 @@ func TestDelegateReleasesSlotOnError(t *testing.T) {
 
 func TestDelegateBlocksUntilSlotFree(t *testing.T) {
 	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
 	fa := &fakeAdapter{result: adapter.SessionResult{ExitCode: 0}}
 	var errBuf bytes.Buffer
+
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	defer func() { modelAvailableFn = origFn }()
+
 	app := &App{Adapter: fa, MillDir: dir, Out: &errBuf, Err: &errBuf, IssueReader: defaultIssueReader}
 	app.slots = slots.NewManager(1)
 
@@ -109,10 +132,16 @@ func TestDelegateBlocksUntilSlotFree(t *testing.T) {
 
 func TestDelegatePriorityStaff(t *testing.T) {
 	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
 	fa := &fakeAdapter{result: adapter.SessionResult{ExitCode: 0}}
 	buf := new(bytes.Buffer)
 
 	os.WriteFile(filepath.Join(dir, "role"), []byte("staff"), 0o644)
+
+
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	defer func() { modelAvailableFn = origFn }()
 
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 	app.slots = slots.NewManager(2)
@@ -130,6 +159,11 @@ func TestDelegatePriorityNonStaffRejected(t *testing.T) {
 
 	os.WriteFile(filepath.Join(dir, "role"), []byte("sr-dev-be"), 0o644)
 
+
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	defer func() { modelAvailableFn = origFn }()
+
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 	app.slots = slots.NewManager(2)
 
@@ -144,8 +178,14 @@ func TestDelegatePriorityNonStaffRejected(t *testing.T) {
 
 func TestDelegatePriorityPreemptsQueue(t *testing.T) {
 	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
 	fa := &fakeAdapter{result: adapter.SessionResult{ExitCode: 0}}
 	buf := new(bytes.Buffer)
+
+
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	defer func() { modelAvailableFn = origFn }()
 
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
 	app.slots = slots.NewManager(1)
@@ -229,3 +269,81 @@ func TestSlotIntegrationConfigConcurrencyRoundTrip(t *testing.T) {
 		t.Fatalf("expected MaxSlots=8 after round-trip, got %d", loaded.Concurrency.MaxSlots)
 	}
 }
+
+func TestReleaseSlotNilManager(t *testing.T) {
+	// Should not panic with nil manager.
+	ReleaseSlot(nil)
+}
+
+func TestReleaseSlotNonNil(t *testing.T) {
+	mgr := slots.NewManager(4)
+	ctx := context.Background()
+	_, err := mgr.Acquire(ctx, 1, "staff", false)
+	if err != nil {
+		t.Fatalf("failed to acquire slot: %v", err)
+	}
+	ReleaseSlot(mgr)
+	// After release, slot should be free.
+	status := mgr.Status()
+	if len(status.Occupied) != 0 {
+		t.Errorf("expected 0 occupied slots after release, got %d", len(status.Occupied))
+	}
+}
+
+func TestEnsureSlotManagerExisting(t *testing.T) {
+	mgr := slots.NewManager(8)
+	result := EnsureSlotManager(mgr, config.Config{Concurrency: config.Concurrency{MaxSlots: 4}})
+	if result != mgr {
+		t.Error("EnsureSlotManager should return existing manager")
+	}
+}
+
+func TestEnsureSlotManagerNew(t *testing.T) {
+	result := EnsureSlotManager(nil, config.Config{Concurrency: config.Concurrency{MaxSlots: 2}})
+	if result == nil {
+		t.Fatal("EnsureSlotManager should create new manager")
+	}
+	status := result.Status()
+	if status.MaxSlots != 2 {
+		t.Errorf("expected MaxSlots=2, got %d", status.MaxSlots)
+	}
+}
+
+func TestMaxSlotsFromConfigZero(t *testing.T) {
+	if s := MaxSlotsFromConfig(config.Config{Concurrency: config.Concurrency{MaxSlots: 0}}); s != 4 {
+		t.Errorf("MaxSlotsFromConfig(0) = %d, want 4", s)
+	}
+}
+
+func TestMaxSlotsFromConfigNegative(t *testing.T) {
+	if s := MaxSlotsFromConfig(config.Config{Concurrency: config.Concurrency{MaxSlots: -1}}); s != 4 {
+		t.Errorf("MaxSlotsFromConfig(-1) = %d, want 4", s)
+	}
+}
+
+func TestMaxSlotsFromConfigCustom(t *testing.T) {
+	if s := MaxSlotsFromConfig(config.Config{Concurrency: config.Concurrency{MaxSlots: 10}}); s != 10 {
+		t.Errorf("MaxSlotsFromConfig(10) = %d, want 10", s)
+	}
+}
+
+func TestAcquireSlotWithCancelledContext(t *testing.T) {
+	mgr := slots.NewManager(1)
+	// Fill the only slot
+	ctx := context.Background()
+	_, err := mgr.Acquire(ctx, 1, "staff", false)
+	if err != nil {
+		t.Fatalf("failed to acquire slot: %v", err)
+	}
+
+	// Cancel the context for the next acquire
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	buf := new(bytes.Buffer)
+	_, err = AcquireSlot(cancelCtx, mgr, buf, 2, "staff", false, 1)
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+}
+

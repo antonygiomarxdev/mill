@@ -23,6 +23,7 @@ const (
 	DefaultWarningTimeout = 120 * time.Second
 	DefaultMaxSlots       = 4
 )
+
 // ErrShutdown is returned by Acquire when the slot manager has been shut down.
 var ErrShutdown = errors.New("slot manager shut down")
 
@@ -34,15 +35,15 @@ type Manager struct {
 	queue chan slotRequest // buffered channel carrying incoming requests
 	stop  chan struct{}    // closed by Shutdown to stop the dispatch loop
 
-	Warn           io.Writer    // warning output; defaults to os.Stderr
-	Err            io.Writer    // error output; defaults to os.Stderr
+	Warn           io.Writer     // warning output; defaults to os.Stderr
+	Err            io.Writer     // error output; defaults to os.Stderr
 	HardLimit      time.Duration // max slot ownership before forced reclaim
 	WarningTimeout time.Duration // queue wait threshold for warning emission
 
 	mu             sync.Mutex
-	active         map[int]*activeSlot  // slotID → slot
-	goroutineSlots map[uint64]int       // goroutine ID → slotID
-	waiters        []*waiter            // ordered queue of pending requests
+	active         map[int]*activeSlot // slotID → slot
+	goroutineSlots map[uint64]int      // goroutine ID → slotID
+	waiters        []*waiter           // ordered queue of pending requests
 	nextSlotID     int
 	maxSlots       int
 
@@ -62,7 +63,7 @@ type slotRequest struct {
 // slotResult is the outcome written back to the caller's result channel.
 type slotResult struct {
 	err        error
-	position   int       // queue position at enqueue time (0 = immediate)
+	position   int // queue position at enqueue time (0 = immediate)
 	acquiredAt time.Time
 }
 
@@ -117,15 +118,15 @@ func NewManager(maxSlots int) *Manager {
 	}
 
 	m := &Manager{
-		maxSlots:        maxSlots,
-		queue:           make(chan slotRequest, 256),
-		stop:            make(chan struct{}),
-		active:          make(map[int]*activeSlot),
-		goroutineSlots:  make(map[uint64]int),
-		Warn:            os.Stderr,
-		Err:             os.Stderr,
-		HardLimit:       DefaultHardLimit,
-		WarningTimeout:  DefaultWarningTimeout,
+		maxSlots:       maxSlots,
+		queue:          make(chan slotRequest, 256),
+		stop:           make(chan struct{}),
+		active:         make(map[int]*activeSlot),
+		goroutineSlots: make(map[uint64]int),
+		Warn:           os.Stderr,
+		Err:            os.Stderr,
+		HardLimit:      DefaultHardLimit,
+		WarningTimeout: DefaultWarningTimeout,
 	}
 
 	go m.dispatchLoop()
@@ -327,7 +328,6 @@ func (m *Manager) assignNextLocked() {
 		return
 	}
 }
-
 
 // ---------------------------------------------------------------------------
 // periodic checks

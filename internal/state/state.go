@@ -24,32 +24,42 @@ func New() State {
 	}
 }
 
-// Load reads state from path. If the file does not exist,
-// Load reads state from path with backup fallback. If the primary file does
-// not exist, an empty State is returned. If the primary file contains corrupt
-// JSON, Load tries state.json.1, then state.json.2. Only returns error when
-// all available files fail to parse.
+// Load reads state from path with backup fallback. If the primary file parses,
+// it is returned directly. If the primary is missing (os.IsNotExist), Load
+// falls back to state.json.1, then state.json.2, so a crash in the
+// rotate->rename window remains recoverable. If the primary is corrupt, the
+// same backup fallback is attempted. An empty State is returned only when no
+// primary file exists and no valid (or corrupt) backup is present. An error is
+// returned when a corrupt primary or backup exists and every parse attempt
+// fails.
 func Load(path string) (State, error) {
 	// Try primary first.
 	s, err := parseStateFile(path)
 	if err == nil {
 		return s, nil
 	}
-	if os.IsNotExist(err) {
-		return New(), nil
-	}
 
-	// Primary corrupt — try backups in order.
+	// Primary failed (missing or corrupt); fall back to backups in order.
+	primaryMissing := os.IsNotExist(err)
+	hadCorrupt := false
+
 	for _, n := range []int{1, 2} {
 		bp := backupPath(path, n)
-		s, bkErr := parseStateFile(bp)
+		bs, bkErr := parseStateFile(bp)
 		if bkErr == nil {
-			return s, nil
+			return bs, nil
 		}
 		if !os.IsNotExist(bkErr) {
-			// Backup exists but corrupt — keep trying.
-			continue
+			// Backup exists but is corrupt — remember corruption occurred.
+			hadCorrupt = true
 		}
+	}
+
+	// No valid file was found. If the primary was simply missing and no corrupt
+	// backup existed, treat this as a fresh state; otherwise a corrupt
+	// primary/backup exists and all parse attempts failed.
+	if primaryMissing && !hadCorrupt {
+		return New(), nil
 	}
 
 	return State{}, fmt.Errorf("state: cannot load %s (corrupt, no valid backup): %w", path, err)

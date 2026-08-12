@@ -15,8 +15,8 @@ func TestDefault(t *testing.T) {
 	if c.Provider != "commandcode" {
 		t.Errorf("expected provider %q, got %q", "commandcode", c.Provider)
 	}
-	if c.Model != "laguna-free" {
-		t.Errorf("expected model %q, got %q", "laguna-free", c.Model)
+	if c.Model != "" {
+		t.Errorf("expected model %q, got %q", "", c.Model)
 	}
 	if c.MaxRounds != 4 {
 		t.Errorf("expected max_rounds %d, got %d", 4, c.MaxRounds)

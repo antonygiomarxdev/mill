@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/antonygiomarxdev/mill/internal/domain"
 )
 
 type Entry struct {
@@ -25,6 +27,16 @@ type Entry struct {
 	Version int `json:"version,omitempty"`
 	// AgentID is the dispatch phase ("produce" or "review") for file events.
 	AgentID string `json:"agent_id,omitempty"`
+	// FailureClass is a coarse-grained failure bucket for task lifecycle events.
+	FailureClass domain.FailureClass `json:"failure_class,omitempty"`
+	// Phase is the task lifecycle phase associated with the event.
+	Phase domain.TaskPhase `json:"phase,omitempty"`
+	// Role is the mill role (e.g. "sr-dev-be") associated with the event.
+	Role string `json:"role,omitempty"`
+	// ParentIssue is the parent issue number this entry is nested under.
+	ParentIssue int `json:"parent_issue,omitempty"`
+	// Depth is the recursion depth of the task producing this entry.
+	Depth int `json:"depth,omitempty"`
 }
 
 // Append writes a single JSON line entry to the ledger file at path.

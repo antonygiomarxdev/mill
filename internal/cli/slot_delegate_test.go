@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,9 @@ import (
 
 	"github.com/antonygiomarxdev/mill/internal/adapter"
 	"github.com/antonygiomarxdev/mill/internal/config"
+	"github.com/antonygiomarxdev/mill/internal/domain"
 	"github.com/antonygiomarxdev/mill/internal/slots"
+	"github.com/antonygiomarxdev/mill/internal/state"
 )
 
 func TestDelegateAcquiresSlot(t *testing.T) {
@@ -138,7 +141,6 @@ func TestDelegatePriorityStaff(t *testing.T) {
 
 	os.WriteFile(filepath.Join(dir, "role"), []byte("staff"), 0o644)
 
-
 	origFn := modelAvailableFn
 	modelAvailableFn = func(string) bool { return true }
 	defer func() { modelAvailableFn = origFn }()
@@ -158,7 +160,6 @@ func TestDelegatePriorityNonStaffRejected(t *testing.T) {
 	buf := new(bytes.Buffer)
 
 	os.WriteFile(filepath.Join(dir, "role"), []byte("sr-dev-be"), 0o644)
-
 
 	origFn := modelAvailableFn
 	modelAvailableFn = func(string) bool { return true }
@@ -181,7 +182,6 @@ func TestDelegatePriorityPreemptsQueue(t *testing.T) {
 	setupTestGitRepo(t, dir)
 	fa := &fakeAdapter{result: adapter.SessionResult{ExitCode: 0}}
 	buf := new(bytes.Buffer)
-
 
 	origFn := modelAvailableFn
 	modelAvailableFn = func(string) bool { return true }
@@ -347,3 +347,125 @@ func TestAcquireSlotWithCancelledContext(t *testing.T) {
 	}
 }
 
+func TestAcquireSlotExhaustionReturnsEnvFailure(t *testing.T) {
+	origTimeout := slotAcquireTimeout
+	slotAcquireTimeout = 50 * time.Millisecond
+	defer func() { slotAcquireTimeout = origTimeout }()
+
+	mgr := slots.NewManager(1)
+	defer mgr.Shutdown()
+
+	// Occupy the only slot.
+	if _, err := mgr.Acquire(context.Background(), 1, "staff", false); err != nil {
+		t.Fatalf("failed to acquire slot: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	start := time.Now()
+	_, err := AcquireSlot(context.Background(), mgr, buf, 2, "staff", false, 1)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, ErrSlotsExhausted) {
+		t.Fatalf("expected ErrSlotsExhausted, got %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("AcquireSlot blocked %s instead of timing out (deadlock)", elapsed)
+	}
+	if !strings.Contains(buf.String(), "slots agotados") {
+		t.Fatalf("expected 'slots agotados' notification, got %q", buf.String())
+	}
+}
+
+func TestAcquireSlotShutdownReturnsExhausted(t *testing.T) {
+	mgr := slots.NewManager(1)
+	defer mgr.Shutdown()
+
+	// Occupy the only slot.
+	if _, err := mgr.Acquire(context.Background(), 1, "staff", false); err != nil {
+		t.Fatalf("failed to acquire slot: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	done := make(chan error, 1)
+	go func() {
+		_, err := AcquireSlot(context.Background(), mgr, buf, 2, "staff", false, 1)
+		done <- err
+	}()
+
+	// Wait until the waiter is enqueued so Shutdown can drain it.
+	deadline := time.Now().Add(2 * time.Second)
+	for len(mgr.Status().Queue) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("waiter never enqueued")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	mgr.Shutdown()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrSlotsExhausted) {
+			t.Fatalf("expected ErrSlotsExhausted, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("AcquireSlot blocked after shutdown (deadlock)")
+	}
+}
+
+func TestDelegateSlotExhaustionAbortsWithEnvFailure(t *testing.T) {
+	origTimeout := slotAcquireTimeout
+	slotAcquireTimeout = 50 * time.Millisecond
+	defer func() { slotAcquireTimeout = origTimeout }()
+
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+	fa := &fakeAdapter{result: adapter.SessionResult{ExitCode: 0}}
+	var errBuf bytes.Buffer
+
+	origFn := modelAvailableFn
+	modelAvailableFn = func(string) bool { return true }
+	defer func() { modelAvailableFn = origFn }()
+
+	app := &App{Adapter: fa, MillDir: dir, Out: &errBuf, Err: &errBuf, IssueReader: defaultIssueReader}
+	app.slots = slots.NewManager(1)
+	defer app.slots.Shutdown()
+
+	// Occupy the only slot.
+	if _, err := app.slots.Acquire(context.Background(), 99, "staff", false); err != nil {
+		t.Fatalf("failed to acquire external slot: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Run("delegate", "--wait", "42")
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("delegate returned error on slot exhaustion: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("delegate blocked indefinitely on slot exhaustion (deadlock)")
+	}
+
+	if !strings.Contains(errBuf.String(), "slots agotados") {
+		t.Fatalf("expected 'slots agotados' notification, got: %s", errBuf.String())
+	}
+
+	s, _ := state.Load(app.statePath())
+	task, ok := s.Task("task-42")
+	if !ok {
+		t.Fatal("expected task-42 to exist")
+	}
+	if task.Phase != domain.TaskPhaseAborted {
+		t.Errorf("expected phase %q, got %q", domain.TaskPhaseAborted, task.Phase)
+	}
+	if task.FailureClass != domain.ENVIRONMENT_FAILURE {
+		t.Errorf("expected failure class %q, got %q", domain.ENVIRONMENT_FAILURE, task.FailureClass)
+	}
+	if task.AbortReason != "slots agotados" {
+		t.Errorf("expected abort reason %q, got %q", "slots agotados", task.AbortReason)
+	}
+}

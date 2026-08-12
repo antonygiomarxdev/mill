@@ -5,15 +5,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
 	"github.com/antonygiomarxdev/mill/internal/compact"
 	"github.com/antonygiomarxdev/mill/internal/config"
 	"github.com/antonygiomarxdev/mill/internal/domain"
 	"github.com/antonygiomarxdev/mill/internal/slots"
 	"github.com/antonygiomarxdev/mill/internal/state"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
 )
 
 type errorReader struct{}

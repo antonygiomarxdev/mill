@@ -111,7 +111,6 @@ Exit codes:
 `)
 }
 
-
 // isTerminal returns true when a task has reached a terminal state.
 func isTerminal(t domain.Task) bool {
 	return t.Status == domain.TaskDone || t.Status == domain.TaskError

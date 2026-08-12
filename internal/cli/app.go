@@ -13,6 +13,7 @@ import (
 	"github.com/antonygiomarxdev/mill/internal/adapter"
 	"github.com/antonygiomarxdev/mill/internal/config"
 	"github.com/antonygiomarxdev/mill/internal/issue"
+	"github.com/antonygiomarxdev/mill/internal/recursion"
 	"github.com/antonygiomarxdev/mill/internal/slots"
 )
 
@@ -24,6 +25,9 @@ type App struct {
 	In          io.Reader
 	slots       *slots.Manager
 	IssueReader func(issueNum int) (body string, labels []string, err error)
+	// Recursion is the recursive delegation engine, initialized only when
+	// mill.yml configures a recursion section. Nil when recursion is absent.
+	Recursion *recursion.Delegator
 	// Backoff is the sleep function for retry backoff. If nil, time.Sleep is used.
 	// Override in tests to avoid real delays.
 	Backoff func(time.Duration)
@@ -44,6 +48,23 @@ func NewApp() *App {
 // statePath returns the path to the state file.
 func (a *App) statePath() string {
 	return filepath.Join(a.MillDir, "state.json")
+}
+
+// initRecursion builds the recursive delegation engine from mill.yml's
+// recursion section. It is a no-op (returns nil) when the section is absent
+// or entirely zero-valued, leaving a.Recursion nil.
+func (a *App) initRecursion(myml *config.MillYML) {
+	if myml == nil || myml.Recursion.IsZero() {
+		a.Recursion = nil
+		return
+	}
+	rc := myml.Recursion
+	a.Recursion = &recursion.Delegator{
+		RolesRoot: filepath.Join(a.MillDir, "roles"),
+		Cost:      &recursion.CostResolver{Models: rc.Models},
+		MaxDepth:  rc.MaxDepth,
+		StatePath: filepath.Join(a.MillDir, "state", "recursion.json"),
+	}
 }
 
 // configPath returns the path to the config file.

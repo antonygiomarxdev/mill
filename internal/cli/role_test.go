@@ -295,8 +295,8 @@ func TestRoleEnforceHookTestMode(t *testing.T) {
 		file     string
 		wantExit int // 0 = allowed, 1 = blocked
 	}{
-		{"pm", "foo.go", 1},              // AC 6
-		{"pm", "foo.md", 0},              // AC 7
+		{"pm", "foo.go", 1}, // AC 6
+		{"pm", "foo.md", 0}, // AC 7
 		{"sr-dev-be", "main.go", 0},
 		{"sr-dev-be", "layout.pen", 1},
 		{"tech-lead", "main.go", 0},

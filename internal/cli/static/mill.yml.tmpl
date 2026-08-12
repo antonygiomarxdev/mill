@@ -13,6 +13,18 @@ max-rounds: {{.MaxRounds}}
 concurrency:
   max-slots: 4   # max simultaneous agent dispatches
 
+# Recursive delegation — chain of command automation
+# Each role delegates down the hierarchy automatically
+# view: "result" (final answer only) or "tree" (full delegation tree)
+# max_depth: caps the delegation chain length (default 4)
+# models: cost tiers — "pro" for thinking roles, "cheap" for execution roles
+recursion:
+  view: result
+  max_depth: 4
+  models:
+    pro: deepseek/deepseek-v4-pro
+    cheap: deepseek/deepseek-v4-flash
+
 # Context compaction — trims old conversation to prevent context-window exhaustion
 compact:
   enabled: false   # set to true to auto-compact long sessions

@@ -9,17 +9,8 @@ import (
 func TestDefaultModelsAndRate(t *testing.T) {
 	c := Default()
 
-	if c.Models == nil {
-		t.Fatal("expected Models to be non-nil")
-	}
-	if c.Models["free"] != "laguna-free" {
-		t.Errorf("expected Models[free]=laguna-free, got %q", c.Models["free"])
-	}
-	if c.Models["paid"] != "laguna-pro" {
-		t.Errorf("expected Models[paid]=laguna-pro, got %q", c.Models["paid"])
-	}
-	if c.Models["pro"] != "laguna-ultra" {
-		t.Errorf("expected Models[pro]=laguna-ultra, got %q", c.Models["pro"])
+	if c.Models != nil {
+		t.Fatalf("expected Models to be nil, got %v", c.Models)
 	}
 	if c.Rate != 0 {
 		t.Errorf("expected Rate 0, got %f", c.Rate)

@@ -12,11 +12,24 @@ type MillYMLConcurrency struct {
 	MaxSlots int `yaml:"max-slots"`
 }
 
+// RecursionConfig holds the recursion section of mill.yml.
+type RecursionConfig struct {
+	View     string            `yaml:"view"`      // "result" or "tree"
+	Models   map[string]string `yaml:"models"`    // tier -> model name
+	MaxDepth int               `yaml:"max_depth"` // default 4
+}
+
+// IsZero reports whether no recursion settings are configured.
+func (r RecursionConfig) IsZero() bool {
+	return r.View == "" && r.MaxDepth == 0 && len(r.Models) == 0
+}
+
 // MillYML holds the parsed contents of mill.yml.
 type MillYML struct {
-	Project     string              `yaml:"project"`
-	Provider    string              `yaml:"provider"`
-	Concurrency MillYMLConcurrency  `yaml:"concurrency"`
+	Project     string             `yaml:"project"`
+	Provider    string             `yaml:"provider"`
+	Concurrency MillYMLConcurrency `yaml:"concurrency"`
+	Recursion   RecursionConfig    `yaml:"recursion,omitempty"`
 }
 
 // LoadAndValidate reads mill.yml at path, parses it as YAML, and validates

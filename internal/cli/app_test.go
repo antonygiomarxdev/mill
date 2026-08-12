@@ -172,6 +172,7 @@ func currentBranch(t *testing.T, dir string) string {
 func TestRunLandEmptyGates(t *testing.T) {
 	dir := t.TempDir()
 	setupTestGitRepo(t, dir)
+	runGit(t, dir, "checkout", "main")
 	err := runLand("main", dir, []string{}, false, false)
 	if err != nil {
 		t.Fatalf("runLand with empty gates returned error: %v", err)
@@ -224,6 +225,7 @@ func TestAppRunLandNoArgs(t *testing.T) {
 func TestRunLandSuccessWithGates(t *testing.T) {
 	dir := t.TempDir()
 	setupTestGitRepo(t, dir)
+	runGit(t, dir, "checkout", "main")
 	buf := new(bytes.Buffer)
 	app := &App{MillDir: t.TempDir(), Out: buf, Err: buf}
 	err := app.Run("land", "-worktree", dir, "main", "echo ok")

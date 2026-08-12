@@ -34,13 +34,16 @@ func TestNewTaskCreatesTaskWithPendingStatus(t *testing.T) {
 	}
 }
 
-func TestTaskUpdateStatusSetsUpdatedAt(t *testing.T) {
+func TestTaskTransitionPersistsAllArgs(t *testing.T) {
 	task := NewTask("task-1", 1)
 	originalUpdated := task.UpdatedAt
 
 	time.Sleep(10 * time.Millisecond)
-	task.UpdateStatus(TaskDone, VerdictApproved, 3)
+	task.Transition(TaskPhaseReview, TaskDone, VerdictApproved, 3, CLASS_OK)
 
+	if task.Phase != TaskPhaseReview {
+		t.Errorf("expected phase %q, got %q", TaskPhaseReview, task.Phase)
+	}
 	if task.Status != TaskDone {
 		t.Errorf("expected status %q, got %q", TaskDone, task.Status)
 	}
@@ -49,6 +52,9 @@ func TestTaskUpdateStatusSetsUpdatedAt(t *testing.T) {
 	}
 	if task.Verdict != VerdictApproved {
 		t.Errorf("expected verdict %q, got %q", VerdictApproved, task.Verdict)
+	}
+	if task.FailureClass != CLASS_OK {
+		t.Errorf("expected failure class %q, got %q", CLASS_OK, task.FailureClass)
 	}
 	if !task.UpdatedAt.After(originalUpdated) {
 		t.Error("expected UpdatedAt to be updated")

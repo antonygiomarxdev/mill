@@ -32,7 +32,7 @@ func TestSessionEndSetsEndedAt(t *testing.T) {
 	session := NewSession("session-1", "task-1", 1)
 
 	time.Sleep(10 * time.Millisecond)
-	session.End(SessionDone, 0, 2, VerdictApproved, "output text")
+	session.End(SessionDone, 0, 2, VerdictApproved, "output text", "artifact.txt")
 
 	if session.Status != SessionDone {
 		t.Errorf("expected status %q, got %q", SessionDone, session.Status)
@@ -56,7 +56,7 @@ func TestSessionEndSetsEndedAt(t *testing.T) {
 
 func TestSessionEndWithError(t *testing.T) {
 	session := NewSession("session-1", "task-1", 1)
-	session.End(SessionError, 1, 0, "", "error output")
+	session.End(SessionError, 1, 0, "", "error output", "artifact.txt")
 
 	if session.Status != SessionError {
 		t.Errorf("expected status %q, got %q", SessionError, session.Status)
@@ -132,6 +132,47 @@ func TestVerdictValues(t *testing.T) {
 	for _, tc := range tests {
 		if string(tc.verdict) != tc.expected {
 			t.Errorf("expected %q, got %q", tc.expected, string(tc.verdict))
+		}
+	}
+}
+
+func TestSessionEndPopulatesResultFields(t *testing.T) {
+	session := NewSession("session-1", "task-1", 1)
+
+	time.Sleep(10 * time.Millisecond)
+	session.RegisterHeartbeat()
+
+	time.Sleep(10 * time.Millisecond)
+	artifactPath := "/out/artifact.txt"
+	session.End(SessionDone, 0, 0, VerdictApproved, "output", artifactPath)
+
+	if session.Duration <= 0 {
+		t.Errorf("expected positive duration, got %v", session.Duration)
+	}
+	if session.HeartbeatStaleness < 0 {
+		t.Errorf("expected non-negative heartbeat staleness, got %v", session.HeartbeatStaleness)
+	}
+	if session.HeartbeatStaleness >= session.Duration {
+		t.Errorf("expected heartbeat staleness < duration, got staleness=%v duration=%v",
+			session.HeartbeatStaleness, session.Duration)
+	}
+	if session.ArtifactPath != artifactPath {
+		t.Errorf("expected artifact path %q, got %q", artifactPath, session.ArtifactPath)
+	}
+
+	data, err := json.Marshal(session)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	for _, key := range []string{"duration", "heartbeat_staleness", "artifact_path"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("expected %q key in JSON", key)
 		}
 	}
 }

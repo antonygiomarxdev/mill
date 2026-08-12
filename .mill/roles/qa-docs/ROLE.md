@@ -1,7 +1,7 @@
 ---
 role: qa-docs
 model: free→paid
-agent: scout
+agent: task
 reviewed_by: delegator
 delegates_to: []
 allowed_files:

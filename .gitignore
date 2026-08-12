@@ -1,5 +1,15 @@
 mill
-/.mill/
+
+# .mill/ is agent runtime state and is not tracked — with two exceptions.
+# Role definitions and the phase gates are source, not state: a delegated
+# worktree is created with `git worktree add`, which only materialises
+# tracked files, so anything an agent needs to read must be versioned.
+# Note the trailing /*: git cannot re-include anything inside a directory
+# that is itself excluded, so the contents are excluded and two subtrees
+# are added back.
+/.mill/*
+!/.mill/roles/
+!/.mill/checks/
 
 # Session exports from the agent harness (multi-MB HTML transcripts)
 omp-session-*.html

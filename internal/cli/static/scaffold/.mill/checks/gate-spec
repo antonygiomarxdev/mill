@@ -4,8 +4,8 @@ set -euo pipefail
 issue="${1:?usage: $0 <issue-number>}"
 mkdir -p ".mill/phases/${issue}"
 spec=".mill/phases/${issue}/spec.md"
-test -f "$spec" || { echo "BLOCKED: spec.md missing for #${issue}. Spawn Architect."; exit 1; }
+test -f "$spec" || { echo "gate-spec: spec.md missing for #${issue}. Spawn Architect." >&2; exit 1; }
 for section in "Architecture" "Components affected" "Risks"; do
-  grep -q "## ${section}" "$spec" || { echo "BLOCKED: spec.md missing section '${section}'"; exit 1; }
+  grep -q "## ${section}" "$spec" || { echo "gate-spec: spec.md missing section '${section}'" >&2; exit 1; }
 done
 echo "SPEC gate passed for #${issue}"

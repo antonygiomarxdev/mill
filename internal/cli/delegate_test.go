@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1049,6 +1050,148 @@ func TestInstallHooksRejectsInvalidGitFile(t *testing.T) {
 	}
 }
 
+// gitAvailable reports whether the git binary is on PATH.
+func gitAvailable() bool {
+	_, err := exec.LookPath("git")
+	return err == nil
+}
+
+// runGateLoop executes the pre-commit dispatcher's gate loop (the final
+// section of preCommitHookScript) against worktree's .mill/checks directory,
+// with the given cwd so the glob resolves inside the worktree.
+func runGateLoop(t *testing.T, worktree string, gates []string) (string, error) {
+	t.Helper()
+	// Cut the loop out of the dispatcher; only the section that matters here
+	// is executed, so the tests don't need go build/go vet to succeed.
+	start := strings.Index(preCommitHookScript, "# Run additional gate scripts if present")
+	if start < 0 {
+		t.Fatal("gate loop section not found in preCommitHookScript")
+	}
+	end := strings.Index(preCommitHookScript[start:], "\necho \"mill: pre-commit passed\"")
+	loop := preCommitHookScript[start : start+end]
+	if len(gates) > 0 {
+		loop += "\n" + strings.Join(gates, "\n")
+	}
+	cmd := exec.Command("bash", "-c", loop)
+	cmd.Dir = worktree
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func TestInstallHooksDoesNotLeakHooksPathToMainRepo(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git binary not available")
+	}
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	// Create a real git worktree
+	wt := filepath.Join(dir, "worktree-hooks")
+	runGit(t, dir, "worktree", "add", wt)
+
+	if err := installHooks(wt); err != nil {
+		t.Fatalf("installHooks returned error: %v", err)
+	}
+
+	// The main repo's core.hooksPath must still be unset — the worktree
+	// setting lives in per-worktree config, not the shared config.
+	cmd := exec.Command("git", "-C", dir, "config", "core.hooksPath")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err == nil {
+		t.Fatalf("main repo core.hooksPath is set to %q; expected unset", strings.TrimSpace(string(out)))
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Fatalf("git config core.hooksPath failed unexpectedly: %v", err)
+	}
+
+	// And the worktree's own hooksPath must point at its hooks directory.
+	cmd = exec.Command("git", "-C", wt, "config", "--worktree", "core.hooksPath")
+	cmd.Dir = wt
+	out, err = cmd.Output()
+	if err != nil {
+		t.Fatalf("failed to read worktree core.hooksPath: %v", err)
+	}
+	want := filepath.Join(wt, ".mill", "hooks")
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Errorf("worktree core.hooksPath = %q, want %q", got, want)
+	}
+}
+
+func TestGateLoopRunsGatesAndSkipsLibrary(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash binary not available")
+	}
+	dir := t.TempDir()
+	checksDir := filepath.Join(dir, ".mill", "checks")
+	if err := os.MkdirAll(checksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// common.sh is a helper library that would abort the loop if executed:
+	// it is not a gate and must be skipped.
+	commonPath := filepath.Join(checksDir, "common.sh")
+	if err := os.WriteFile(commonPath, []byte("#!/bin/bash\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// gate-ok is a real gate that passes.
+	okGate := filepath.Join(checksDir, "gate-ok")
+	if err := os.WriteFile(okGate, []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runGateLoop(t, dir, nil)
+	if err != nil {
+		t.Fatalf("gate loop failed with only passing gates: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Running gate: gate-ok") {
+		t.Errorf("expected gate-ok to run, output:\n%s", out)
+	}
+	if strings.Contains(out, "Running gate: common.sh") {
+		t.Errorf("common.sh was executed as a gate — it is a library, not a gate; output:\n%s", out)
+	}
+
+	// Add a failing gate: the loop must now fail.
+	badGate := filepath.Join(checksDir, "gate-bad")
+	if err := os.WriteFile(badGate, []byte("#!/bin/bash\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runGateLoop(t, dir, nil)
+	if err == nil {
+		t.Fatalf("gate loop should have failed with gate-bad present; output:\n%s", out)
+	}
+	if !strings.Contains(out, "FAIL gate-bad") {
+		t.Errorf("expected 'FAIL gate-bad' in output, got:\n%s", out)
+	}
+}
+
+func TestGateLoopPipefailSurvives(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash binary not available")
+	}
+	dir := t.TempDir()
+	checksDir := filepath.Join(dir, ".mill", "checks")
+	if err := os.MkdirAll(checksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// A gate with set -euo pipefail must run via its shebang (bash).
+	// Under the old `sh "$gate"` this aborted with "Illegal option -o pipefail".
+	gatePath := filepath.Join(checksDir, "gate-pipefail")
+	gateBody := "#!/bin/bash\nset -euo pipefail\nexit 0\n"
+	if err := os.WriteFile(gatePath, []byte(gateBody), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runGateLoop(t, dir, nil)
+	if err != nil {
+		t.Fatalf("pipefail gate failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Running gate: gate-pipefail") {
+		t.Errorf("expected gate-pipefail to run, output:\n%s", out)
+	}
+}
+
 func TestInstallHooksVerifiesExecutable(t *testing.T) {
 	// After installHooks, the hook must be executable (mode 0755)
 	dir := t.TempDir()
@@ -1146,8 +1289,8 @@ func TestPreCommitHookBlocksOnFailure(t *testing.T) {
 	// Create .mill/checks with a failing gate
 	checksDir := filepath.Join(wt, ".mill", "checks")
 	os.MkdirAll(checksDir, 0755)
-	failGate := filepath.Join(checksDir, "test-fail.sh")
-	os.WriteFile(failGate, []byte("#!/bin/sh\necho 'FAIL test gate — intentional'\nexit 1\n"), 0755)
+	failGate := filepath.Join(checksDir, "gate-fail")
+	os.WriteFile(failGate, []byte("#!/bin/bash\necho 'FAIL test gate — intentional'\nexit 1\n"), 0755)
 
 	if err := installHooks(wt); err != nil {
 		t.Fatalf("installHooks returned error: %v", err)

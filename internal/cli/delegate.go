@@ -723,10 +723,10 @@ fi
 # --- End version conflict detection ---
 
 # Run additional gate scripts if present
-for gate in .mill/checks/*.sh; do
+for gate in .mill/checks/gate-*; do
     if [ -x "$gate" ]; then
         echo "Running gate: $(basename "$gate")"
-        sh "$gate" || { echo "FAIL $(basename "$gate")"; exit 1; }
+        "$gate" || { echo "FAIL $(basename "$gate")"; exit 1; }
     fi
 done
 
@@ -736,8 +736,9 @@ echo "mill: pre-commit passed"
 // installHooks installs the gauntlet pre-commit hook for the worktree.
 // It first verifies the target is a real git worktree (worktree/.git is
 // a file containing "gitdir:"), then creates a .mill/hooks/ directory
-// inside the worktree, configures core.hooksPath to point there, and
-// writes the pre-commit dispatcher with 0755 permissions.
+// inside the worktree, enables per-worktree config (extensions.worktreeConfig),
+// configures core.hooksPath for this worktree only via `git config --worktree`,
+// and writes the pre-commit dispatcher with 0755 permissions.
 func installHooks(worktree string) error {
 	// 1. Verify this is a real git worktree
 	gitFile := filepath.Join(worktree, ".git")
@@ -762,8 +763,14 @@ func installHooks(worktree string) error {
 	if err := os.MkdirAll(hookDir, 0755); err != nil {
 		return fmt.Errorf("cannot create hooks directory: %w", err)
 	}
-	// Set core.hooksPath so git finds hooks in this worktree-local directory
-	setHook := exec.Command("git", "-C", worktree, "config", "core.hooksPath", hookDir)
+	// Enable per-worktree config (idempotent), then set core.hooksPath with
+	// --worktree so only this worktree (not the main repo or other worktrees)
+	// reads it. Without extensions.worktreeConfig, --worktree would fail.
+	enableWT := exec.Command("git", "-C", worktree, "config", "extensions.worktreeConfig", "true")
+	if out, err := enableWT.CombinedOutput(); err != nil {
+		return fmt.Errorf("cannot enable extensions.worktreeConfig: %w\n%s", err, out)
+	}
+	setHook := exec.Command("git", "-C", worktree, "config", "--worktree", "core.hooksPath", hookDir)
 	if out, err := setHook.CombinedOutput(); err != nil {
 		return fmt.Errorf("cannot configure core.hooksPath: %w\n%s", err, out)
 	}

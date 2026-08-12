@@ -30,11 +30,14 @@ type CompactConfig struct {
 
 // Config holds the mill configuration.
 type Config struct {
-	Provider             string            `json:"provider"`
-	Model                string            `json:"model"`
-	Concurrency          Concurrency       `json:"concurrency,omitempty"`
-	MaxRounds            int               `json:"max_rounds"`
-	MaxRetries           int               `json:"max_retries"`
+	Provider    string      `json:"provider"`
+	Model       string      `json:"model"`
+	Concurrency Concurrency `json:"concurrency,omitempty"`
+	MaxRounds   int         `json:"max_rounds"`
+	MaxRetries  int         `json:"max_retries"`
+	// MaxDepth bounds the delegation/escalation chain depth. Defaults to the
+	// deepest org-chart leaf (staff → … → qa-docs).
+	MaxDepth             int               `json:"max_depth"`
 	Budget               *adapter.Budget   `json:"budget,omitempty"`
 	Compact              *CompactConfig    `json:"compact,omitempty"`
 	ReviewTimeoutSeconds int               `json:"review_timeout_seconds"`
@@ -43,22 +46,17 @@ type Config struct {
 }
 
 // Default returns the default mill configuration.
-//
 func Default() Config {
 	return Config{
-		Provider:    "commandcode",
-		Model:       "laguna-free",
-		Concurrency: Concurrency{MaxSlots: 4},
-		MaxRounds:   4,
-		MaxRetries:  4,
-		Compact:     &CompactConfig{Enabled: false, Mode: CompactModeFast},
-		Models: map[string]string{
-			"free": "laguna-free",
-			"paid": "laguna-pro",
-			"pro":  "laguna-ultra",
-		},
+		Provider:             "commandcode",
+		MaxRounds:            4,
+		MaxRetries:           4,
+		MaxDepth:             4,
+		Concurrency:          Concurrency{MaxSlots: 4},
+		Compact:              &CompactConfig{Enabled: false, Mode: CompactModeFast},
+		Models:               nil,
 		ReviewTimeoutSeconds: 300,
-		Rate:                  0,
+		Rate:                 0,
 	}
 }
 

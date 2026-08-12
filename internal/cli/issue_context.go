@@ -92,7 +92,6 @@ func buildIssueContextPrompt(issueNum int, body string, ac []string, targetRole 
 		parts = append(parts, "", "## Role", rolePrompt)
 	}
 
-
 	// Read Tool Capabilities (when non-zero)
 	if caps.ReadTool != (adapter.ReadToolCapabilities{}) {
 		parts = append(parts, "", "## Read Tool Capabilities", buildReadToolCapSection(caps.ReadTool))

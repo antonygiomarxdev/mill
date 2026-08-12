@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/antonygiomarxdev/mill/internal/config"
+	"github.com/antonygiomarxdev/mill/internal/recursion"
 )
 
 func TestRunUnknownCommandReturnsError(t *testing.T) {
@@ -82,6 +85,48 @@ func TestNewApp(t *testing.T) {
 	}
 }
 
+func TestInitRecursionEngineWithConfig(t *testing.T) {
+	app := &App{MillDir: t.TempDir()}
+	myml := &config.MillYML{
+		Project:  "test",
+		Provider: "commandcode",
+		Recursion: config.RecursionConfig{
+			View:     "tree",
+			MaxDepth: 3,
+			Models:   map[string]string{"pro": "deepseek-v4-pro"},
+		},
+	}
+	app.initRecursion(myml)
+
+	if app.Recursion == nil {
+		t.Fatal("expected recursion engine to be initialized when recursion config present")
+	}
+	if app.Recursion.MaxDepth != 3 {
+		t.Errorf("expected MaxDepth 3, got %d", app.Recursion.MaxDepth)
+	}
+	if app.Recursion.Cost == nil || app.Recursion.Cost.Models["pro"] != "deepseek-v4-pro" {
+		t.Errorf("expected CostResolver with pro model, got %+v", app.Recursion.Cost)
+	}
+	wantState := filepath.Join(app.MillDir, "state", "recursion.json")
+	if app.Recursion.StatePath != wantState {
+		t.Errorf("expected StatePath %q, got %q", wantState, app.Recursion.StatePath)
+	}
+}
+
+func TestInitRecursionEngineAbsentConfig(t *testing.T) {
+	app := &App{MillDir: t.TempDir()}
+	app.initRecursion(nil)
+	if app.Recursion != nil {
+		t.Errorf("expected nil recursion engine for nil config, got %+v", app.Recursion)
+	}
+
+	app.Recursion = &recursion.Delegator{RolesRoot: "/tmp"}
+	app.initRecursion(&config.MillYML{Project: "test", Provider: "commandcode"})
+	if app.Recursion != nil {
+		t.Errorf("expected nil recursion engine when recursion section absent, got %+v", app.Recursion)
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -94,7 +139,6 @@ func runGit(t *testing.T, dir string, args ...string) {
 func init() {
 	modelAvailableFn = func(string) bool { return true }
 }
-
 
 func setupTestGitRepo(t *testing.T, dir string) {
 	t.Helper()
@@ -176,7 +220,6 @@ func TestAppRunLandNoArgs(t *testing.T) {
 		t.Error("expected usage error for land with no target")
 	}
 }
-
 
 func TestRunLandSuccessWithGates(t *testing.T) {
 	dir := t.TempDir()

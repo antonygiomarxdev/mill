@@ -2,12 +2,24 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/antonygiomarxdev/mill/internal/config"
 	"github.com/antonygiomarxdev/mill/internal/slots"
 )
+
+// ErrSlotsExhausted is returned by AcquireSlot when no slot becomes available
+// within the acquisition timeout (all slots occupied) or when the slot manager
+// is shut down while the caller is queued. Callers map it to
+// ENVIRONMENT_FAILURE and abort instead of blocking indefinitely.
+var ErrSlotsExhausted = errors.New("slots agotados")
+
+// slotAcquireTimeout bounds how long AcquireSlot waits for a free slot before
+// declaring exhaustion. It is a var (not a const) so tests can shrink it.
+var slotAcquireTimeout = 30 * time.Second
 
 // MaxSlotsFromConfig extracts the maximum concurrent slots from config.
 // Defaults to 4 when Concurrency.MaxSlots is zero or negative.
@@ -51,8 +63,22 @@ func AcquireSlot(ctx context.Context, mgr *slots.Manager, errOut io.Writer, issu
 	if mgr == nil {
 		return 0, nil
 	}
+
+	// Bound the wait so slot exhaustion cannot block the dispatcher
+	// indefinitely. A caller-supplied deadline is honored as-is; otherwise a
+	// default timeout is applied.
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, slotAcquireTimeout)
+		defer cancel()
+	}
+
 	position, err := mgr.Acquire(ctx, issue, role, priority)
 	if err != nil {
+		if errors.Is(err, slots.ErrShutdown) || errors.Is(err, context.DeadlineExceeded) {
+			fmt.Fprintln(errOut, "slots agotados")
+			return position, ErrSlotsExhausted
+		}
 		return position, fmt.Errorf("slot acquisition failed: %w", err)
 	}
 	if position > 0 {

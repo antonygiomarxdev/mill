@@ -3,14 +3,14 @@ package cli
 import (
 	"bytes"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
 	"github.com/antonygiomarxdev/mill/internal/adapter"
 	"github.com/antonygiomarxdev/mill/internal/config"
 	"github.com/antonygiomarxdev/mill/internal/domain"
 	"github.com/antonygiomarxdev/mill/internal/state"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
 )
 
 // multiResultAdapter supports a sequence of results for testing cycles.
@@ -35,6 +35,22 @@ func (m *multiResultAdapter) Resume(sessionID string) (adapter.Session, error) {
 func (m *multiResultAdapter) Capabilities() adapter.Capabilities {
 	return adapter.Capabilities{Models: []string{"test"}}
 }
+
+func (m *multiResultAdapter) DefaultModel() string {
+	return "test"
+}
+
+func (m *multiResultAdapter) DefaultFallbackChain() map[string][]string {
+	return map[string][]string{
+		"free": {"test"},
+		"paid": {"test"},
+		"pro":  {"test"},
+	}
+}
+
+func (m *multiResultAdapter) FailureSignals() []domain.Signal { return nil }
+
+func (m *multiResultAdapter) BinaryPath() string { return "/usr/local/bin/mill" }
 
 func TestReviewLoopApprovedFirstRound(t *testing.T) {
 	dir := t.TempDir()
@@ -105,7 +121,7 @@ func TestReviewLoopChangesRequestedThenApproved(t *testing.T) {
 	madapter := &multiResultAdapter{
 		results: []adapter.SessionResult{
 			{ExitCode: 0, Commits: 2, Output: "v1", Stderr: ""},
-			{ExitCode: 0, Commits: 0, Output: "review", Stderr: "CHANGES_REQUESTED: 1. Missing error handling"},
+			{ExitCode: 0, Commits: 0, Output: "review", Stderr: "CHANGES_REQUESTED: 1. [criterion: error handling] Missing error handling"},
 			{ExitCode: 0, Commits: 4, Output: "v2", Stderr: ""},
 			{ExitCode: 0, Commits: 0, Output: "review2", Stderr: "APPROVED: good"},
 		},
@@ -154,13 +170,13 @@ func TestReviewLoopMaxCyclesExhausted(t *testing.T) {
 	madapter := &multiResultAdapter{
 		results: []adapter.SessionResult{
 			{ExitCode: 0, Commits: 1, Output: "v1", Stderr: ""},
-			{ExitCode: 0, Commits: 0, Output: "r1", Stderr: "CHANGES_REQUESTED: 1. Fix X"},
+			{ExitCode: 0, Commits: 0, Output: "r1", Stderr: "CHANGES_REQUESTED: 1. [criterion: X] Fix X"},
 			{ExitCode: 0, Commits: 2, Output: "v2", Stderr: ""},
-			{ExitCode: 0, Commits: 0, Output: "r2", Stderr: "CHANGES_REQUESTED: 2. Fix Y"},
+			{ExitCode: 0, Commits: 0, Output: "r2", Stderr: "CHANGES_REQUESTED: 2. [criterion: Y] Fix Y"},
 			{ExitCode: 0, Commits: 3, Output: "v3", Stderr: ""},
-			{ExitCode: 0, Commits: 0, Output: "r3", Stderr: "CHANGES_REQUESTED: 3. Fix Z"},
+			{ExitCode: 0, Commits: 0, Output: "r3", Stderr: "CHANGES_REQUESTED: 3. [criterion: Z] Fix Z"},
 			{ExitCode: 0, Commits: 4, Output: "v4", Stderr: ""},
-			{ExitCode: 0, Commits: 0, Output: "r4", Stderr: "CHANGES_REQUESTED: 4. Fix W"},
+			{ExitCode: 0, Commits: 0, Output: "r4", Stderr: "CHANGES_REQUESTED: 4. [criterion: W] Fix W"},
 		},
 	}
 
@@ -208,14 +224,14 @@ func TestReviewLoopMaxCyclesExhausted(t *testing.T) {
 	}
 }
 
-func TestReviewLoopBlockedImmediate(t *testing.T) {
+func TestReviewLoopGateFailureImmediate(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644)
 
 	madapter := &multiResultAdapter{
 		results: []adapter.SessionResult{
 			{ExitCode: 0, Commits: 1, Output: "produced", Stderr: ""},
-			{ExitCode: 1, Commits: 0, Output: "review", Stderr: "BLOCKED: missing API credentials"},
+			{ExitCode: 1, Commits: 0, Output: "review", Stderr: "gate-spec: missing criteria"},
 		},
 	}
 
@@ -255,28 +271,27 @@ func TestReviewLoopBlockedImmediate(t *testing.T) {
 	}
 
 	errOutput := errBuf.String()
-	if !strings.Contains(errOutput, "ESCALATION: Review cycle aborted") {
-		t.Error("expected escalation message on stderr")
+	if !strings.Contains(errOutput, "ESCALATION") {
+		t.Error("expected ESCALATION message on stderr")
 	}
 }
 
-func TestClassifyResultReviewSignals_54(t *testing.T) {
+func TestClassifyFailureReviewSignals(t *testing.T) {
 	tests := []struct {
 		name   string
-		code   int
-		stderr string
-		want   domain.Classification
+		result domain.SessionResult
+		want   domain.FailureClass
 	}{
-		{name: "APPROVED signal", code: 1, stderr: "APPROVED: looks great", want: domain.ClassificationOK},
-		{name: "BLOCKED signal", code: 0, stderr: "BLOCKED: need credentials", want: domain.ClassificationBlocked},
-		{name: "CHANGES_REQUESTED signal", code: 0, stderr: "CHANGES_REQUESTED: 1. Fix X", want: domain.ClassificationChangesRequested},
+		{name: "APPROVED signal", result: domain.SessionResult{ExitCode: 0, Stderr: "APPROVED: looks great"}, want: domain.CLASS_OK},
+		{name: "gate signal", result: domain.SessionResult{ExitCode: 1, Stderr: "gate-frd: rejected"}, want: domain.GATE_FAILURE},
+		{name: "CHANGES_REQUESTED signal", result: domain.SessionResult{ExitCode: 0, Stderr: "CHANGES_REQUESTED: [criterion: x] 1. Fix X"}, want: domain.RESULT_FAILURE},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := classifyResult(tt.code, tt.stderr)
+			got := classifyFailure(tt.result)
 			if got != tt.want {
-				t.Errorf("classifyResult(%d, %q) = %q, want %q", tt.code, tt.stderr, got, tt.want)
+				t.Errorf("classifyFailure(%+v) = %q, want %q", tt.result, got, tt.want)
 			}
 		})
 	}
@@ -313,7 +328,6 @@ func TestRecordErrorReviewLoop(t *testing.T) {
 		t.Error("expected ledger file to exist after recordError")
 	}
 }
-
 
 func TestReviewLoopProduceDispatchError(t *testing.T) {
 	t.Skip("integration test — needs adapter mock fixes after model routing changes")
@@ -418,8 +432,8 @@ func TestReviewLoopBlockedVerdict(t *testing.T) {
 		if callCount == 1 {
 			return &fakeSession{result: adapter.SessionResult{ExitCode: 0, Output: "produce ok"}}, nil
 		}
-		// Review returns BLOCKED signal
-		return &fakeSession{result: adapter.SessionResult{ExitCode: 0, Output: "", Stderr: "BLOCKED: cannot proceed"}}, nil
+		// Review returns a gate failure signal
+		return &fakeSession{result: adapter.SessionResult{ExitCode: 1, Output: "", Stderr: "gate-tasks: rejected"}}, nil
 	}
 
 	errBuf := new(bytes.Buffer)

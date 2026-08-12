@@ -1,0 +1,12 @@
+{
+  "id": "task-golden",
+  "issue": 42,
+  "status": "done",
+  "phase": "review",
+  "failure_class": "CLASS_OK",
+  "commits": 5,
+  "verdict": "approved",
+  "round": 2,
+  "started_at": "2026-08-10T12:00:00Z",
+  "updated_at": "2026-08-10T12:30:00Z"
+}

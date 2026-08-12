@@ -14,10 +14,11 @@ type mockSession struct {
 	err    error
 }
 
-func (m *mockSession) ID() string      { return m.id }
-func (m *mockSession) Status() string  { return m.status }
+func (m *mockSession) ID() string                   { return m.id }
+func (m *mockSession) Status() string               { return m.status }
 func (m *mockSession) Wait() (SessionResult, error) { return m.result, m.err }
 func (m *mockSession) ContextText() (string, error) { return "", nil }
+func (m *mockSession) HeartbeatPath() string        { return ".mill/heartbeat" }
 
 // mockAdapter implements Adapter for testing.
 type mockAdapter struct {
@@ -51,6 +52,20 @@ func (m *mockAdapter) Resume(sessionID string) (Session, error) {
 func (m *mockAdapter) Capabilities() Capabilities {
 	return m.caps
 }
+
+func (m *mockAdapter) DefaultModel() string {
+	return "mock-default-model"
+}
+
+func (m *mockAdapter) DefaultFallbackChain() map[string][]string {
+	return map[string][]string{
+		"free": {"mock-model"},
+	}
+}
+
+func (m *mockAdapter) FailureSignals() []domain.Signal { return nil }
+
+func (m *mockAdapter) BinaryPath() string { return "/usr/local/bin/mill" }
 
 func TestMockAdapterDispatchUsesDispatchOpts(t *testing.T) {
 	a := &mockAdapter{
@@ -160,5 +175,27 @@ func TestCapabilitiesModelsField(t *testing.T) {
 	c := Capabilities{Models: []string{"x", "y", "z"}}
 	if len(c.Models) != 3 {
 		t.Errorf("expected 3 models, got %d", len(c.Models))
+	}
+}
+
+func TestMockAdapterDefaultModel(t *testing.T) {
+	a := &mockAdapter{}
+	model := a.DefaultModel()
+	if model != "mock-default-model" {
+		t.Errorf("expected mock-default-model, got %q", model)
+	}
+}
+
+func TestMockAdapterDefaultFallbackChain(t *testing.T) {
+	a := &mockAdapter{}
+	chain := a.DefaultFallbackChain()
+	if len(chain) != 1 {
+		t.Fatalf("expected 1 tier, got %d", len(chain))
+	}
+	if _, ok := chain["free"]; !ok {
+		t.Fatal("expected 'free' tier in fallback chain")
+	}
+	if len(chain["free"]) != 1 || chain["free"][0] != "mock-model" {
+		t.Errorf("expected 'free' tier to be [mock-model], got %v", chain["free"])
 	}
 }

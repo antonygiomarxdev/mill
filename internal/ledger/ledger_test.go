@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/antonygiomarxdev/mill/internal/domain"
 )
 
 func TestAppendCreatesFile(t *testing.T) {
@@ -521,5 +523,174 @@ func TestAppendFilePermissions(t *testing.T) {
 	mode := info.Mode().Perm()
 	if mode != 0o644 {
 		t.Errorf("expected file permissions 0o644, got %o", mode)
+	}
+}
+
+func TestAppendNewFieldsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger", "1.jsonl")
+
+	entry := Entry{
+		Timestamp:    time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
+		Issue:        1,
+		Event:        "resolve",
+		Status:       "done",
+		FailureClass: domain.EXECUTION_FAILURE,
+		Phase:        domain.TaskPhaseProduce,
+		Role:         "sr-dev-be",
+	}
+
+	if err := Append(path, entry); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	got, err := ReadEntries(path)
+	if err != nil {
+		t.Fatalf("ReadEntries failed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(got))
+	}
+
+	if got[0].FailureClass != entry.FailureClass {
+		t.Errorf("FailureClass: expected %q, got %q", entry.FailureClass, got[0].FailureClass)
+	}
+	if got[0].Phase != entry.Phase {
+		t.Errorf("Phase: expected %q, got %q", entry.Phase, got[0].Phase)
+	}
+	if got[0].Role != entry.Role {
+		t.Errorf("Role: expected %q, got %q", entry.Role, got[0].Role)
+	}
+}
+
+func TestAppendNewFieldsOmitEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger", "1.jsonl")
+
+	entry := Entry{
+		Timestamp: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
+		Issue:     1,
+		Event:     "dispatch",
+		Status:    "running",
+	}
+
+	if err := Append(path, entry); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	for _, f := range []string{"failure_class", "phase", "role"} {
+		if _, ok := fields[f]; ok {
+			t.Errorf("expected field %q to be omitted when empty", f)
+		}
+	}
+}
+
+func TestAppendParentDepthFieldsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger", "1.jsonl")
+
+	entry := Entry{
+		Timestamp:   time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC),
+		Issue:       390,
+		ParentIssue: 388,
+		Event:       "dispatch",
+		Status:      "running",
+		Depth:       2,
+	}
+
+	if err := Append(path, entry); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	got, err := ReadEntries(path)
+	if err != nil {
+		t.Fatalf("ReadEntries failed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(got))
+	}
+
+	if got[0].ParentIssue != entry.ParentIssue {
+		t.Errorf("ParentIssue: expected %d, got %d", entry.ParentIssue, got[0].ParentIssue)
+	}
+	if got[0].Depth != entry.Depth {
+		t.Errorf("Depth: expected %d, got %d", entry.Depth, got[0].Depth)
+	}
+}
+
+func TestAppendParentDepthFieldsOmitEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger", "1.jsonl")
+
+	entry := Entry{
+		Timestamp: time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC),
+		Issue:     390,
+		Event:     "dispatch",
+		Status:    "running",
+	}
+
+	if err := Append(path, entry); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	for _, f := range []string{"parent_issue", "depth"} {
+		if _, ok := fields[f]; ok {
+			t.Errorf("expected field %q to be omitted when empty", f)
+		}
+	}
+}
+
+func TestAppendMonotonicOrdering(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger", "1.jsonl")
+
+	base := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	entries := []Entry{
+		{Timestamp: base, Issue: 1, Event: "dispatch", Status: "running"},
+		{Timestamp: base.Add(1 * time.Minute), Issue: 1, Event: "produce", Status: "running"},
+		{Timestamp: base.Add(2 * time.Minute), Issue: 1, Event: "complete", Status: "done", Verdict: "approved"},
+	}
+
+	for _, e := range entries {
+		if err := Append(path, e); err != nil {
+			t.Fatalf("Append failed: %v", err)
+		}
+	}
+
+	got, err := ReadEntries(path)
+	if err != nil {
+		t.Fatalf("ReadEntries failed: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(got))
+	}
+
+	for i, g := range got {
+		if !g.Timestamp.Equal(entries[i].Timestamp) {
+			t.Errorf("entry %d timestamp: expected %v, got %v", i, entries[i].Timestamp, g.Timestamp)
+		}
+		if g.Event != entries[i].Event {
+			t.Errorf("entry %d event: expected %q, got %q", i, entries[i].Event, g.Event)
+		}
 	}
 }

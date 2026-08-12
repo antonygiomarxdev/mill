@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-
 // safeBuffer is a goroutine-safe bytes.Buffer.
 type safeBuffer struct {
 	mu  sync.Mutex

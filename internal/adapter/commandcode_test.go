@@ -16,7 +16,11 @@ func TestCommandCodeCapabilities(t *testing.T) {
 		t.Error("expected non-empty models list")
 	}
 
-	expected := []string{"claude-sonnet-5", "claude-sonnet-4-6", "deepseek-v4-pro", "deepseek-v4-flash", "gpt-5"}
+	expected := []string{
+		"claude-sonnet-5", "claude-sonnet-4-6", "claude-fable-5",
+		"claude-opus-5", "claude-haiku-4-5",
+		"deepseek-v4-pro", "deepseek-v4-flash", "laguna-s-2.1-free",
+	}
 	for _, want := range expected {
 		found := false
 		for _, got := range caps.Models {
@@ -59,6 +63,8 @@ func TestBuildArgs(t *testing.T) {
 
 	expected := []string{
 		"-p", "fix the bug",
+		"--yolo",
+		"--skip-onboarding",
 		"-m", "gpt-5",
 		"--output-format", "json",
 		"--max-turns", "50",
@@ -584,3 +590,34 @@ func TestIsWriteFrame_NotWrite(t *testing.T) {
 	}
 }
 
+func TestCommandCodeDefaultModel(t *testing.T) {
+	a := &CommandCodeAdapter{}
+	model := a.DefaultModel()
+	if model != "laguna-s-2.1-free" {
+		t.Errorf("expected laguna-s-2.1-free, got %q", model)
+	}
+}
+
+func TestCommandCodeDefaultFallbackChain(t *testing.T) {
+	a := &CommandCodeAdapter{}
+	chain := a.DefaultFallbackChain()
+
+	expectedTiers := []string{"free", "paid", "pro"}
+	for _, tier := range expectedTiers {
+		if _, ok := chain[tier]; !ok {
+			t.Errorf("expected tier %q in fallback chain", tier)
+		}
+	}
+
+	if len(chain["free"]) != 2 || chain["free"][0] != "laguna-s-2.1-free" || chain["free"][1] != "deepseek-v4-flash" {
+		t.Errorf("unexpected free chain: %v", chain["free"])
+	}
+
+	if len(chain["paid"]) != 4 || chain["paid"][0] != "deepseek-v4-pro" {
+		t.Errorf("unexpected paid chain: %v", chain["paid"])
+	}
+
+	if len(chain["pro"]) != 3 || chain["pro"][0] != "deepseek-v4-pro" {
+		t.Errorf("unexpected pro chain: %v", chain["pro"])
+	}
+}

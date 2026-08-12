@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/antonygiomarxdev/mill/internal/config"
 )
 
 func TestInitCreatesMillYAML(t *testing.T) {
@@ -72,6 +74,47 @@ func TestInitCreatesDirectories(t *testing.T) {
 		}
 		if !info.IsDir() {
 			t.Errorf("expected %s to be a directory", dirName)
+		}
+	}
+}
+
+func TestInitCreatesRecursionDirsAndLessons(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf, In: strings.NewReader("")}
+
+	err := app.Run("init", "-yes", "-target", dir)
+	if err != nil {
+		t.Fatalf("init returned error: %v", err)
+	}
+
+	for _, sub := range []string{"logs", "state"} {
+		info, err := os.Stat(filepath.Join(dir, ".mill", sub))
+		if err != nil {
+			t.Errorf("expected .mill/%s directory to be created: %v", sub, err)
+			continue
+		}
+		if !info.IsDir() {
+			t.Errorf("expected .mill/%s to be a directory", sub)
+		}
+	}
+
+	// Every scaffolded role gets a lessons.md file.
+	for _, role := range []string{"staff", "pm", "architect", "tech-lead", "sr-dev-be", "ux-designer", "ui-designer", "qa-docs", "reviewer"} {
+		p := filepath.Join(dir, ".mill", "roles", role, "lessons.md")
+		content, err := os.ReadFile(p)
+		if err != nil {
+			t.Errorf("expected lessons.md for role %s: %v", role, err)
+			continue
+		}
+		if !strings.Contains(string(content), "# Lessons for "+role) {
+			t.Errorf("expected lessons.md for %s to contain title, got: %q", role, string(content))
 		}
 	}
 }
@@ -1432,8 +1475,6 @@ func TestPreserveUnknownDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-
-
 	// src/ is not a known harness dir, so it should NOT be preserved
 	// (preserveDir returns false).
 	d := filepath.Join(dir, "src")
@@ -1873,5 +1914,54 @@ func TestInitMinimalFlag(t *testing.T) {
 		if info, err := os.Stat(p); err != nil || !info.IsDir() {
 			t.Errorf("expected .mill/%s/ directory in minimal mode", sub)
 		}
+	}
+}
+
+func TestInitScaffoldsRecursionConfig(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf, In: strings.NewReader("")}
+
+	err := app.Run("init", "-yes", "-target", dir)
+	if err != nil {
+		t.Fatalf("init returned error: %v", err)
+	}
+
+	// Load and validate the generated mill.yml using the real loader
+	millYMLPath := filepath.Join(dir, "mill.yml")
+	myml, err := config.LoadAndValidate(millYMLPath)
+	if err != nil {
+		t.Fatalf("LoadAndValidate returned error: %v", err)
+	}
+
+	// Assert recursion is fully configured (not zero)
+	if myml.Recursion.IsZero() {
+		t.Errorf("expected Recursion.IsZero() to be false, got true")
+	}
+
+	// Assert View is "result"
+	if myml.Recursion.View != "result" {
+		t.Errorf("expected Recursion.View == \"result\", got %q", myml.Recursion.View)
+	}
+
+	// Assert MaxDepth is 4
+	if myml.Recursion.MaxDepth != 4 {
+		t.Errorf("expected Recursion.MaxDepth == 4, got %d", myml.Recursion.MaxDepth)
+	}
+
+	// Assert Models["pro"] is set correctly
+	if myml.Recursion.Models["pro"] != "deepseek/deepseek-v4-pro" {
+		t.Errorf("expected Models[\"pro\"] == \"deepseek/deepseek-v4-pro\", got %q", myml.Recursion.Models["pro"])
+	}
+
+	// Assert Models["cheap"] is set correctly
+	if myml.Recursion.Models["cheap"] != "deepseek/deepseek-v4-flash" {
+		t.Errorf("expected Models[\"cheap\"] == \"deepseek/deepseek-v4-flash\", got %q", myml.Recursion.Models["cheap"])
 	}
 }

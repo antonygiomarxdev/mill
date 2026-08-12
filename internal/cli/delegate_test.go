@@ -13,6 +13,7 @@ import (
 	"github.com/antonygiomarxdev/mill/internal/adapter"
 	"github.com/antonygiomarxdev/mill/internal/config"
 	"github.com/antonygiomarxdev/mill/internal/domain"
+	"github.com/antonygiomarxdev/mill/internal/recursion"
 	"github.com/antonygiomarxdev/mill/internal/state"
 )
 
@@ -48,6 +49,23 @@ func (f *fakeAdapter) Capabilities() adapter.Capabilities {
 	return adapter.Capabilities{Models: []string{"gpt-5", "deepseek-v4-pro"}}
 }
 
+func (f *fakeAdapter) DefaultModel() string {
+	return "gpt-5"
+}
+
+func (f *fakeAdapter) DefaultFallbackChain() map[string][]string {
+	return map[string][]string{
+		"free":   {"gpt-5", "deepseek-v4-pro", "gpt-5", "deepseek-v4-pro", "gpt-5", "deepseek-v4-pro", "gpt-5"},
+		"paid":   {"deepseek-v4-pro", "gpt-5"},
+		"pro":    {"deepseek-v4-pro", "gpt-5"},
+		"review": {"deepseek-v4-pro", "gpt-5"},
+	}
+}
+
+func (f *fakeAdapter) FailureSignals() []domain.Signal { return nil }
+
+func (f *fakeAdapter) BinaryPath() string { return "/usr/local/bin/mill" }
+
 type fakeSession struct {
 	result  adapter.SessionResult
 	waitErr error
@@ -74,6 +92,8 @@ func (s *fakeSession) ContextText() (string, error) {
 	return "", nil
 }
 
+func (s *fakeSession) HeartbeatPath() string { return ".mill/heartbeat" }
+
 // transientResult returns a SessionResult that classifies as TRANSIENT.
 func transientResult() adapter.SessionResult {
 	return adapter.SessionResult{ExitCode: 6, Output: "transient", Stderr: "connection refused"}
@@ -93,8 +113,6 @@ func fatalResult() adapter.SessionResult {
 func defaultIssueReader(issueNum int) (string, []string, error) {
 	return "Test issue body content", nil, nil
 }
-
-
 
 func TestDelegateValidIssueDispatchesAndRecords(t *testing.T) {
 	dir := t.TempDir()
@@ -126,8 +144,8 @@ func TestDelegateValidIssueDispatchesAndRecords(t *testing.T) {
 		t.Error("expected non-empty produce prompt")
 	}
 	// Review model should be laguna-pro
-	if fa.allOpts[1].Model != "laguna-pro" {
-		t.Errorf("expected review model laguna-pro, got %q", fa.allOpts[1].Model)
+	if fa.allOpts[1].Model != "deepseek-v4-pro" {
+		t.Errorf("expected review model deepseek-v4-pro, got %q", fa.allOpts[1].Model)
 	}
 	if fa.allOpts[0].MaxTurns != 100 {
 		t.Errorf("expected max turns 100, got %d", fa.allOpts[0].MaxTurns)
@@ -191,7 +209,7 @@ func TestDelegateExitCodeErrorSetsTaskError(t *testing.T) {
 	setupTestGitRepo(t, dir)
 	fa := &fakeAdapter{
 		result: adapter.SessionResult{
-			ExitCode: 3,
+			ExitCode: 137,
 			Commits:  0,
 			Output:   "REJECTED - something went wrong",
 		},
@@ -308,12 +326,12 @@ func TestDelegateModelFlagOverridesConfig(t *testing.T) {
 	}
 
 	// Produce dispatch uses resolved model from tier override
-	if fa.allOpts[0].Model != "laguna-ultra" {
-		t.Errorf("expected produce model %q, got %q", "laguna-ultra", fa.allOpts[0].Model)
+	if fa.allOpts[0].Model != "deepseek-v4-pro" {
+		t.Errorf("expected produce model %q, got %q", "deepseek-v4-pro", fa.allOpts[0].Model)
 	}
 	// Review dispatch also uses the same flag override
-	if fa.allOpts[1].Model != "laguna-ultra" {
-		t.Errorf("expected review model %q, got %q", "laguna-ultra", fa.allOpts[1].Model)
+	if fa.allOpts[1].Model != "deepseek-v4-pro" {
+		t.Errorf("expected review model %q, got %q", "deepseek-v4-pro", fa.allOpts[1].Model)
 	}
 }
 
@@ -358,7 +376,6 @@ func TestInstallHooksInRealWorktree(t *testing.T) {
 		t.Error("pre-commit hook content does not match expected script")
 	}
 }
-
 
 func TestDelegateStaffToSrDevRejected(t *testing.T) {
 	dir := t.TempDir()
@@ -447,7 +464,6 @@ func TestDelegateNoRoleUsesActiveRole(t *testing.T) {
 	}
 }
 
-
 func TestDelegateScaffoldsWorktree(t *testing.T) {
 	dir := t.TempDir()
 	setupTestGitRepo(t, dir)
@@ -489,35 +505,31 @@ func TestDelegateScaffoldsWorktree(t *testing.T) {
 	}
 }
 
-func TestClassifyResultExitCodes(t *testing.T) {
+func TestClassifyFailure(t *testing.T) {
 	tests := []struct {
 		name   string
-		code   int
-		stderr string
-		want   domain.Classification
+		result domain.SessionResult
+		want   domain.FailureClass
 	}{
-		{name: "exit 0 is OK", code: 0, want: domain.ClassificationOK},
-		{name: "exit 3 is AUTH", code: 3, want: domain.ClassificationAuth},
-		{name: "exit -1 is BLOCKED", code: -1, want: domain.ClassificationBlocked},
-		{name: "exit -2 is BLOCKED", code: -2, want: domain.ClassificationBlocked},
-		{name: "exit 4 is FATAL", code: 4, want: domain.ClassificationFatal},
-		{name: "exit 5 is RATE_LIMITED", code: 5, want: domain.ClassificationRateLimited},
-		{name: "exit 8 is MAX_TURNS", code: 8, want: domain.ClassificationMaxTurns},
-		{name: "exit 10 is NO_CREDIT", code: 10, want: domain.ClassificationNoCredit},
-		{name: "unknown exit is FATAL", code: 99, want: domain.ClassificationFatal},
-		{name: "stderr blocked: overrides exit 0", code: 0, stderr: "blocked: budget exceeded", want: domain.ClassificationBlocked},
-		{name: "stderr 401 signals AUTH", code: 1, stderr: "401 Unauthorized", want: domain.ClassificationAuth},
-		{name: "stderr insufficient credits signals NO_CREDIT", code: 1, stderr: "insufficient credits", want: domain.ClassificationNoCredit},
-		{name: "stderr timeout signals TRANSIENT", code: 1, stderr: "network timeout", want: domain.ClassificationTransient},
-		{name: "stderr approved: signal", code: 1, stderr: "APPROVED: all good", want: domain.ClassificationOK},
-		{name: "stderr changes_requested: signal", code: 0, stderr: "CHANGES_REQUESTED: needs work", want: domain.ClassificationChangesRequested},
+		{name: "exit 0 with no signal is CLASS_OK", result: domain.SessionResult{ExitCode: 0}, want: domain.CLASS_OK},
+		{name: "exit 0 with placeholder output is CONTRACT", result: domain.SessionResult{ExitCode: 0, Output: "TODO: implement"}, want: domain.CONTRACT_FAILURE},
+		{name: "exit 0 with whitespace output is CONTRACT", result: domain.SessionResult{ExitCode: 0, Output: "   "}, want: domain.CONTRACT_FAILURE},
+		{name: "exit 4 is EXECUTION_FAILURE", result: domain.SessionResult{ExitCode: 4}, want: domain.EXECUTION_FAILURE},
+		{name: "exit 137 is EXECUTION_FAILURE", result: domain.SessionResult{ExitCode: 137}, want: domain.EXECUTION_FAILURE},
+		{name: "exit -1 with blocked stderr is EXECUTION_FAILURE", result: domain.SessionResult{ExitCode: -1, Stderr: "blocked: time budget exceeded"}, want: domain.EXECUTION_FAILURE},
+		{name: "exit 1 with gate stderr is GATE_FAILURE", result: domain.SessionResult{ExitCode: 1, Stderr: "gate-spec: missing criteria"}, want: domain.GATE_FAILURE},
+		{name: "changes_requested with criterion is RESULT_FAILURE", result: domain.SessionResult{ExitCode: 0, Stderr: "CHANGES_REQUESTED: [criterion: x] fix"}, want: domain.RESULT_FAILURE},
+		{name: "connection refused is EXECUTION_FAILURE", result: domain.SessionResult{ExitCode: 1, Stderr: "connection refused"}, want: domain.EXECUTION_FAILURE},
+		{name: "network timeout is EXECUTION_FAILURE", result: domain.SessionResult{ExitCode: 1, Stderr: "network timeout"}, want: domain.EXECUTION_FAILURE},
+		{name: "env error is ENVIRONMENT_FAILURE", result: domain.SessionResult{EnvError: fmt.Errorf("git not found")}, want: domain.ENVIRONMENT_FAILURE},
+		{name: "stale heartbeat with active process is EXECUTION_FAILURE", result: domain.SessionResult{ProcessActive: true, HeartbeatStaleness: time.Minute}, want: domain.EXECUTION_FAILURE},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := classifyResult(tt.code, tt.stderr)
+			got := classifyFailure(tt.result)
 			if got != tt.want {
-				t.Errorf("classifyResult(%d, %q) = %q, want %q", tt.code, tt.stderr, got, tt.want)
+				t.Errorf("classifyFailure(%+v) = %q, want %q", tt.result, got, tt.want)
 			}
 		})
 	}
@@ -541,6 +553,7 @@ func TestDelegateBlockedExitCodeSetsTaskError(t *testing.T) {
 					ExitCode: tt.exitCode,
 					Commits:  0,
 					Output:   "BLOCKED — budget exceeded",
+					Stderr:   "blocked: time budget exceeded",
 				},
 			}
 			buf := new(bytes.Buffer)
@@ -560,14 +573,14 @@ func TestDelegateBlockedExitCodeSetsTaskError(t *testing.T) {
 				t.Errorf("expected status %q, got %q", domain.TaskError, task.Status)
 			}
 
-			// Verify ledger classifies as BLOCKED
+			// Verify ledger records the execution failure class
 			ledgerFile := app.ledgerPath(53)
 			content, err := os.ReadFile(ledgerFile)
 			if err != nil {
 				t.Fatalf("failed to read ledger: %v", err)
 			}
-			if !strings.Contains(string(content), string(domain.ClassificationBlocked)) {
-				t.Error("expected ledger to contain BLOCKED classification")
+			if !strings.Contains(string(content), string(domain.EXECUTION_FAILURE)) {
+				t.Error("expected ledger to contain EXECUTION_FAILURE classification")
 			}
 		})
 	}
@@ -1163,11 +1176,10 @@ func TestPreCommitHookBlocksOnFailure(t *testing.T) {
 	}
 }
 
-
 // --- Retry dispatch tests ---
 
-// TestDispatchLoopRetryTransient verifies that transient failures are retried
-// with backoff before succeeding.
+// TestDispatchLoopRetryTransient verifies that transient failures advance
+// to the next model in the fallback chain.
 func TestDispatchLoopRetryTransient(t *testing.T) {
 	dir := t.TempDir()
 	setupTestGitRepo(t, dir)
@@ -1176,10 +1188,10 @@ func TestDispatchLoopRetryTransient(t *testing.T) {
 	fa := &fakeAdapter{
 		dispatchFn: func(opts adapter.DispatchOpts) (adapter.Session, error) {
 			callCount++
-			// First 2 calls (produce attempt 1, 2): transient
-			// Third call (produce attempt 3): OK
-			// Fourth call (review): OK
-			if callCount <= 2 {
+			// First call (produce with gpt-5): transient → advance to deepseek-v4-pro
+			// Second call (produce with deepseek-v4-pro): OK
+			// Third call (review with deepseek-v4-pro): OK
+			if callCount == 1 {
 				return &fakeSession{result: transientResult()}, nil
 			}
 			return &fakeSession{result: okResult()}, nil
@@ -1188,7 +1200,8 @@ func TestDispatchLoopRetryTransient(t *testing.T) {
 	buf := new(bytes.Buffer)
 	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader, Backoff: func(time.Duration) {}}
 
-	err := app.Run("delegate", "--wait", "101")
+	// Use "free" tier to get multi-model chain: ["gpt-5", "deepseek-v4-pro"]
+	err := app.Run("delegate", "--wait", "-model", "free", "101")
 	if err != nil {
 		t.Fatalf("delegate returned error: %v", err)
 	}
@@ -1219,22 +1232,21 @@ func TestDispatchLoopRetryTransient(t *testing.T) {
 		t.Error("expected non-empty output.txt")
 	}
 
-	// Verify at least 3 produce dispatches (2 transient + 1 OK)
-	if len(fa.allOpts) < 3 {
-		t.Errorf("expected at least 3 dispatches (2 produce transient + 1 produce OK + review), got %d", len(fa.allOpts))
+	// 1 transient produce + 1 OK produce + 1 OK review = 3 dispatches
+	if len(fa.allOpts) != 3 {
+		t.Errorf("expected 3 dispatches (transient produce + OK produce + review), got %d", len(fa.allOpts))
 	}
 }
 
-// TestDispatchLoopNoRetryFatal verifies that FATAL failures skip retry
-// and exit immediately.
-func TestDispatchLoopNoRetryFatal(t *testing.T) {
+// TestDispatchLoopExecutionFailureRetries verifies that EXECUTION_FAILURE
+// (e.g. exit 4, formerly FATAL) now retries the fallback chain before the
+// task is marked as error.
+func TestDispatchLoopExecutionFailureRetries(t *testing.T) {
 	dir := t.TempDir()
 	setupTestGitRepo(t, dir)
 
-	callCount := 0
 	fa := &fakeAdapter{
 		dispatchFn: func(opts adapter.DispatchOpts) (adapter.Session, error) {
-			callCount++
 			return &fakeSession{result: fatalResult()}, nil
 		},
 	}
@@ -1246,9 +1258,9 @@ func TestDispatchLoopNoRetryFatal(t *testing.T) {
 		t.Fatalf("delegate returned error: %v", err)
 	}
 
-	// FATAL should skip retry: only 1 produce dispatch, 0 review dispatch
-	if len(fa.allOpts) != 1 {
-		t.Errorf("expected exactly 1 dispatch (no retry on FATAL), got %d", len(fa.allOpts))
+	// EXECUTION_FAILURE retries the fallback chain: produceModel + chain = 2 attempts
+	if len(fa.allOpts) != 2 {
+		t.Errorf("expected 2 produce dispatches (retry on EXECUTION_FAILURE), got %d", len(fa.allOpts))
 	}
 
 	s, err := state.Load(app.statePath())
@@ -1267,17 +1279,15 @@ func TestDispatchLoopNoRetryFatal(t *testing.T) {
 	}
 }
 
-// TestDispatchLoopMaxRetriesExceeded verifies that after maxRetries transient
-// failures, the task is marked as error.
-func TestDispatchLoopMaxRetriesExceeded(t *testing.T) {
+// TestDispatchLoopChainExhausted verifies that when all models in the
+// fallback chain fail with transient errors, the task is marked as error.
+func TestDispatchLoopChainExhausted(t *testing.T) {
 	dir := t.TempDir()
 	setupTestGitRepo(t, dir)
 
-	callCount := 0
 	fa := &fakeAdapter{
 		dispatchFn: func(opts adapter.DispatchOpts) (adapter.Session, error) {
-			callCount++
-			// Always return transient — will exhaust all retries
+			// Always return transient — will exhaust the chain
 			return &fakeSession{result: transientResult()}, nil
 		},
 	}
@@ -1289,10 +1299,9 @@ func TestDispatchLoopMaxRetriesExceeded(t *testing.T) {
 		t.Fatalf("delegate returned error: %v", err)
 	}
 
-	// Should have exactly 5 produce dispatches (1 initial + 4 retries)
-	// and 0 review dispatches (produce never succeeded)
-	if len(fa.allOpts) != 5 {
-		t.Errorf("expected exactly 5 produce dispatches (1 initial + 4 retries), got %d", len(fa.allOpts))
+	// produceModel=deepseek-v4-pro (role-resolved) + chain=["gpt-5"] = 2 dispatch attempts
+	if len(fa.allOpts) != 2 {
+		t.Errorf("expected 2 produce dispatches (produceModel + chain fallback exhausted on transient), got %d", len(fa.allOpts))
 	}
 
 	s, err := state.Load(app.statePath())
@@ -1310,12 +1319,15 @@ func TestDispatchLoopMaxRetriesExceeded(t *testing.T) {
 		t.Errorf("expected verdict %q, got %q", domain.VerdictRejected, task.Verdict)
 	}
 }
-
-// TestDispatchLoopApprovedAfterRetry verifies that transient failures on
-// produce don't prevent review from approving the eventual successful output.
 func TestDispatchLoopApprovedAfterRetry(t *testing.T) {
 	dir := t.TempDir()
 	setupTestGitRepo(t, dir)
+
+	// Write config with model alias "free" to get multi-model fallback chain
+	cfg := config.Config{Model: "free"}
+	if err := cfg.Save(filepath.Join(dir, "config.json")); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
 
 	callCount := 0
 	fa := &fakeAdapter{
@@ -1325,8 +1337,6 @@ func TestDispatchLoopApprovedAfterRetry(t *testing.T) {
 			if callCount <= 3 {
 				return &fakeSession{result: transientResult()}, nil
 			}
-			// callCount == 4: produce succeeds
-			// callCount == 5: review succeeds
 			return &fakeSession{result: okResult()}, nil
 		},
 	}
@@ -1343,10 +1353,10 @@ func TestDispatchLoopApprovedAfterRetry(t *testing.T) {
 		t.Errorf("expected 5 dispatches (3 transient + produce OK + review OK), got %d", len(fa.allOpts))
 	}
 
-	// Review model should be laguna-pro
+	// Review model should be deepseek-v4-pro
 	if len(fa.allOpts) >= 5 {
-		if fa.allOpts[4].Model != "laguna-pro" {
-			t.Errorf("expected review model laguna-pro, got %q", fa.allOpts[4].Model)
+		if fa.allOpts[4].Model != "deepseek-v4-pro" {
+			t.Errorf("expected review model deepseek-v4-pro, got %q", fa.allOpts[4].Model)
 		}
 	}
 
@@ -1375,22 +1385,44 @@ func TestDispatchLoopApprovedAfterRetry(t *testing.T) {
 		t.Error("expected non-empty output.txt")
 	}
 }
-
 func TestValidateDelegateBinariesEmptyProvider(t *testing.T) {
+	dir := t.TempDir()
+	app := &App{MillDir: dir}
+	task := domain.NewTask("task-1", 1)
+	s := state.New()
+	s.UpsertTask(task)
 	cfg := config.Config{Provider: ""}
-	if err := validateDelegateBinaries(cfg); err != nil {
+	if err := app.validateDelegateBinaries(cfg, &task, s); err != nil {
 		t.Fatalf("expected no error for empty provider, got: %v", err)
+	}
+	if task.Phase != domain.TaskPhaseDispatch || task.FailureClass != domain.CLASS_OK {
+		t.Errorf("expected task unchanged, got phase=%q class=%q", task.Phase, task.FailureClass)
 	}
 }
 
 func TestValidateDelegateBinariesUnknownProvider(t *testing.T) {
+	dir := t.TempDir()
+	app := &App{MillDir: dir}
+	task := domain.NewTask("task-1", 1)
+	s := state.New()
+	s.UpsertTask(task)
 	cfg := config.Config{Provider: "nonexistent-binary-xyz"}
-	err := validateDelegateBinaries(cfg)
-	if err == nil {
-		t.Fatal("expected error for unknown provider binary not in PATH")
+	if err := app.validateDelegateBinaries(cfg, &task, s); err != nil {
+		t.Fatalf("expected nil error (failure recorded in state), got: %v", err)
+	}
+	if task.Phase != domain.TaskPhaseAborted {
+		t.Errorf("expected phase %q, got %q", domain.TaskPhaseAborted, task.Phase)
+	}
+	if task.Status != domain.TaskAborted {
+		t.Errorf("expected status %q, got %q", domain.TaskAborted, task.Status)
+	}
+	if task.FailureClass != domain.ENVIRONMENT_FAILURE {
+		t.Errorf("expected failure class %q, got %q", domain.ENVIRONMENT_FAILURE, task.FailureClass)
+	}
+	if task.AbortReason == "" {
+		t.Error("expected non-empty abort reason")
 	}
 }
-
 func TestRecordError(t *testing.T) {
 	dir := t.TempDir()
 	d := filepath.Join(dir, ".mill")
@@ -1472,7 +1504,6 @@ func TestRecordErrorWithExistingState(t *testing.T) {
 		t.Errorf("expected status %q, got %q", domain.TaskError, updated.Status)
 	}
 }
-
 
 func TestBuildRolePromptFallback(t *testing.T) {
 	// Change to a directory without .mill/roles to trigger the fallback path
@@ -1614,4 +1645,61 @@ func TestDelegateAsyncDispatch(t *testing.T) {
 	}
 	// Give the async goroutine time to complete before cleanup.
 	time.Sleep(200 * time.Millisecond)
+}
+
+func TestRunRecursionHandoffNilEngineIsNoop(t *testing.T) {
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: t.TempDir(), Out: buf, Err: buf}
+	// Recursion is left nil
+	err := app.runRecursionHandoff("architect", t.TempDir())
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+func TestRunRecursionHandoffMissingRoleReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf}
+	app.Recursion = &recursion.Delegator{RolesRoot: filepath.Join(dir, "roles")}
+
+	err := app.runRecursionHandoff("architect", t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for missing role file")
+	}
+	if !strings.Contains(err.Error(), "cannot read role architect") {
+		t.Errorf("expected error message containing 'cannot read role architect', got: %v", err)
+	}
+}
+
+func TestRunRecursionHandoffLeafRoleIsNoop(t *testing.T) {
+	dir := t.TempDir()
+	roleDir := filepath.Join(dir, "roles", "sr-dev-be")
+	if err := os.MkdirAll(roleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	roleContent := `---
+role: sr-dev-be
+model: cheap
+agent: task
+reviewed_by: tech-lead
+allowed_files:
+  - .go
+---
+
+# Role: Backend Dev
+`
+	if err := os.WriteFile(filepath.Join(roleDir, "ROLE.md"), []byte(roleContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf}
+	app.Recursion = &recursion.Delegator{RolesRoot: filepath.Join(dir, "roles")}
+
+	err := app.runRecursionHandoff("sr-dev-be", t.TempDir())
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
 }

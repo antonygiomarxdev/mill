@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -68,6 +69,10 @@ func (a *App) runDelegate(args []string) error {
 		return err
 	}
 
+	// Initialize the recursive delegation engine only when mill.yml
+	// configures a recursion section; otherwise it stays nil.
+	a.initRecursion(myml)
+
 	// Read issue body and labels from GitHub
 	issueBody, labels, err := a.IssueReader(issueNum)
 	if err != nil {
@@ -108,9 +113,25 @@ func (a *App) runDelegate(args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Validate required binaries before proceeding
-	if err := validateDelegateBinaries(cfg); err != nil {
-		return err
+	// Create task and persist initial state so environment failures during
+	// binary validation can be recorded against the task.
+	taskID := fmt.Sprintf("task-%d", issueNum)
+	task := domain.NewTask(taskID, issueNum)
+
+	s, err := state.Load(a.statePath())
+	if err != nil {
+		return fmt.Errorf("failed to load state: %w", err)
+	}
+	s.UpsertTask(task)
+	if err := s.Save(a.statePath()); err != nil {
+		return fmt.Errorf("failed to save state: %w", err)
+	}
+
+	// Validate required binaries before proceeding. On a missing binary the
+	// task is marked aborted + ENVIRONMENT_FAILURE and persisted; delegation
+	// stops without a direct error.
+	if err := a.validateDelegateBinaries(cfg, &task, s); err != nil {
+		return fmt.Errorf("failed to record environment failure: %w", err)
 	}
 
 	// Query adapter capabilities before side effects (spec: eager, before worktree)
@@ -118,6 +139,15 @@ func (a *App) runDelegate(args []string) error {
 	fmt.Fprintf(a.Err, "delegate: adapter capabilities — models=%d selectors=%v recovery=%v line_ceiling=%d byte_ceiling=%d\n",
 		len(caps.Models), caps.ReadTool.HasSelectorSupport, caps.ReadTool.HasRecoveryNotes,
 		caps.ReadTool.LineCeiling, caps.ReadTool.ByteCeiling)
+
+	// Resolve and validate model fallback chain
+	modelChain, err := a.resolveModelChain(model, cfg)
+	if err != nil {
+		return err
+	}
+	if err := validateModelChain(modelChain, caps); err != nil {
+		return err
+	}
 
 	// Initialize slot manager if not already set.
 	// mill.yml's concurrency.max-slots takes precedence over config.json.
@@ -135,21 +165,6 @@ func (a *App) runDelegate(args []string) error {
 	}
 
 	modelOverride := model
-
-	// Resolve adapter capabilities for prompt generation
-
-	// Create task and persist initial state
-	taskID := fmt.Sprintf("task-%d", issueNum)
-	task := domain.NewTask(taskID, issueNum)
-
-	s, err := state.Load(a.statePath())
-	if err != nil {
-		return fmt.Errorf("failed to load state: %w", err)
-	}
-	s.UpsertTask(task)
-	if err := s.Save(a.statePath()); err != nil {
-		return fmt.Errorf("failed to save state: %w", err)
-	}
 
 	// Append dispatch ledger entry
 	dispatchEntry := ledger.Entry{
@@ -200,13 +215,13 @@ func (a *App) runDelegate(args []string) error {
 	// Build issue context prompt with full body, acceptance criteria, and role
 	prompt := buildIssueContextPrompt(issueNum, issueBody, ac, targetRole, caps)
 	opts := adapter.DispatchOpts{
-		Worktree: wt,
-		Prompt:   prompt,
-		Model:    model,
-		MaxTurns: maxTurns,
-		Budget:   cfg.Budget,
+		Worktree:   wt,
+		Prompt:     prompt,
+		Model:      modelChain[0],
+		ModelChain: modelChain,
+		MaxTurns:   maxTurns,
+		Budget:     cfg.Budget,
 	}
-
 	// Acquire slot before dispatching (blocks if all slots occupied).
 	ctx := context.Background()
 	maxSlots := MaxSlotsFromConfig(cfg)
@@ -214,6 +229,27 @@ func (a *App) runDelegate(args []string) error {
 		maxSlots = myml.Concurrency.MaxSlots
 	}
 	if _, err := AcquireSlot(ctx, a.slots, a.Err, issueNum, targetRole, priority, maxSlots); err != nil {
+		if errors.Is(err, ErrSlotsExhausted) {
+			// Slot exhaustion is an environment failure: abort with no retry
+			// and no indefinite block. The "slots agotados" notification was
+			// already emitted by AcquireSlot.
+			task.Transition(domain.TaskPhaseAborted, domain.TaskAborted, domain.VerdictRejected, 0, domain.ENVIRONMENT_FAILURE)
+			task.AbortReason = "slots agotados"
+			s.UpsertTask(task)
+			if saveErr := s.Save(a.statePath()); saveErr != nil {
+				fmt.Fprintf(a.Err, "warning: failed to save state after slot exhaustion: %v\n", saveErr)
+			}
+			ledger.Append(a.ledgerPath(issueNum), ledger.Entry{
+				Timestamp:    time.Now().UTC(),
+				Issue:        issueNum,
+				Event:        "slots_exhausted",
+				Status:       string(domain.TaskAborted),
+				FailureClass: domain.ENVIRONMENT_FAILURE,
+				Phase:        domain.TaskPhaseAborted,
+				Role:         targetRole,
+			})
+			return nil
+		}
 		return fmt.Errorf("slot acquisition failed: %w", err)
 	}
 
@@ -222,6 +258,14 @@ func (a *App) runDelegate(args []string) error {
 		classification, err := runDispatchLoop54(a, issueNum, taskID, targetRole, modelOverride, opts, issueBody, labels, cfg, caps)
 		if isIrrecoverable(classification) {
 			irrecoverable = true
+		}
+		// Post-loop recursion handoff: when the produce-review loop ends with
+		// CLASS_OK and the target role delegates to subordinates, hand the
+		// worktree off to the recursive delegation engine.
+		if err == nil && classification == domain.CLASS_OK {
+			if rerr := a.runRecursionHandoff(targetRole, wt); rerr != nil {
+				return rerr
+			}
 		}
 		return err
 	}
@@ -238,14 +282,39 @@ func (a *App) runDelegate(args []string) error {
 	return nil
 }
 
+// isIrrecoverable reports whether a failure class indicates the worktree
+// should be cleaned up. EXECUTION_FAILURE (which subsumes the old FATAL,
+// AUTH, and NO_CREDIT classifications) triggers cleanup; environment
+// failures preserve the worktree for post-mortem.
+func isIrrecoverable(fc domain.FailureClass) bool {
+	return fc == domain.EXECUTION_FAILURE
+}
 
-
-// isIrrecoverable reports whether a classification indicates the worktree
-// should be cleaned up (FATAL, AUTH, or NO_CREDIT).
-func isIrrecoverable(c domain.Classification) bool {
-	return c == domain.ClassificationFatal ||
-		c == domain.ClassificationAuth ||
-		c == domain.ClassificationNoCredit
+// runRecursionHandoff triggers the recursive delegation engine when the
+// target role delegates to subordinates. It is a no-op when recursion is
+// not configured (a.Recursion nil) or the role is a leaf (empty
+// delegates_to). The result is logged to a.Err; the artifact path points at
+// the produce-loop's output.txt in the worktree.
+func (a *App) runRecursionHandoff(targetRole, worktreePath string) error {
+	if a.Recursion == nil {
+		return nil
+	}
+	rolePath := filepath.Join(a.MillDir, "roles", targetRole, "ROLE.md")
+	fm, err := role.ParseFrontmatter(rolePath)
+	if err != nil {
+		return fmt.Errorf("recursion: cannot read role %s: %w", targetRole, err)
+	}
+	if len(fm.DelegatesTo) == 0 {
+		return nil
+	}
+	res, derr := a.Recursion.Delegate(targetRole, worktreePath, filepath.Join(worktreePath, "output.txt"))
+	if res != nil {
+		fmt.Fprintf(a.Err, "recursion: %s → %s (depth %d, %s)\n", targetRole, res.Role, res.Depth, res.Failure)
+	}
+	if derr != nil {
+		return fmt.Errorf("recursion: %w", derr)
+	}
+	return nil
 }
 
 // createWorktree creates a real git worktree at .mill/worktrees/issue-N
@@ -311,7 +380,7 @@ func (a *App) cleanupWorktree(issueNum int) {
 
 // recordError updates the task and ledger to reflect an agent failure.
 func (a *App) recordError(s state.State, issueNum int, task domain.Task, err error, event string) {
-	task.UpdateStatus(domain.TaskError, domain.VerdictRejected, 0)
+	task.Transition(domain.TaskPhaseAborted, domain.TaskError, domain.VerdictRejected, 0, domain.EXECUTION_FAILURE)
 	s.UpsertTask(task)
 	s.Save(a.statePath())
 
@@ -323,66 +392,133 @@ func (a *App) recordError(s state.State, issueNum int, task domain.Task, err err
 	})
 }
 
-// maxRetries is the maximum number of retry attempts for transient failures.
-const maxRetries = 4
-
-// retryDispatch wraps Adapter.Dispatch + session.Wait + classifyResult with
-// exponential backoff retry on transient failures.
-// Backoff: 1s → 2s → 4s → 8s (max 4 retries).
-// Non-transient classifications (FATAL, AUTH, NO_CREDIT, BLOCKED, RATE_LIMITED)
-// bypass retry and return immediately.
+// retryDispatch wraps Adapter.Dispatch + session.Wait + classifyFailure with
+// model-chain fallback on execution failures.
+// Models are tried in order from opts.ModelChain; on EXECUTION_FAILURE the
+// dispatcher advances to the next model, bounded by Config.MaxRetries
+// (default 4). When retries are exhausted the dispatcher returns the last
+// result with EXECUTION_FAILURE so the caller can escalate. Any other
+// FailureClass returns immediately. When the chain is empty, only opts.Model
+// is tried.
 func (a *App) retryDispatch(
 	opts adapter.DispatchOpts,
 	phase string,
 	issueNum int,
 	task domain.Task,
 	cfg config.Config,
-) (adapter.SessionResult, domain.Classification, error) {
-	retryLimit := cfg.MaxRetries
-	if retryLimit <= 0 {
-		retryLimit = maxRetries
+) (adapter.SessionResult, domain.FailureClass, error) {
+	chain := opts.ModelChain
+	// Prepend opts.Model so the role-resolved model is tried first,
+	// then the config/adapter chain provides fallback.
+	allModels := make([]string, 0, len(chain)+1)
+	allModels = append(allModels, opts.Model)
+	for _, m := range chain {
+		if m != opts.Model {
+			allModels = append(allModels, m)
+		}
 	}
 
-	for retry := 0; retry <= retryLimit; retry++ {
-		if retry > 0 {
-			backoff := time.Duration(1<<(retry-1)) * time.Second
-			sleep := a.Backoff
-			if sleep == nil {
-				sleep = time.Sleep
-			}
-			sleep(backoff)
+	// Bound the number of model attempts at Config.MaxRetries (default 4) so
+	// execution failures are retried a finite number of times before escalation.
+	maxRetries := cfg.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 4
+	}
+	if len(allModels) > maxRetries {
+		allModels = allModels[:maxRetries]
+	}
+
+	var aggErrs []string
+
+	for i, model := range allModels {
+		if i > 0 {
+			fmt.Fprintf(a.Err, "model %s execution failed, falling back to %s (%d/%d)\n",
+				allModels[i-1], model, i+1, len(allModels))
 		}
+		opts.Model = model
 
 		session, err := a.Adapter.Dispatch(opts)
 		if err != nil {
-			if isTransientError(err) && retry < retryLimit {
+			if isTransientError(err) {
+				aggErrs = append(aggErrs, fmt.Sprintf("%s: %v", model, err))
 				continue
 			}
-			return adapter.SessionResult{}, "", fmt.Errorf("%s dispatch failed: %w", phase, err)
+			return adapter.SessionResult{}, domain.EXECUTION_FAILURE, fmt.Errorf("%s dispatch failed: %w", phase, err)
 		}
 
-		result, err := session.Wait()
+		result, err := a.waitSession(session)
 		if err != nil {
-			if isTransientError(err) && retry < retryLimit {
+			if isTransientError(err) {
+				aggErrs = append(aggErrs, fmt.Sprintf("%s: %v", model, err))
 				continue
 			}
-			return adapter.SessionResult{}, "", fmt.Errorf("%s session failed: %w", phase, err)
+			return adapter.SessionResult{}, domain.EXECUTION_FAILURE, fmt.Errorf("%s session failed: %w", phase, err)
 		}
 
 		// Auto-compact session context if enabled and near threshold.
 		a.maybeAutoCompactSession(session, opts.Model, issueNum, opts.Worktree, cfg)
 
-		class := classifyResult(result.ExitCode, result.Stderr)
-		if class == domain.ClassificationTransient && retry < retryLimit {
+		fc := classifyFailure(toSessionResult(result))
+		if fc == domain.EXECUTION_FAILURE {
+			aggErrs = append(aggErrs, fmt.Sprintf("%s: %s", model, fc))
 			continue
 		}
-		if class != domain.ClassificationTransient {
-			return result, class, nil
-		}
-		// Last retry and still transient — let loop exit and return error
+		return result, fc, nil
 	}
 
-	return adapter.SessionResult{}, "", fmt.Errorf("%s: max retries (%d) exceeded", phase, retryLimit)
+	errMsg := fmt.Sprintf("%s: all %d models exhausted", phase, len(allModels))
+	if len(aggErrs) > 0 {
+		errMsg += ": " + strings.Join(aggErrs, "; ")
+	}
+	return adapter.SessionResult{}, domain.EXECUTION_FAILURE, fmt.Errorf("%s", errMsg)
+}
+
+// If the resolved value is an alias:
+//   - config.Models[alias] → single-element chain
+//   - adapter.DefaultFallbackChain()[alias] → multi-element chain
+//   - passthrough: alias IS the model name → single-element chain
+func (a *App) resolveModelChain(modelFlag string, cfg config.Config) ([]string, error) {
+	modelName := modelFlag
+	if modelName == "" {
+		modelName = cfg.Model
+	}
+	if modelName == "" {
+		modelName = a.Adapter.DefaultModel()
+	}
+	if modelName == "" {
+		return nil, fmt.Errorf("no model configured: set model in config or use --model flag")
+	}
+
+	// Alias resolution
+	if mapped, ok := cfg.Models[modelName]; ok && mapped != "" {
+		return []string{mapped}, nil
+	}
+	if chain := a.Adapter.DefaultFallbackChain()[modelName]; len(chain) > 0 {
+		return chain, nil
+	}
+
+	// Passthrough: the value IS the model name
+	return []string{modelName}, nil
+}
+
+// validateModelChain checks that every model in chain exists in the adapter's
+// Capabilities().Models. Returns an error listing any invalid models.
+func validateModelChain(chain []string, caps adapter.Capabilities) error {
+	modelSet := make(map[string]bool, len(caps.Models))
+	for _, m := range caps.Models {
+		modelSet[m] = true
+	}
+	var invalid []string
+	for _, m := range chain {
+		if !modelSet[m] {
+			invalid = append(invalid, m)
+		}
+	}
+	if len(invalid) > 0 {
+		return fmt.Errorf("model %s not supported by provider. Available: %s",
+			strings.Join(invalid, ", "), strings.Join(caps.Models, ", "))
+	}
+	return nil
 }
 
 // isTransientError reports whether an error from Adapter.Dispatch or
@@ -667,66 +803,26 @@ func extractFlag(args []string, name string) (string, []string) {
 	return "", args
 }
 
+// classifyFailure examines an agent session result and returns the
+// corresponding domain.FailureClass using the default SignalRegistry.
+//
+// The registry resolves signals in priority order: stderr-derived signals
+// first, then exit-code signals, then the heartbeat guard, then the
+// environment guard. The CONTRACT artifact inspection (empty/placeholder/
+// TODO/TBD output) only fires when the process exit code is OK (0).
+func classifyFailure(result domain.SessionResult) domain.FailureClass {
+	return domain.NewSignalRegistry().Resolve(result)
+}
 
-// classifyResult examines an agent session's exit code and stderr output
-// and returns the corresponding domain.Classification.
-//
-// Stderr signals are checked first (priority over exit code):
-//
-//	1. "blocked:"           → BLOCKED
-//	2. auth signals         → AUTH
-//	3. no-credit signals    → NO_CREDIT
-//	4. rate-limit signals   → RATE_LIMITED
-//	5. transient signals    → TRANSIENT
-//
-// If no stderr signal matches, the exit code is mapped:
-// 0 → OK, 3 → AUTH, 4/9/130/137/143 → FATAL, 5 → RATE_LIMITED,
-// 6/7 → TRANSIENT, 8 → MAX_TURNS, 10 → NO_CREDIT,
-// -1/-2 → BLOCKED (budget violation), default → FATAL.
-func classifyResult(exitCode int, stderr string) domain.Classification {
-	lower := strings.ToLower(stderr)
-	// Check stderr signals first
-	if strings.Contains(lower, "blocked:") {
-		return domain.ClassificationBlocked
-	}
-	if strings.Contains(lower, "approved:") {
-		return domain.ClassificationOK
-	}
-	if strings.Contains(lower, "changes_requested:") || strings.Contains(lower, "changes requested:") {
-		return domain.ClassificationChangesRequested
-	}
-	if strings.Contains(lower, "not authenticated") || strings.Contains(lower, "no api key") || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "401") || strings.Contains(lower, "403") {
-		return domain.ClassificationAuth
-	}
-	if strings.Contains(lower, "insufficient credits") || strings.Contains(lower, "no credits") || strings.Contains(lower, "credit limit") {
-		return domain.ClassificationNoCredit
-	}
-	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "429") {
-		return domain.ClassificationRateLimited
-	}
-	if strings.Contains(lower, "connection refused") || strings.Contains(lower, "econnrefused") || strings.Contains(lower, "timeout") {
-		return domain.ClassificationTransient
-	}
-	// Fall back to exit code
-	switch exitCode {
-	case 0:
-		return domain.ClassificationOK
-	case 3:
-		return domain.ClassificationAuth
-	case 4, 9, 130, 137, 143:
-		return domain.ClassificationFatal
-	case 5:
-		return domain.ClassificationRateLimited
-	case 6, 7:
-		return domain.ClassificationTransient
-	case 8:
-		return domain.ClassificationMaxTurns
-	case 10:
-		return domain.ClassificationNoCredit
-	case -1, -2:
-		return domain.ClassificationBlocked
-	default:
-		return domain.ClassificationFatal
+// toSessionResult converts an adapter.SessionResult into a domain.SessionResult
+// for failure classification. HeartbeatStaleness is copied from the adapter's
+// wait path so the classifier can observe session liveness.
+func toSessionResult(r adapter.SessionResult) domain.SessionResult {
+	return domain.SessionResult{
+		ExitCode:           r.ExitCode,
+		Stderr:             r.Stderr,
+		Output:             r.Output,
+		HeartbeatStaleness: r.HeartbeatStaleness,
 	}
 }
 
@@ -736,11 +832,10 @@ var providerBinary = map[string]string{
 	"commandcode": "cmd",
 }
 
-// validateDelegateBinaries checks that required toolchain and provider
-// binaries are on PATH before delegation begins. It checks git, go,
-// and the configured provider's CLI binary. The check runs BEFORE
-// worktree creation so the user gets a fast, clear error.
-func validateDelegateBinaries(cfg config.Config) error {
+// missingBinaryErr returns an error naming the first required binary missing
+// from PATH (git, go, or the configured provider binary), or nil if all are
+// present.
+func missingBinaryErr(cfg config.Config) error {
 	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("git not found in PATH. Install git to continue.")
 	}
@@ -756,6 +851,22 @@ func validateDelegateBinaries(cfg config.Config) error {
 	}
 	if _, err := exec.LookPath(binary); err != nil {
 		return fmt.Errorf("provider binary %q not found in PATH", binary)
+	}
+	return nil
+}
+
+// validateDelegateBinaries checks that the required toolchain and provider
+// binaries are on PATH before delegation begins. It checks git, go, and the
+// configured provider's CLI binary. On a missing binary the task is marked
+// aborted + ENVIRONMENT_FAILURE and persisted (instead of returning a direct
+// error), so the environment failure is recorded in state. Returns nil in
+// that case; a non-nil error means the failure could not be persisted.
+func (a *App) validateDelegateBinaries(cfg config.Config, task *domain.Task, s state.State) error {
+	if err := missingBinaryErr(cfg); err != nil {
+		task.Transition(domain.TaskPhaseAborted, domain.TaskAborted, domain.VerdictRejected, 0, domain.ENVIRONMENT_FAILURE)
+		task.AbortReason = err.Error()
+		s.UpsertTask(*task)
+		return s.Save(a.statePath())
 	}
 	return nil
 }

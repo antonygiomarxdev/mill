@@ -2,7 +2,9 @@ package state
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,11 +18,11 @@ func TestSaveAndLoad(t *testing.T) {
 
 	s := New()
 	s.UpsertTask(domain.Task{
-		ID:      "abc123",
-		Issue:   390,
-		Status:  domain.TaskRunning,
-		Commits: 1,
-		Verdict: domain.VerdictChanges,
+		ID:        "abc123",
+		Issue:     390,
+		Status:    domain.TaskRunning,
+		Commits:   1,
+		Verdict:   domain.VerdictChanges,
 		StartedAt: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2026, 8, 10, 12, 30, 0, 0, time.UTC),
 	})
@@ -470,5 +472,220 @@ func TestSaveBackupContentMatchesSaveOrder(t *testing.T) {
 	}
 	if _, ok := loaded.Task("second"); !ok {
 		t.Error("primary should contain task 'second'")
+	}
+}
+
+func TestStateRoundTripsPhaseAndFailureClass(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	s := New()
+	s.UpsertTask(domain.Task{
+		ID:           "t1",
+		Phase:        domain.TaskPhaseGateFailed,
+		FailureClass: domain.GATE_FAILURE,
+		Status:       domain.TaskRunning,
+	})
+
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	task, ok := loaded.Task("t1")
+	if !ok {
+		t.Fatal("expected task t1 to exist after round-trip")
+	}
+
+	if task.Phase != domain.TaskPhaseGateFailed {
+		t.Errorf("expected phase %q, got %q", domain.TaskPhaseGateFailed, task.Phase)
+	}
+	if task.FailureClass != domain.GATE_FAILURE {
+		t.Errorf("expected failure_class %q, got %q", domain.GATE_FAILURE, task.FailureClass)
+	}
+}
+
+// TestCrashInjectionRecoversFromBackup verifies that Load recovers the most
+// recent consistent generation when a crash occurs in the rotate->rename
+// window of Save (primary missing, but .1/.2 hold valid generations).
+//
+// The parent seeds gen1 then gen2 via Save, then spawns this same test binary
+// as a helper that simulates a Save of gen3 crashing right after rotateBackups
+// (before the final rename). The helper is SIGKILLed, leaving the primary
+// missing with gen2 in .1 and gen1 in .2. Load must recover gen2.
+func TestCrashInjectionRecoversFromBackup(t *testing.T) {
+	if os.Getenv("STATE_CRASH_HELPER") == "1" {
+		runCrashHelper(t)
+		return
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	signal := filepath.Join(dir, "ready.signal")
+
+	// gen1: produce / execution_failure / running
+	g1 := New()
+	g1.UpsertTask(domain.Task{
+		ID:           "gen1",
+		Phase:        domain.TaskPhaseProduce,
+		FailureClass: domain.EXECUTION_FAILURE,
+		Status:       domain.TaskRunning,
+	})
+	if err := g1.Save(path); err != nil {
+		t.Fatalf("save gen1 failed: %v", err)
+	}
+
+	// gen2: gate_failed / gate_failure
+	g2 := New()
+	g2.UpsertTask(domain.Task{
+		ID:           "gen2",
+		Phase:        domain.TaskPhaseGateFailed,
+		FailureClass: domain.GATE_FAILURE,
+	})
+	if err := g2.Save(path); err != nil {
+		t.Fatalf("save gen2 failed: %v", err)
+	}
+
+	// Spawn helper that simulates a crash during gen3's Save.
+	cmd := exec.Command(os.Args[0], "-test.run=TestCrashInjectionRecoversFromBackup")
+	cmd.Env = append(os.Environ(),
+		"STATE_CRASH_HELPER=1",
+		"STATE_PATH="+path,
+		"STATE_SIGNAL="+signal,
+	)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start crash helper: %v", err)
+	}
+
+	// Poll for the signal file indicating the helper reached its sleep loop.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(signal); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			t.Fatal("timed out waiting for crash helper signal")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Kill the helper (SIGKILL) mid-Save, before the final rename.
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill helper: %v", err)
+	}
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("expected helper to exit non-zero from SIGKILL")
+	}
+
+	// .1 should hold gen2.
+	b1, err := parseStateFile(path + ".1")
+	if err != nil {
+		t.Fatalf("parseStateFile(.1) failed: %v", err)
+	}
+	task1, ok := b1.Task("gen2")
+	if !ok {
+		t.Fatal("expected gen2 in .1")
+	}
+	if task1.Phase != domain.TaskPhaseGateFailed {
+		t.Errorf(".1: expected phase %q, got %q", domain.TaskPhaseGateFailed, task1.Phase)
+	}
+	if task1.FailureClass != domain.GATE_FAILURE {
+		t.Errorf(".1: expected failure_class %q, got %q", domain.GATE_FAILURE, task1.FailureClass)
+	}
+
+	// .2 should hold gen1.
+	b2, err := parseStateFile(path + ".2")
+	if err != nil {
+		t.Fatalf("parseStateFile(.2) failed: %v", err)
+	}
+	task2, ok := b2.Task("gen1")
+	if !ok {
+		t.Fatal("expected gen1 in .2")
+	}
+	if task2.Phase != domain.TaskPhaseProduce {
+		t.Errorf(".2: expected phase %q, got %q", domain.TaskPhaseProduce, task2.Phase)
+	}
+	if task2.FailureClass != domain.EXECUTION_FAILURE {
+		t.Errorf(".2: expected failure_class %q, got %q", domain.EXECUTION_FAILURE, task2.FailureClass)
+	}
+
+	// Primary is missing; Load must recover gen2 from .1.
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after crash failed: %v", err)
+	}
+	got, ok := loaded.Task("gen2")
+	if !ok {
+		t.Fatal("expected gen2 to be recovered by Load")
+	}
+	if got.Phase != domain.TaskPhaseGateFailed {
+		t.Errorf("Load: expected phase %q, got %q", domain.TaskPhaseGateFailed, got.Phase)
+	}
+	if got.FailureClass != domain.GATE_FAILURE {
+		t.Errorf("Load: expected failure_class %q, got %q", domain.GATE_FAILURE, got.FailureClass)
+	}
+}
+
+// runCrashHelper simulates a Save that crashes in the rotate->rename window.
+// It writes gen3 to the temp file, calls rotateBackups (which moves the
+// primary to .1 and .1 to .2, leaving the primary missing), signals readiness,
+// then blocks until SIGKILLed — never performing the final rename.
+func runCrashHelper(t *testing.T) {
+	path := os.Getenv("STATE_PATH")
+	signal := os.Getenv("STATE_SIGNAL")
+
+	// gen3: rejected / contract_failure
+	g3 := New()
+	g3.UpsertTask(domain.Task{
+		ID:           "gen3",
+		Phase:        domain.TaskPhaseRejected,
+		FailureClass: domain.CONTRACT_FAILURE,
+	})
+
+	data, err := json.MarshalIndent(g3, "", "  ")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "helper marshal failed:", err)
+		os.Exit(1)
+	}
+
+	tmp := path + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "helper create temp failed:", err)
+		os.Exit(1)
+	}
+	if _, err := f.Write(data); err != nil {
+		fmt.Fprintln(os.Stderr, "helper write failed:", err)
+		os.Exit(1)
+	}
+	if err := f.Sync(); err != nil {
+		fmt.Fprintln(os.Stderr, "helper sync failed:", err)
+		os.Exit(1)
+	}
+	if err := f.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "helper close failed:", err)
+		os.Exit(1)
+	}
+
+	// Mirror Save's rotate step: .2 removed, .1->.2, primary->.1. Leaves primary
+	// missing while .1 holds gen2 and .2 holds gen1.
+	rotateBackups(path)
+
+	// Signal the parent that the crash point has been reached.
+	if err := os.WriteFile(signal, []byte("ready"), 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, "helper signal failed:", err)
+		os.Exit(1)
+	}
+
+	// Block here until SIGKILLed — the final os.Rename(tmp, path) never runs,
+	// so the primary file remains missing and .tmp (gen3) is left behind.
+	for {
+		time.Sleep(time.Second)
 	}
 }

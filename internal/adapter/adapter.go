@@ -2,7 +2,11 @@
 // AI agent sessions. Each provider (CommandCode, OpenCode, Claude) implements Adapter.
 package adapter
 
-import "github.com/antonygiomarxdev/mill/internal/domain"
+import (
+	"time"
+
+	"github.com/antonygiomarxdev/mill/internal/domain"
+)
 
 // Budget holds per-target resource constraints for agent delegation.
 type Budget struct {
@@ -19,6 +23,10 @@ type DispatchOpts struct {
 	Prompt string
 	// Model is the provider model identifier (e.g. "laguna-free").
 	Model string
+	// ModelChain is the ordered fallback list of model identifiers.
+	// When Model hits RATE_LIMITED, the dispatcher advances to the next.
+	// An empty chain means use Model alone with no fallback.
+	ModelChain []string
 	// MaxTurns caps the conversation turns. Zero means no cap.
 	MaxTurns int
 	// Budget is the per-target resource budget (nil = unbounded).
@@ -51,16 +59,17 @@ type ReadToolCapabilities struct {
 
 // Capabilities describes what an adapter can do.
 type Capabilities struct {
-	Models   []string            `json:"models"`
+	Models   []string             `json:"models"`
 	ReadTool ReadToolCapabilities `json:"read_tool"`
 }
 
 // SessionResult is the outcome of a completed session.
 type SessionResult struct {
-	ExitCode int    `json:"exit_code"`
-	Commits  int    `json:"commits"`
-	Output   string `json:"output"`
-	Stderr   string `json:"stderr"`
+	ExitCode           int           `json:"exit_code"`
+	Commits            int           `json:"commits"`
+	Output             string        `json:"output"`
+	Stderr             string        `json:"stderr"`
+	HeartbeatStaleness time.Duration `json:"heartbeat_staleness"`
 }
 
 // Session represents an in-flight or completed agent session.
@@ -70,16 +79,24 @@ type Session interface {
 	Wait() (SessionResult, error)
 	// ContextText returns the full NDJSON session context for compaction.
 	ContextText() (string, error)
+	// HeartbeatPath returns the filesystem path where the session writes
+	// its liveness heartbeat, resolved within the worktree's .mill directory.
+	HeartbeatPath() string
 }
 
 // Adapter dispatches agent sessions for a provider.
-// Dispatch starts work on a worktree with a prompt and model.
-// Resume reconnects to an existing session by ID.
-// Capabilities returns the provider's supported models.
 type Adapter interface {
 	Dispatch(opts DispatchOpts) (Session, error)
 	Resume(sessionID string) (Session, error)
 	Capabilities() Capabilities
+	DefaultModel() string
+	DefaultFallbackChain() map[string][]string
+	// FailureSignals returns the declarative failure-classification signal
+	// table this adapter contributes to the shared SignalRegistry.
+	FailureSignals() []domain.Signal
+	// BinaryPath returns the path to the mill executable so BinaryCopier
+	// can copy it into child worktrees.
+	BinaryPath() string
 }
 
 // sessionStatus returns the domain session status as a string.

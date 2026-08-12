@@ -124,3 +124,54 @@ func TestLoadAndValidateLineNumberInError(t *testing.T) {
 		t.Fatalf("expected error to contain 'line' (yaml.v3 includes line numbers), got: %v", errStr)
 	}
 }
+
+func TestLoadAndValidateRecursionConfig(t *testing.T) {
+	yml := `project: mill
+provider: commandcode
+recursion:
+  view: tree
+  max_depth: 3
+  models:
+    pro: deepseek-v4-pro
+    cheap: laguna-s-2.1-free
+`
+	path := filepath.Join(t.TempDir(), "mill.yml")
+	if err := os.WriteFile(path, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadAndValidate(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Recursion.View != "tree" {
+		t.Errorf("expected recursion.view 'tree', got %q", cfg.Recursion.View)
+	}
+	if cfg.Recursion.MaxDepth != 3 {
+		t.Errorf("expected recursion.max_depth 3, got %d", cfg.Recursion.MaxDepth)
+	}
+	if cfg.Recursion.Models["pro"] != "deepseek-v4-pro" {
+		t.Errorf("expected recursion.models.pro 'deepseek-v4-pro', got %q", cfg.Recursion.Models["pro"])
+	}
+	if cfg.Recursion.Models["cheap"] != "laguna-s-2.1-free" {
+		t.Errorf("expected recursion.models.cheap 'laguna-s-2.1-free', got %q", cfg.Recursion.Models["cheap"])
+	}
+}
+
+func TestLoadAndValidateRecursionAbsentIsZero(t *testing.T) {
+	yml := "project: mill\nprovider: commandcode\n"
+	path := filepath.Join(t.TempDir(), "mill.yml")
+	if err := os.WriteFile(path, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadAndValidate(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Recursion.View != "" || cfg.Recursion.MaxDepth != 0 || len(cfg.Recursion.Models) != 0 {
+		t.Errorf("expected zero RecursionConfig when recursion absent, got %+v", cfg.Recursion)
+	}
+}

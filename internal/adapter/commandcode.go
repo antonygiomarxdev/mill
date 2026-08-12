@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/antonygiomarxdev/mill/internal/domain"
@@ -23,18 +25,63 @@ func (a *CommandCodeAdapter) Capabilities() Capabilities {
 		Models: []string{
 			"claude-sonnet-5",
 			"claude-sonnet-4-6",
+			"claude-fable-5",
+			"claude-opus-5",
+			"claude-haiku-4-5",
 			"deepseek-v4-pro",
 			"deepseek-v4-flash",
-			"gpt-5",
+			"laguna-s-2.1-free",
 		},
 		ReadTool: ReadToolCapabilities{
-			LineCeiling:         2000,
-			ByteCeiling:         128 * 1024, // 128KB
-			CharCeiling:         500,
-			HasSelectorSupport:  true,
-			HasRecoveryNotes:    true,
+			LineCeiling:        2000,
+			ByteCeiling:        128 * 1024, // 128KB
+			CharCeiling:        500,
+			HasSelectorSupport: true,
+			HasRecoveryNotes:   true,
 		},
 	}
+}
+
+// DefaultModel returns the recommended default model for the CommandCode adapter.
+func (a *CommandCodeAdapter) DefaultModel() string {
+	return "laguna-s-2.1-free"
+}
+
+// DefaultFallbackChain returns bidirectional model fallback chains per tier.
+// Each tier ensures at least two models from different providers so a
+// rate-limited model falls back to a different provider.
+func (a *CommandCodeAdapter) DefaultFallbackChain() map[string][]string {
+	return map[string][]string{
+		"free": {"laguna-s-2.1-free", "deepseek-v4-flash"},
+		"paid": {"deepseek-v4-pro", "claude-sonnet-5", "deepseek-v4-flash", "laguna-s-2.1-free"},
+		"pro":  {"deepseek-v4-pro", "claude-fable-5", "claude-sonnet-5"},
+	}
+}
+
+// FailureSignals returns the shared declarative failure-classification signal
+// table used to classify completed sessions into a domain.FailureClass.
+func (a *CommandCodeAdapter) FailureSignals() []domain.Signal {
+	return domain.NewSignalRegistry().Signals()
+}
+
+// BinaryPath returns the path to the mill executable so BinaryCopier can
+// copy it into child worktrees. The resolved path is cached.
+func (a *CommandCodeAdapter) BinaryPath() string {
+	return resolveBinaryPath()
+}
+
+var cachedBinaryPath string
+
+func resolveBinaryPath() string {
+	if cachedBinaryPath != "" {
+		return cachedBinaryPath
+	}
+	path, err := os.Executable()
+	if err != nil {
+		return "mill"
+	}
+	cachedBinaryPath = path
+	return path
 }
 
 // Dispatch starts a `cmd -p` session in the given worktree.
@@ -43,6 +90,7 @@ func (a *CommandCodeAdapter) Capabilities() Capabilities {
 func (a *CommandCodeAdapter) Dispatch(opts DispatchOpts) (Session, error) {
 	args := buildArgs(opts)
 	cmd := exec.Command("cmd", args...)
+	cmd.Env = append(os.Environ(), "NODE_OPTIONS=--dns-result-order=ipv4first")
 	if opts.Worktree != "" {
 		if err := os.MkdirAll(opts.Worktree, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create worktree %s: %w", opts.Worktree, err)
@@ -58,8 +106,7 @@ func (a *CommandCodeAdapter) Dispatch(opts DispatchOpts) (Session, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start cmd: %w", err)
 	}
-
-	return &liveSession{
+	ls := &liveSession{
 		id:        generateID(),
 		cmd:       cmd,
 		outputBuf: &out,
@@ -67,17 +114,25 @@ func (a *CommandCodeAdapter) Dispatch(opts DispatchOpts) (Session, error) {
 		startedAt: time.Now().UTC(),
 		status:    sessionStatus(domain.SessionRunning),
 		budget:    opts.Budget,
-	}, nil
+		worktree:  opts.Worktree,
+	}
+	if opts.Worktree != "" {
+		ls.startHeartbeat()
+	}
+	return ls, nil
 }
 
 // Resume reconnects to an existing CommandCode headless session by ID.
 func (a *CommandCodeAdapter) Resume(sessionID string) (Session, error) {
 	args := []string{
 		"-p", "--resume", sessionID,
+		"--yolo",
+		"--skip-onboarding",
 		"--output-format", "json",
 	}
 
 	cmd := exec.Command("cmd", args...)
+	cmd.Env = append(os.Environ(), "NODE_OPTIONS=--dns-result-order=ipv4first")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -102,6 +157,8 @@ func (a *CommandCodeAdapter) Resume(sessionID string) (Session, error) {
 func buildArgs(opts DispatchOpts) []string {
 	args := []string{
 		"-p", opts.Prompt,
+		"--yolo",
+		"--skip-onboarding",
 		"-m", opts.Model,
 		"--output-format", "json",
 	}
@@ -120,11 +177,99 @@ type liveSession struct {
 	startedAt time.Time
 	status    string
 	budget    *Budget
+	worktree  string
 	parse     func(string) (string, string)
+
+	// Heartbeat tracking: a goroutine writes a liveness file every second
+	// while the session process is running.
+	heartbeatStop   chan struct{}
+	heartbeatExited chan struct{}
+	lastHeartbeat   time.Time
+	heartbeatMu     sync.Mutex
 }
 
 func (s *liveSession) ID() string     { return s.id }
 func (s *liveSession) Status() string { return s.status }
+
+// HeartbeatPath returns the filesystem path to the session heartbeat file,
+// resolved within the worktree's .mill directory.
+func (s *liveSession) HeartbeatPath() string {
+	return filepath.Join(s.worktree, ".mill", "heartbeat")
+}
+
+// resolveAgentID determines the agent_id written in heartbeat frontmatter.
+// It reads from .mill/agent_id, falls back to .mill/role, then to the session id.
+func (s *liveSession) resolveAgentID() string {
+	if s.worktree == "" {
+		return s.id
+	}
+	agentIDPath := filepath.Join(s.worktree, ".mill", "agent_id")
+	if data, err := os.ReadFile(agentIDPath); err == nil {
+		if id := strings.TrimSpace(string(data)); id != "" {
+			return id
+		}
+	}
+	rolePath := filepath.Join(s.worktree, ".mill", "role")
+	if data, err := os.ReadFile(rolePath); err == nil {
+		if id := strings.TrimSpace(string(data)); id != "" {
+			return id
+		}
+	}
+	return s.id
+}
+
+// writeHeartbeat writes a YAML frontmatter heartbeat file to the worktree's
+// .mill/heartbeat. On success it records the current time as the last heartbeat.
+func (s *liveSession) writeHeartbeat() {
+	if s.worktree == "" {
+		return
+	}
+	millDir := filepath.Join(s.worktree, ".mill")
+	os.MkdirAll(millDir, 0o755)
+	now := time.Now().UTC()
+	content := fmt.Sprintf("---\nagent_id: %s\ntimestamp: %s\n---\n",
+		s.resolveAgentID(), now.Format(time.RFC3339))
+	if err := os.WriteFile(filepath.Join(millDir, "heartbeat"), []byte(content), 0o644); err == nil {
+		s.heartbeatMu.Lock()
+		s.lastHeartbeat = now
+		s.heartbeatMu.Unlock()
+	}
+}
+
+// startHeartbeat launches a goroutine that writes a heartbeat file every
+// second. The goroutine must be stopped via stopHeartbeat before Wait returns.
+func (s *liveSession) startHeartbeat() {
+	s.heartbeatStop = make(chan struct{})
+	s.heartbeatExited = make(chan struct{})
+	go func() {
+		defer close(s.heartbeatExited)
+		s.writeHeartbeat()
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.writeHeartbeat()
+			case <-s.heartbeatStop:
+				return
+			}
+		}
+	}()
+}
+
+// stopHeartbeat signals the heartbeat goroutine to stop, waits for it to exit,
+// and returns the duration since the last successful heartbeat write.
+func (s *liveSession) stopHeartbeat() time.Duration {
+	if s.heartbeatStop == nil {
+		return time.Since(time.Time{})
+	}
+	close(s.heartbeatStop)
+	<-s.heartbeatExited
+	s.heartbeatMu.Lock()
+	staleness := time.Since(s.lastHeartbeat)
+	s.heartbeatMu.Unlock()
+	return staleness
+}
 
 // ContextText returns the full NDJSON session context for compaction.
 func (s *liveSession) ContextText() (string, error) {
@@ -146,6 +291,7 @@ func (s *liveSession) Wait() (SessionResult, error) {
 // waitSimple is the original, backward-compatible Wait() path.
 func (s *liveSession) waitSimple() (SessionResult, error) {
 	err := s.cmd.Wait()
+	staleness := s.stopHeartbeat()
 	exitCode := 0
 
 	if err != nil {
@@ -154,7 +300,11 @@ func (s *liveSession) waitSimple() (SessionResult, error) {
 			s.status = sessionStatus(domain.SessionError)
 		} else {
 			s.status = sessionStatus(domain.SessionError)
-			return SessionResult{ExitCode: -1, Stderr: s.stderrBuf.String()}, err
+			return SessionResult{
+				ExitCode:           -1,
+				Stderr:             s.stderrBuf.String(),
+				HeartbeatStaleness: staleness,
+			}, err
 		}
 	} else {
 		s.status = sessionStatus(domain.SessionDone)
@@ -169,10 +319,11 @@ func (s *liveSession) waitSimple() (SessionResult, error) {
 	commits := countCommits(output)
 
 	return SessionResult{
-		ExitCode: exitCode,
-		Commits:  commits,
-		Output:   finalText,
-		Stderr:   s.stderrBuf.String(),
+		ExitCode:           exitCode,
+		Commits:            commits,
+		Output:             finalText,
+		Stderr:             s.stderrBuf.String(),
+		HeartbeatStaleness: staleness,
 	}, nil
 }
 
@@ -180,24 +331,27 @@ func (s *liveSession) waitSimple() (SessionResult, error) {
 func (s *liveSession) waitWithBudget() (SessionResult, error) {
 	timeout := time.Duration(s.budget.TimeSeconds) * time.Second
 	exitErr, timeKilled := waitCmd(s.cmd, timeout)
+	staleness := s.stopHeartbeat()
 
 	output := s.outputBuf.String()
 
 	if timeKilled {
 		s.status = sessionStatus(domain.SessionError)
 		return SessionResult{
-			ExitCode: -1,
-			Commits:  countCommits(output),
-			Stderr:   "blocked: time budget exceeded",
+			ExitCode:           -1,
+			Commits:            countCommits(output),
+			Stderr:             "blocked: time budget exceeded",
+			HeartbeatStaleness: staleness,
 		}, nil
 	}
 
 	if exitErr != nil {
 		s.status = sessionStatus(domain.SessionError)
 		return SessionResult{
-			ExitCode: exitErr.ExitCode(),
-			Commits:  countCommits(output),
-			Stderr:   s.stderrBuf.String(),
+			ExitCode:           exitErr.ExitCode(),
+			Commits:            countCommits(output),
+			Stderr:             s.stderrBuf.String(),
+			HeartbeatStaleness: staleness,
 		}, nil
 	}
 
@@ -205,9 +359,10 @@ func (s *liveSession) waitWithBudget() (SessionResult, error) {
 	if s.budget.MaxTurns > 0 && detectAnalysisParalysis(output, s.budget.MaxTurns) {
 		s.status = sessionStatus(domain.SessionError)
 		return SessionResult{
-			ExitCode: -2,
-			Commits:  countCommits(output),
-			Stderr:   "blocked: analysis paralysis detected",
+			ExitCode:           -2,
+			Commits:            countCommits(output),
+			Stderr:             "blocked: analysis paralysis detected",
+			HeartbeatStaleness: staleness,
 		}, nil
 	}
 
@@ -220,10 +375,11 @@ func (s *liveSession) waitWithBudget() (SessionResult, error) {
 	commits := countCommits(output)
 
 	return SessionResult{
-		ExitCode: 0,
-		Commits:  commits,
-		Output:   finalText,
-		Stderr:   s.stderrBuf.String(),
+		ExitCode:           0,
+		Commits:            commits,
+		Output:             finalText,
+		Stderr:             s.stderrBuf.String(),
+		HeartbeatStaleness: staleness,
 	}, nil
 }
 
@@ -263,8 +419,8 @@ func waitCmd(cmd *exec.Cmd, timeout time.Duration) (exitErr *exec.ExitError, tim
 
 // ndjsonFrame is a single line of NDJSON from the agent process.
 type ndjsonFrame struct {
-	Type  string       `json:"type"`
-	Event *frameEvent  `json:"event,omitempty"`
+	Type  string      `json:"type"`
+	Event *frameEvent `json:"event,omitempty"`
 }
 
 // frameEvent is the nested event object inside an NDJSON frame.
@@ -338,9 +494,9 @@ func parseJSONOutput(output string) (finalText string, sessionID string) {
 		}
 
 		var frame struct {
-			Type      string          `json:"type"`
-			FinalText string          `json:"finalText"`
-			SessionID string          `json:"sessionId"`
+			Type      string `json:"type"`
+			FinalText string `json:"finalText"`
+			SessionID string `json:"sessionId"`
 		}
 		if err := json.Unmarshal([]byte(line), &frame); err != nil {
 			continue

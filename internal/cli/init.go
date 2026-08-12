@@ -32,10 +32,10 @@ type initConfig struct {
 type ProjectType int
 
 const (
-	ProjectGeneric  ProjectType = iota // no recognized sentinel
-	ProjectGoModule                      // go.mod found, no package.json
-	ProjectJSProject                     // package.json found, no go.mod
-	ProjectMonoRepo                      // BOTH go.mod AND package.json at different levels
+	ProjectGeneric   ProjectType = iota // no recognized sentinel
+	ProjectGoModule                     // go.mod found, no package.json
+	ProjectJSProject                    // package.json found, no go.mod
+	ProjectMonoRepo                     // BOTH go.mod AND package.json at different levels
 )
 
 func (p ProjectType) String() string {
@@ -214,8 +214,13 @@ func (a *App) runInit(args []string) error {
 	}
 
 	// Create .mill/ runtime directories
-	for _, sub := range []string{"ledger", "worktrees", "phases", "artifacts", "memory"} {
+	for _, sub := range []string{"ledger", "worktrees", "phases", "artifacts", "memory", "logs", "state"} {
 		os.MkdirAll(filepath.Join(target, ".mill", sub), 0o755)
+	}
+
+	// Create per-role lessons.md files (recursion/learning scaffold).
+	if err := a.scaffoldRoleLessons(target); err != nil {
+		return err
 	}
 
 	// Clean up empty static/ dir from embedded FS walk
@@ -501,6 +506,31 @@ func collisionReport(target string, cfg initConfig, force bool) ([]string, error
 		return nil, nil
 	}
 	return conflicts, nil
+}
+
+// scaffoldRoleLessons creates .mill/roles/<role>/lessons.md for every role
+// in the scaffold, so the learning recorder has a per-role file to append to.
+// Existing lessons files are left untouched.
+func (a *App) scaffoldRoleLessons(target string) error {
+	rolesDir := filepath.Join(target, ".mill", "roles")
+	entries, err := os.ReadDir(rolesDir)
+	if err != nil {
+		return fmt.Errorf("failed to read roles directory %s: %w", rolesDir, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		lessonsPath := filepath.Join(rolesDir, e.Name(), "lessons.md")
+		if _, err := os.Stat(lessonsPath); err == nil {
+			continue
+		}
+		content := fmt.Sprintf("# Lessons for %s\n\n## Summary\n\n_No older lessons compressed yet._\n", e.Name())
+		if err := os.WriteFile(lessonsPath, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", lessonsPath, err)
+		}
+	}
+	return nil
 }
 
 // minimalFile returns true if the given scaffold-relative path should be

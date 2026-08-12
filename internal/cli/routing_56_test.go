@@ -238,7 +238,8 @@ func TestModelAvailableCacheExpiry(t *testing.T) {
 	modelAvailableFn = func(model string) bool {
 		modelCacheMu.RLock()
 		if e, ok := modelCache[model]; ok && time.Now().Before(e.cacheUntil) {
-			modelCacheMu.RUnlock(); return e.available
+			modelCacheMu.RUnlock()
+			return e.available
 		}
 		modelCacheMu.RUnlock()
 		callCount++
@@ -249,9 +250,13 @@ func TestModelAvailableCacheExpiry(t *testing.T) {
 	}
 
 	modelAvailableFn("test-model")
-	if callCount != 1 { t.Fatalf("expected 1 call, got %d", callCount) }
+	if callCount != 1 {
+		t.Fatalf("expected 1 call, got %d", callCount)
+	}
 	modelAvailableFn("test-model")
-	if callCount != 2 { t.Errorf("expected 2 calls (cache expired), got %d", callCount) }
+	if callCount != 2 {
+		t.Errorf("expected 2 calls (cache expired), got %d", callCount)
+	}
 }
 
 func TestLogCost56WritesJSONL(t *testing.T) {
@@ -259,9 +264,13 @@ func TestLogCost56WritesJSONL(t *testing.T) {
 	app := &App{MillDir: dir}
 	app.logCost(config.Config{Rate: 0}, 55, "sr-dev-be", "paid", "laguna-pro", 0, "dispatch")
 	data, err := os.ReadFile(app.costsPath())
-	if err != nil { t.Fatalf("failed to read: %v", err) }
+	if err != nil {
+		t.Fatalf("failed to read: %v", err)
+	}
 	var entry costEntry
-	if err := json.Unmarshal(data, &entry); err != nil { t.Fatalf("unmarshal: %v", err) }
+	if err := json.Unmarshal(data, &entry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if entry.Issue != 55 || entry.Role != "sr-dev-be" || entry.Tier != "paid" || entry.Event != "dispatch" {
 		t.Errorf("unexpected entry: %+v", entry)
 	}
@@ -274,7 +283,9 @@ func TestLogCost56NullEstimateWhenNoRate(t *testing.T) {
 	data, _ := os.ReadFile(app.costsPath())
 	var entry costEntry
 	json.Unmarshal(data, &entry)
-	if entry.CostEstimate != nil { t.Errorf("expected null, got %v", *entry.CostEstimate) }
+	if entry.CostEstimate != nil {
+		t.Errorf("expected null, got %v", *entry.CostEstimate)
+	}
 }
 
 func TestLogCost56ComputesEstimate(t *testing.T) {
@@ -284,9 +295,13 @@ func TestLogCost56ComputesEstimate(t *testing.T) {
 	data, _ := os.ReadFile(app.costsPath())
 	var entry costEntry
 	json.Unmarshal(data, &entry)
-	if entry.CostEstimate == nil { t.Fatal("expected cost_estimate") }
+	if entry.CostEstimate == nil {
+		t.Fatal("expected cost_estimate")
+	}
 	diff := *entry.CostEstimate - 0.045
-	if diff < -0.0001 || diff > 0.0001 { t.Errorf("expected ~0.045, got %f", *entry.CostEstimate) }
+	if diff < -0.0001 || diff > 0.0001 {
+		t.Errorf("expected ~0.045, got %f", *entry.CostEstimate)
+	}
 }
 
 func TestLogCost56AppendsMultiple(t *testing.T) {
@@ -297,7 +312,9 @@ func TestLogCost56AppendsMultiple(t *testing.T) {
 	app.logCost(cfg, 55, "reviewer", "pro", "laguna-ultra", 2000, "review")
 	data, _ := os.ReadFile(app.costsPath())
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != 2 { t.Errorf("expected 2 lines, got %d", len(lines)) }
+	if len(lines) != 2 {
+		t.Errorf("expected 2 lines, got %d", len(lines))
+	}
 }
 
 func TestStageLabelToModelProduce(t *testing.T) {

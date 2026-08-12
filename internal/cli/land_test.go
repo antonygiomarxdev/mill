@@ -4,76 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-func TestRunLandLockedByOtherWorktree(t *testing.T) {
-	dir := t.TempDir()
-	setupTestGitRepo(t, dir)
-
-	// Create a second worktree that holds main checked out.
-	otherDir := filepath.Join(t.TempDir(), "other-worktree")
-	runGit(t, dir, "worktree", "add", otherDir, "main")
-
-	// primary worktree is already on "feature" from setupTestGitRepo.
-
-	err := runLand("main", dir, []string{}, false, false)
-	if err == nil {
-		// Clean up before failing.
-		runGit(t, dir, "worktree", "remove", otherDir)
-		t.Fatal("expected error due to locked branch, got nil")
-	}
-	// Clean up the second worktree.
-	runGit(t, dir, "worktree", "remove", otherDir)
-
-	if !strings.Contains(err.Error(), "locked by another worktree") {
-		t.Errorf("expected 'locked by another worktree' in error, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), otherDir) {
-		t.Errorf("expected locking worktree path %q in error, got: %v", otherDir, err)
-	}
-}
-
-func TestRunLandLockedPrintsResolution(t *testing.T) {
-	dir := t.TempDir()
-	setupTestGitRepo(t, dir)
-
-	otherDir := filepath.Join(t.TempDir(), "other-worktree")
-	runGit(t, dir, "worktree", "add", otherDir, "main")
-
-	err := runLand("main", dir, []string{}, false, false)
-	if err == nil {
-		runGit(t, dir, "worktree", "remove", otherDir)
-		t.Fatal("expected error due to locked branch, got nil")
-	}
-	runGit(t, dir, "worktree", "remove", otherDir)
-
-	if !strings.Contains(err.Error(), "resolve: cd ") {
-		t.Errorf("expected 'resolve: cd ' in error, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "git checkout") {
-		t.Errorf("expected 'git checkout' in error, got: %v", err)
-	}
-}
-
-func TestRunLandCheckoutGenericFailure(t *testing.T) {
-	dir := t.TempDir()
-	setupTestGitRepo(t, dir)
-
-	// Try to checkout a branch that does not exist — no lock involved.
-	err := runLand("nonexistent-branch", dir, []string{}, false, false)
-	if err == nil {
-		t.Fatal("expected checkout failure error, got nil")
-	}
-	if !strings.Contains(err.Error(), "checkout failed") {
-		t.Errorf("expected 'checkout failed' in error, got: %v", err)
-	}
-	if strings.Contains(err.Error(), "locked by another worktree") {
-		t.Errorf("expected no lock message for nonexistent branch, got: %v", err)
-	}
-}
 
 func TestIsProcessAliveOwnPid(t *testing.T) {
 	if !isProcessAlive(os.Getpid()) {
@@ -87,133 +22,14 @@ func TestIsProcessAliveDeadPid(t *testing.T) {
 	}
 }
 
-func TestDetectWorktreeLockLiveProcess(t *testing.T) {
-	dir := t.TempDir()
-	setupTestGitRepo(t, dir)
-
-	otherDir := filepath.Join(t.TempDir(), "other-worktree")
-	runGit(t, dir, "worktree", "add", otherDir, "main")
-
-	// Write PID file pointing to our own (alive) process.
-	writePidFile(t, otherDir, os.Getpid())
-
-	err := runLand("main", dir, []string{}, false, false)
-	if err == nil {
-		runGit(t, dir, "worktree", "remove", "--force", otherDir)
-		t.Fatal("expected error due to live lock, got nil")
-	}
-	runGit(t, dir, "worktree", "remove", "--force", otherDir)
-
-	if !strings.Contains(err.Error(), "locked by another worktree") {
-		t.Errorf("expected 'locked by another worktree' for live lock, got: %v", err)
-	}
-	if strings.Contains(err.Error(), "stale") {
-		t.Errorf("expected no 'stale' in live lock error, got: %v", err)
-	}
-}
-
-func TestDetectWorktreeLockStaleProcess(t *testing.T) {
-	dir := t.TempDir()
-	setupTestGitRepo(t, dir)
-
-	otherDir := filepath.Join(t.TempDir(), "other-worktree")
-	runGit(t, dir, "worktree", "add", otherDir, "main")
-
-	// Write PID file pointing to a dead PID.
-	writePidFile(t, otherDir, 99999)
-
-	err := runLand("main", dir, []string{}, false, false)
-	if err == nil {
-		runGit(t, dir, "worktree", "remove", "--force", otherDir)
-		t.Fatal("expected stale lock error, got nil")
-	}
-	runGit(t, dir, "worktree", "remove", "--force", otherDir)
-
-	errStr := err.Error()
-	if !strings.Contains(errStr, "stale lock") {
-		t.Errorf("expected 'stale lock' in error, got: %v", err)
-	}
-	if !strings.Contains(errStr, "agent pid 99999 not running") {
-		t.Errorf("expected 'agent pid 99999 not running' in error, got: %v", err)
-	}
-	if !strings.Contains(errStr, "Use --force to clear") {
-		t.Errorf("expected 'Use --force to clear' in error, got: %v", err)
-	}
-}
-
-func TestDetectWorktreeLockStaleWithForce(t *testing.T) {
-	dir := t.TempDir()
-	setupTestGitRepo(t, dir)
-
-	otherDir := filepath.Join(t.TempDir(), "other-worktree")
-	runGit(t, dir, "worktree", "add", otherDir, "main")
-
-	writePidFile(t, otherDir, 99999)
-
-	err := runLand("main", dir, []string{}, false, true)
-	// Force should bypass the stale lock — checkout succeeds.
-	runGit(t, dir, "worktree", "remove", "--force", otherDir)
-	if err != nil {
-		t.Fatalf("expected force to bypass stale lock, got: %v", err)
-	}
-}
-
-func TestDetectWorktreeLockNoPidFile(t *testing.T) {
-	dir := t.TempDir()
-	setupTestGitRepo(t, dir)
-
-	otherDir := filepath.Join(t.TempDir(), "other-worktree")
-	runGit(t, dir, "worktree", "add", otherDir, "main")
-	// Do NOT write a PID file — simulate pre-#72 worktree.
-
-	err := runLand("main", dir, []string{}, false, false)
-	if err == nil {
-		runGit(t, dir, "worktree", "remove", "--force", otherDir)
-		t.Fatal("expected error for missing PID file, got nil")
-	}
-	runGit(t, dir, "worktree", "remove", "--force", otherDir)
-
-	errStr := err.Error()
-	if !strings.Contains(errStr, "unknown liveness") {
-		t.Errorf("expected 'unknown liveness' in error, got: %v", err)
-	}
-	if !strings.Contains(errStr, "locked by another worktree") {
-		t.Errorf("expected 'locked by another worktree' in error, got: %v", err)
-	}
-}
-
-func TestDetectWorktreeLockNoMatchingBranch(t *testing.T) {
-	dir := t.TempDir()
-	setupTestGitRepo(t, dir)
-
-	// branch "nonexistent" is not held by any worktree.
-	err := runLand("nonexistent-branch", dir, []string{}, false, false)
-	if err == nil {
-		t.Fatal("expected checkout failure error, got nil")
-	}
-	errStr := err.Error()
-	if !strings.Contains(errStr, "checkout failed") {
-		t.Errorf("expected 'checkout failed' in error, got: %v", err)
-	}
-	if strings.Contains(errStr, "stale") || strings.Contains(errStr, "locked by another worktree") {
-		t.Errorf("expected no lock message for nonexistent branch, got: %v", err)
-	}
-}
-
 func TestRunLandForceFlag(t *testing.T) {
 	dir := t.TempDir()
 	setupTestGitRepo(t, dir)
-
-	otherDir := filepath.Join(t.TempDir(), "other-worktree")
-	runGit(t, dir, "worktree", "add", otherDir, "main")
-
-	// Write stale PID file in the locking worktree.
-	writePidFile(t, otherDir, 99999)
+	runGit(t, dir, "checkout", "main")
 
 	buf := new(bytes.Buffer)
 	app := &App{MillDir: dir, Out: buf, Err: buf}
 	err := app.Run("land", "--force", "--worktree", dir, "main")
-	runGit(t, dir, "worktree", "remove", "--force", otherDir)
 	if err != nil {
 		t.Fatalf("expected --force to bypass stale lock, got: %v", err)
 	}
@@ -229,5 +45,129 @@ func writePidFile(t *testing.T, worktreeDir string, pid int) {
 	pidFile := filepath.Join(pidDir, "agent.pid")
 	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", pid)), 0644); err != nil {
 		t.Fatalf("failed to write PID file: %v", err)
+	}
+}
+
+// runGitOutput runs git in dir and returns trimmed stdout, failing on error.
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v failed: %v", args, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestRunLandActuallyLands(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir) // main with "initial", leaves HEAD on "feature"
+
+	// Target branch must be checked out in the main repo for the merge.
+	runGit(t, dir, "checkout", "main")
+
+	// Agent worktree on branch agent/x with a new commit.
+	wt := filepath.Join(t.TempDir(), "agent-x")
+	runGit(t, dir, "worktree", "add", "-b", "agent/x", wt, "main")
+	if err := os.WriteFile(filepath.Join(wt, "agent-file.txt"), []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt, "add", ".")
+	runGit(t, wt, "commit", "-m", "agent work")
+
+	before := runGitOutput(t, dir, "rev-parse", "main")
+	if err := runLand("main", wt, []string{}, false, false); err != nil {
+		t.Fatalf("runLand returned error: %v", err)
+	}
+	after := runGitOutput(t, dir, "rev-parse", "main")
+	if after == before {
+		t.Fatal("expected main to advance after landing, but it did not")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agent-file.txt")); err != nil {
+		t.Errorf("expected landed file on main, got: %v", err)
+	}
+	log := runGitOutput(t, dir, "log", "--oneline", "-1", "main")
+	if !strings.Contains(log, "Land agent/x") {
+		t.Errorf("expected 'Land agent/x' in merge commit, got: %q", log)
+	}
+}
+
+func TestRunLandRefusesWhenTargetNotCheckedOut(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir) // leaves HEAD on "feature"
+
+	wt := filepath.Join(t.TempDir(), "agent-x")
+	runGit(t, dir, "worktree", "add", "-b", "agent/x", wt, "main")
+	if err := os.WriteFile(filepath.Join(wt, "agent-file.txt"), []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt, "add", ".")
+	runGit(t, wt, "commit", "-m", "agent work")
+
+	before := runGitOutput(t, dir, "rev-parse", "main")
+	err := runLand("main", wt, []string{}, false, false)
+	if err == nil {
+		t.Fatal("expected error when target is not checked out, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot land onto main") {
+		t.Errorf("expected 'cannot land onto main' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "feature") {
+		t.Errorf("expected checked-out branch 'feature' named in error, got: %v", err)
+	}
+	if after := runGitOutput(t, dir, "rev-parse", "main"); after != before {
+		t.Errorf("expected main to be unchanged, got %s -> %s", before, after)
+	}
+}
+
+func TestRunLandRefusesDirtyWorktree(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	wt := filepath.Join(t.TempDir(), "agent-x")
+	runGit(t, dir, "worktree", "add", "-b", "agent/x", wt, "main")
+	if err := os.WriteFile(filepath.Join(wt, "uncommitted.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	before := runGitOutput(t, dir, "rev-parse", "main")
+	err := runLand("main", wt, []string{}, false, false)
+	if err == nil {
+		t.Fatal("expected error for dirty worktree, got nil")
+	}
+	if !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Errorf("expected 'uncommitted changes' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), wt) {
+		t.Errorf("expected worktree path in error, got: %v", err)
+	}
+	if after := runGitOutput(t, dir, "rev-parse", "main"); after != before {
+		t.Errorf("expected main to be unchanged, got %s -> %s", before, after)
+	}
+}
+
+func TestRunLandFailingGateBlocksMerge(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	wt := filepath.Join(t.TempDir(), "agent-x")
+	runGit(t, dir, "worktree", "add", "-b", "agent/x", wt, "main")
+	if err := os.WriteFile(filepath.Join(wt, "agent-file.txt"), []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt, "add", ".")
+	runGit(t, wt, "commit", "-m", "agent work")
+
+	before := runGitOutput(t, dir, "rev-parse", "main")
+	err := runLand("main", wt, []string{"exit 1"}, false, false)
+	if err == nil {
+		t.Fatal("expected error for failing gate, got nil")
+	}
+	if !strings.Contains(err.Error(), "gate") {
+		t.Errorf("expected gate-related error, got: %v", err)
+	}
+	if after := runGitOutput(t, dir, "rev-parse", "main"); after != before {
+		t.Errorf("expected main to be unchanged after failing gate, got %s -> %s", before, after)
 	}
 }

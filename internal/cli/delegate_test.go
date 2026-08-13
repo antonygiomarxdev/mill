@@ -1078,6 +1078,97 @@ func runGateLoop(t *testing.T, worktree string, gates []string) (string, error) 
 	return string(out), err
 }
 
+// runRoleEnforce executes the pre-commit dispatcher's role-enforce section
+// (the block before the gate loop in preCommitHookScript) against worktree's
+// .mill/checks directory, with the given cwd so the checks resolve inside
+// the worktree.
+func runRoleEnforce(t *testing.T, worktree string) (string, error) {
+	t.Helper()
+	// Cut the role-enforce block out of the dispatcher; only the section
+	// that matters here is executed, so the tests don't need go build/go
+	// vet to succeed.
+	start := strings.Index(preCommitHookScript, "# Role capability enforcement")
+	if start < 0 {
+		t.Fatal("role-enforce section not found in preCommitHookScript")
+	}
+	end := strings.Index(preCommitHookScript[start:], "\n# Run additional gate scripts if present")
+	if end < 0 {
+		t.Fatal("gate loop marker not found after role-enforce section")
+	}
+	block := preCommitHookScript[start : start+end]
+	cmd := exec.Command("bash", "-c", block)
+	cmd.Dir = worktree
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func TestRoleEnforceFailsCommitWhenScriptExitsOne(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash binary not available")
+	}
+	dir := t.TempDir()
+	checksDir := filepath.Join(dir, ".mill", "checks")
+	if err := os.MkdirAll(checksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	enforcePath := filepath.Join(checksDir, "role-enforce")
+	if err := os.WriteFile(enforcePath, []byte("#!/bin/bash\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runRoleEnforce(t, dir)
+	if err == nil {
+		t.Fatalf("role-enforce exiting 1 should fail the hook; output:\n%s", out)
+	}
+	if !strings.Contains(out, "Running role-enforce") {
+		t.Errorf("expected 'Running role-enforce' in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "FAIL role-enforce") {
+		t.Errorf("expected 'FAIL role-enforce' in output, got:\n%s", out)
+	}
+}
+
+func TestRoleEnforceLetsCommitProceedWhenScriptExitsZero(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash binary not available")
+	}
+	dir := t.TempDir()
+	checksDir := filepath.Join(dir, ".mill", "checks")
+	if err := os.MkdirAll(checksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	enforcePath := filepath.Join(checksDir, "role-enforce")
+	if err := os.WriteFile(enforcePath, []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runRoleEnforce(t, dir)
+	if err != nil {
+		t.Fatalf("role-enforce exiting 0 should let the hook continue: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Running role-enforce") {
+		t.Errorf("expected 'Running role-enforce' in output, got:\n%s", out)
+	}
+}
+
+func TestRoleEnforceAbsentDoesNotFailHook(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash binary not available")
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".mill", "checks"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runRoleEnforce(t, dir)
+	if err != nil {
+		t.Fatalf("missing role-enforce should not fail the hook: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "Running role-enforce") {
+		t.Errorf("expected role-enforce not to run when absent, got:\n%s", out)
+	}
+}
+
 func TestInstallHooksDoesNotLeakHooksPathToMainRepo(t *testing.T) {
 	if !gitAvailable() {
 		t.Skip("git binary not available")

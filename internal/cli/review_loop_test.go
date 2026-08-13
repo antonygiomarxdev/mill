@@ -492,3 +492,206 @@ func TestReviewLoopReviewDispatchError(t *testing.T) {
 		t.Fatal("expected error from review dispatch failure")
 	}
 }
+
+// TestReviewLoopBuildFailureShortCircuits proves that a worktree which does
+// not compile cannot reach verdict: approved. The build fails, the reviewer
+// is never dispatched, and the verdict is rejected.
+func TestReviewLoopBuildFailureShortCircuits(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	// Add a non-compiling Go file to the worktree.
+	if err := os.WriteFile(filepath.Join(dir, "broken.go"), []byte(
+		"package mypkg\nfunc broken() { undefinedVariable }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	madapter := &multiResultAdapter{
+		results: []adapter.SessionResult{
+			{ExitCode: 0, Commits: 1, Output: "code produced", Stderr: ""},
+			{ExitCode: 0, Commits: 0, Output: "review done", Stderr: "APPROVED: LGTM"},
+		},
+	}
+
+	cfg := config.Default()
+	cfg.MaxRounds = 1
+
+	var errBuf bytes.Buffer
+	app := &App{
+		Adapter:     madapter,
+		IssueReader: defaultIssueReader,
+		MillDir:     dir,
+		Err:         &errBuf,
+		Out:         &bytes.Buffer{},
+	}
+
+	opts := adapter.DispatchOpts{
+		Worktree: dir, Prompt: "Fix the bug", Model: "laguna-free", MaxTurns: 10,
+	}
+
+	fc, err := runDispatchLoop54(app, 9143, "task-9143", "", "", opts, "Test issue body", nil, cfg, adapter.Capabilities{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Build failure must result in GATE_FAILURE, not CLASS_OK.
+	if fc != domain.GATE_FAILURE {
+		t.Errorf("expected GATE_FAILURE for non-compiling tree, got %s", fc)
+	}
+
+	// The review model must NOT have been dispatched — only produce was called.
+	if madapter.callCount != 1 {
+		t.Errorf("expected 1 dispatch (produce only, review skipped), got %d", madapter.callCount)
+	}
+
+	// State should reflect a rejected verdict.
+	data, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	if err != nil {
+		t.Fatalf("state file not created: %v", err)
+	}
+	if !strings.Contains(string(data), `"verdict": "rejected"`) {
+		t.Error("expected verdict 'rejected' for non-compiling tree")
+	}
+
+	// Stderr should mention the build failure.
+	if !strings.Contains(errBuf.String(), "build gate FAILED") {
+		t.Error("expected 'build gate FAILED' message in stderr")
+	}
+}
+
+// TestReviewLoopTestFailureShortCircuits proves that a worktree with failing
+// tests also cannot reach verdict: approved. The tests fail, the reviewer
+// is never dispatched, and the verdict is rejected.
+func TestReviewLoopTestFailureShortCircuits(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	// Add a compilable Go file and a failing test.
+	if err := os.WriteFile(filepath.Join(dir, "feature.go"), []byte(
+		"package mypkg\nfunc Add(a, b int) int { return a + b }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "feature_test.go"), []byte(
+		"package mypkg\nimport \"testing\"\nfunc TestAdd(t *testing.T) {\n"+
+			"  if Add(1, 2) != 999 { t.Fail() }\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	madapter := &multiResultAdapter{
+		results: []adapter.SessionResult{
+			{ExitCode: 0, Commits: 1, Output: "code produced", Stderr: ""},
+			{ExitCode: 0, Commits: 0, Output: "review done", Stderr: "APPROVED: LGTM"},
+		},
+	}
+
+	cfg := config.Default()
+	cfg.MaxRounds = 1
+
+	var errBuf bytes.Buffer
+	app := &App{
+		Adapter:     madapter,
+		IssueReader: defaultIssueReader,
+		MillDir:     dir,
+		Err:         &errBuf,
+		Out:         &bytes.Buffer{},
+	}
+
+	opts := adapter.DispatchOpts{
+		Worktree: dir, Prompt: "Fix the bug", Model: "laguna-free", MaxTurns: 10,
+	}
+
+	fc, err := runDispatchLoop54(app, 9144, "task-9144", "", "", opts, "Test issue body", nil, cfg, adapter.Capabilities{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if fc != domain.GATE_FAILURE {
+		t.Errorf("expected GATE_FAILURE for failing tests, got %s", fc)
+	}
+
+	if madapter.callCount != 1 {
+		t.Errorf("expected 1 dispatch (produce only), got %d", madapter.callCount)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	if err != nil {
+		t.Fatalf("state file not created: %v", err)
+	}
+	if !strings.Contains(string(data), `"verdict": "rejected"`) {
+		t.Error("expected verdict 'rejected' for failing tests")
+	}
+}
+
+// TestReviewPromptContainsRealDiff proves that the review prompt contains the
+// actual git diff of the worktree (not the produce agent's prose) and
+// includes harness-run build/test results.
+func TestReviewPromptContainsRealDiff(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	// Add a compilable Go file so build and test pass.
+	newCode := "package mypkg\n\nfunc Feature() string { return \"new-feature\" }\n"
+	if err := os.WriteFile(filepath.Join(dir, "feature.go"), []byte(newCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	callCount := 0
+	fa := &fakeAdapter{}
+	fa.dispatchFn = func(opts adapter.DispatchOpts) (adapter.Session, error) {
+		callCount++
+		if callCount == 1 {
+			// Produce phase — returns output that looks like narrative.
+			return &fakeSession{result: adapter.SessionResult{
+				ExitCode: 0, Commits: 0, Output: "I implemented the feature", Stderr: "",
+			}}, nil
+		}
+		// Review phase
+		return &fakeSession{result: adapter.SessionResult{
+			ExitCode: 0, Output: "review", Stderr: "APPROVED: looks good",
+		}}, nil
+	}
+
+	cfg := config.Default()
+	cfg.MaxRounds = 4
+
+	var errBuf bytes.Buffer
+	app := &App{
+		Adapter:     fa,
+		IssueReader: defaultIssueReader,
+		MillDir:     dir,
+		Err:         &errBuf,
+		Out:         &bytes.Buffer{},
+	}
+
+	opts := adapter.DispatchOpts{
+		Worktree: dir, Prompt: "Fix the bug", Model: "laguna-free", MaxTurns: 10,
+	}
+
+	_, err := runDispatchLoop54(app, 9145, "task-9145", "", "", opts, "Test issue body", nil, cfg, adapter.Capabilities{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have exactly 2 dispatches: produce + review.
+	if len(fa.allOpts) != 2 {
+		t.Fatalf("expected 2 dispatches (produce + review), got %d", len(fa.allOpts))
+	}
+
+	reviewPrompt := fa.allOpts[1].Prompt
+
+	// The review prompt must contain the real diff, not the agent's prose.
+	if !strings.Contains(reviewPrompt, "feature.go") {
+		t.Error("expected review prompt to contain the real diff (feature.go)")
+	}
+	if strings.Contains(reviewPrompt, "I implemented the feature") {
+		t.Error("review prompt should NOT contain the produce agent's prose")
+	}
+
+	// The review prompt must include harness-run build/test results.
+	if !strings.Contains(reviewPrompt, "## Build Results") {
+		t.Error("expected build results section in review prompt")
+	}
+	if !strings.Contains(reviewPrompt, "## Test Results") {
+		t.Error("expected test results section in review prompt")
+	}
+}

@@ -29,6 +29,8 @@ func TestBuildReviewPrompt54_Structure(t *testing.T) {
 				"- Error message on failure",
 				"## Changes (diff)",
 				"diff --git a/login.go b/login.go",
+				"## Build Results (go build ./...)",
+				"## Test Results (go test ./...)",
 				"If all criteria are met:",
 				"If changes are needed:",
 				"If blocked by external dependency:",
@@ -70,7 +72,7 @@ func TestBuildReviewPrompt54_Structure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := buildReviewPrompt54(tt.issueBody, tt.diffOutput, tt.acceptanceCriteria, adapter.Capabilities{})
+			result := buildReviewPrompt54(tt.issueBody, tt.diffOutput, "", "", tt.acceptanceCriteria, adapter.Capabilities{})
 			for _, check := range tt.checks {
 				if !strings.Contains(result, check) {
 					t.Errorf("expected output to contain %q", check)

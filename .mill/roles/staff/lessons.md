@@ -286,3 +286,51 @@ role hook without any bypass. That is the design working, not a loophole.
 `git worktree add` → commit inside the worktree under the executing role →
 `git merge --no-ff` from the main tree → remove worktree and branch.
 `mill land` is meant to automate exactly this and currently does not (#124).
+
+---
+
+## 16 — Commit the agent's output before re-delegating, whatever the verdict
+
+**What happened:** a delegation on #116 produced 372 insertions across 10 files
+plus two new files. The work did not meet acceptance criteria, so Staff withheld
+the commit and re-delegated with a narrower contract. Re-delegating reset the
+worktree and destroyed everything — unstaged modifications and untracked files
+alike, neither recoverable. Staff had said out loud, one message earlier, that
+the work was safe in the worktree.
+
+**Lesson:** withholding the commit is the correct review decision and is exactly
+what makes the work destroyable. The two must be separated: commit the agent's
+output on its branch when the delegation completes, then judge it. A rejected
+attempt is history worth keeping, and rework should start from a known point
+rather than from whatever survived.
+
+**Mechanised:** filed as #146 — re-delegation must refuse, checkpoint, or
+require a flag before discarding a dirty worktree. Until that lands, Staff
+commits on `agent/<n>` immediately on completion, before any review or rework.
+
+---
+
+## 17 — Verify by execution, never by inspecting the artefact's shape
+
+**What happened:** `core.hooksPath` was written relative to the main repo and
+resolved by git from the worktree, so it pointed at a path that did not exist.
+Git treats a missing hooks directory as no hooks, silently. Every delegated
+worktree ran no gauntlet at all — no build, no vet, no phase gates, no
+role-enforce — for as long as worktree delegation has existed (#145). Every
+test covering hook installation passed throughout, because they asserted the
+configured value rather than running a hook.
+
+The same shape appeared twice more the same day: a reviewer that received the
+produce agent's own narration under a heading reading `## Changes (diff)` and
+approved it (#143), and a `provider_config` structure that parsed correctly and
+changed nothing at dispatch because it populated a different map than the
+resolver reads (#116).
+
+**Lesson:** a check that inspects structure passes on a defect that has the
+right structure. Acceptance criteria must be behavioural: make a violating
+commit and assert it is rejected; dispatch a `model: pro` role and assert the
+expensive model reaches the argument builder. "The config parses" and "the field
+is set" prove nothing about what runs.
+
+**Mechanised:** every brief Staff writes states the acceptance test as an
+observable behaviour, and Staff re-runs it rather than accepting the report.

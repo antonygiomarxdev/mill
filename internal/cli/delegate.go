@@ -645,8 +645,9 @@ end your response with a verdict line: APPROVED, NEEDS CHANGES, or REJECTED.`, i
 }
 
 // preCommitHookScript is the generated pre-commit dispatcher installed
-// into worktree .git/hooks/. It runs go build + go vet, then any
-// additional gate scripts found in .mill/checks/*.sh.
+// into worktree .git/hooks/. It runs go build + go vet, then role
+// capability enforcement, then any additional gate scripts found in
+// .mill/checks/gate-*.
 const preCommitHookScript = `#!/bin/bash
 # Mill gauntlet — pre-commit. Runs on every git commit.
 # Fast checks (<30s). Fail = commit rejected.
@@ -721,6 +722,12 @@ if [ -n "$LEDGER_FILE" ] && [ -f "$LEDGER_FILE" ]; then
     done
 fi
 # --- End version conflict detection ---
+
+# Role capability enforcement — runs before the phase gates
+if [ -x .mill/checks/role-enforce ]; then
+    echo "Running role-enforce"
+    .mill/checks/role-enforce || { echo "FAIL role-enforce"; exit 1; }
+fi
 
 # Run additional gate scripts if present
 for gate in .mill/checks/gate-*; do

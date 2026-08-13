@@ -765,8 +765,17 @@ func installHooks(worktree string) error {
 		return fmt.Errorf("worktree .git is not a valid git worktree reference")
 	}
 
-	// 2. Create hooks directory inside the worktree and configure git
-	hookDir := filepath.Join(worktree, ".mill", "hooks")
+	// 2. Create hooks directory inside the worktree and configure git.
+	// Resolve to an absolute path: a relative core.hooksPath is resolved by
+	// git from the committer's current working directory (the worktree root),
+	// which would double-nest the path (e.g. <wt>/<wt>/.mill/hooks). An
+	// absolute path resolves identically from any CWD and outlives the
+	// worktree if the relative root shifts.
+	absWorktree, err := filepath.Abs(worktree)
+	if err != nil {
+		return fmt.Errorf("cannot resolve absolute worktree path: %w", err)
+	}
+	hookDir := filepath.Join(absWorktree, ".mill", "hooks")
 	if err := os.MkdirAll(hookDir, 0755); err != nil {
 		return fmt.Errorf("cannot create hooks directory: %w", err)
 	}

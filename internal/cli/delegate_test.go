@@ -754,7 +754,7 @@ func TestReadActiveRoleError(t *testing.T) {
 }
 
 func TestBuildReviewPrompt(t *testing.T) {
-	result := buildReviewPrompt54("Fix the login", "PATCH: done", nil, adapter.Capabilities{})
+	result := buildReviewPrompt54("Fix the login", "PATCH: done", "", "", nil, adapter.Capabilities{})
 	if !strings.Contains(result, "APPROVED:") {
 		t.Error("expected review prompt to mention APPROVED:")
 	}

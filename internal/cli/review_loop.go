@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -148,24 +149,54 @@ func runDispatchLoop54(a *App, issueNum int, taskID string, targetRole string, m
 			agentIDFile := filepath.Join(opts.Worktree, ".mill", "agent_id")
 			os.WriteFile(agentIDFile, []byte("review"), 0644)
 
-			// --- Review phase (with retry on transient) ---
-			reviewPrompt := buildReviewPrompt54(issueBody, produceResult.Output, acceptanceCriteria, caps)
-			reviewOpts := adapter.DispatchOpts{
-				Worktree:   opts.Worktree,
-				Prompt:     reviewPrompt,
-				Model:      reviewModel,
-				ModelChain: opts.ModelChain,
-				MaxTurns:   opts.MaxTurns,
-				Budget:     opts.Budget,
-			}
-			reviewResult, reviewClass, rerr := a.retryDispatch(reviewOpts, "review", issueNum, task, cfg)
+			// --- Harness build/test gate (run by Mill, not self-reported) ---
+			// The reviewer must see the real diff and the harness-run build/test
+			// results, not the produce agent's prose. A non-compiling or
+			// failing tree short-circuits to GATE_FAILURE before any model
+			// is asked an opinion.
+			diffStr := captureDiff(opts.Worktree)
+			buildExit, buildOutput := runGoBuild(opts.Worktree)
 
-			if rerr != nil {
-				finalClass = domain.EXECUTION_FAILURE
+			if buildExit != 0 {
+				// Non-compiling tree: skip tests and model review entirely.
+				finalClass = domain.GATE_FAILURE
+				lastResult = adapter.SessionResult{
+					Stderr: fmt.Sprintf("gate-build: go build ./... failed (exit %d):\n%s", buildExit, buildOutput),
+				}
+				fmt.Fprintf(a.Err, "review: build gate FAILED for issue %d — skipping model review\n", issueNum)
+				fmt.Fprintf(a.Err, "build output:\n%s\n", buildOutput)
 			} else {
-				finalClass = reviewClass
+				testExit, testOutput := runGoTest(opts.Worktree)
+				if testExit != 0 {
+					// Failing tests: skip model review.
+					finalClass = domain.GATE_FAILURE
+					lastResult = adapter.SessionResult{
+						Stderr: fmt.Sprintf("gate-test: go test ./... failed (exit %d):\n%s", testExit, testOutput),
+					}
+					fmt.Fprintf(a.Err, "review: test gate FAILED for issue %d — skipping model review\n", issueNum)
+					fmt.Fprintf(a.Err, "test output:\n%s\n", testOutput)
+				} else {
+					// Build and tests pass — dispatch reviewer with real diff
+					// and harness-run results.
+					reviewPrompt := buildReviewPrompt54(issueBody, diffStr, buildOutput, testOutput, acceptanceCriteria, caps)
+					reviewOpts := adapter.DispatchOpts{
+						Worktree:   opts.Worktree,
+						Prompt:     reviewPrompt,
+						Model:      reviewModel,
+						ModelChain: opts.ModelChain,
+						MaxTurns:   opts.MaxTurns,
+						Budget:     opts.Budget,
+					}
+					reviewResult, reviewClass, rerr := a.retryDispatch(reviewOpts, "review", issueNum, task, cfg)
+
+					if rerr != nil {
+						finalClass = domain.EXECUTION_FAILURE
+					} else {
+						finalClass = reviewClass
+					}
+					lastResult = reviewResult
+				}
 			}
-			lastResult = reviewResult
 
 			// Append review ledger entry (includes FailureClass/Phase/Role)
 			reviewLedger := ledger.Entry{
@@ -430,9 +461,11 @@ func (a *App) waitSession(session adapter.Session) (adapter.SessionResult, error
 	return result, err
 }
 
-// buildReviewPrompt constructs a review prompt that asks the reviewer agent
-// to evaluate the produce agent's output against the issue body and acceptance criteria.
-func buildReviewPrompt54(issueBody string, diffOutput string, acceptanceCriteria []string, caps adapter.Capabilities) string {
+// buildReviewPrompt54 constructs a review prompt that asks the reviewer agent
+// to evaluate the produce agent's output against the issue body and acceptance
+// criteria. The reviewer receives the actual git diff and the harness-run
+// build/test results, not the agent's narrative.
+func buildReviewPrompt54(issueBody string, diff string, buildOutput string, testOutput string, acceptanceCriteria []string, caps adapter.Capabilities) string {
 	var b strings.Builder
 
 	b.WriteString("You are a code reviewer. Review the following code change against the acceptance criteria.\n\n")
@@ -459,12 +492,30 @@ func buildReviewPrompt54(issueBody string, diffOutput string, acceptanceCriteria
 		b.WriteString("\n")
 	}
 
-	// Diff
+	// Diff — the real working-tree diff, not the agent's prose.
 	b.WriteString("## Changes (diff)\n")
-	if diffOutput == "" {
+	if diff == "" {
 		b.WriteString("(no diff available)\n\n")
 	} else {
-		b.WriteString(diffOutput)
+		b.WriteString(diff)
+		b.WriteString("\n\n")
+	}
+
+	// Build results — produced by Mill, not self-reported by the agent.
+	b.WriteString("## Build Results (go build ./...)\n")
+	if buildOutput == "" {
+		b.WriteString("(no build output)\n\n")
+	} else {
+		b.WriteString(buildOutput)
+		b.WriteString("\n\n")
+	}
+
+	// Test results — produced by Mill, not self-reported by the agent.
+	b.WriteString("## Test Results (go test ./...)\n")
+	if testOutput == "" {
+		b.WriteString("(no test output)\n\n")
+	} else {
+		b.WriteString(testOutput)
 		b.WriteString("\n\n")
 	}
 
@@ -490,7 +541,90 @@ func buildReviewPrompt54(issueBody string, diffOutput string, acceptanceCriteria
 	b.WriteString("- Vague feedback without a criterion reference is INVALID.\n")
 	b.WriteString("- APPROVED is the ONLY valid verdict when all criteria pass.\n")
 	b.WriteString("  Do NOT write \"APPROVED but note X\" — if anything is wrong, use CHANGES_REQUESTED.\n")
+	b.WriteString("- The build and test results above are generated by Mill (the harness),\n")
+	b.WriteString("  not self-reported by the produce agent. Verify the code yourself;\n")
+	b.WriteString("  do not rely on the agent's claims.\n")
+	b.WriteString("- If `go build ./...` or `go test ./...` fails, do NOT classify as APPROVED.\n")
 	return b.String()
+}
+
+// captureDiff returns the actual git diff of the worktree, including
+// untracked files. This is the real change set that the reviewer must
+// evaluate — not the produce agent's self-reported prose.
+func captureDiff(worktree string) string {
+	var b strings.Builder
+
+	// git diff HEAD shows all tracked changes (staged + unstaged) relative
+	// to the current commit.
+	diffCmd := exec.Command("git", "-C", worktree, "diff", "HEAD", "--no-color")
+	if diffOut, err := diffCmd.CombinedOutput(); err == nil || len(diffOut) > 0 {
+		b.Write(diffOut)
+	}
+
+	// Collect untracked files and show their content as new-file diffs,
+	// excluding mill's own artifacts (.mill/ directory and output.txt)
+	// so the reviewer sees only agent code changes.
+	statusCmd := exec.Command("git", "-C", worktree, "ls-files", "--others", "--exclude-standard")
+	untrackedOut, err := statusCmd.Output()
+	if err != nil {
+		return b.String()
+	}
+	for _, file := range strings.Split(strings.TrimSpace(string(untrackedOut)), "\n") {
+		file = strings.TrimSpace(file)
+		if file == "" {
+			continue
+		}
+		if file == "output.txt" || strings.HasPrefix(file, ".mill/") {
+			continue
+		}
+		niCmd := exec.Command("git", "-C", worktree, "diff", "--no-index", "--no-color", "/dev/null", file)
+		// git diff --no-index exits 1 when differences exist; that is expected.
+		if niOut, _ := niCmd.CombinedOutput(); len(niOut) > 0 {
+			b.WriteString(string(niOut))
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}
+
+// runGoBuild runs `go build ./...` in the worktree and returns the exit code
+// and combined output. The build result is produced by the harness, not
+// self-reported by the produce agent.
+func runGoBuild(worktree string) (int, string) {
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Dir = worktree
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode(), output
+		}
+		return 1, output
+	}
+	return 0, output
+}
+
+// runGoTest runs `go test ./...` in the worktree and returns the exit code
+// and combined output. The test result is produced by the harness, not
+// self-reported by the produce agent.
+func runGoTest(worktree string) (int, string) {
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Dir = worktree
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		// "no packages to test" means there are no Go test files — not a
+		// real failure, just an empty module.
+		if strings.Contains(output, "no packages to test") {
+			return 0, output
+		}
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode(), output
+		}
+		return 1, output
+	}
+	return 0, output
 }
 
 // extractAcceptanceCriteria parses acceptance criteria from an issue body.

@@ -1210,6 +1210,173 @@ func TestInstallHooksDoesNotLeakHooksPathToMainRepo(t *testing.T) {
 	}
 }
 
+// TestInstallHooksRelativePathHookFiresByExecution reproduces issue #145.
+// In production, MillDir is ".mill" (relative), so the worktree path passed to
+// installHooks is relative. A relative core.hooksPath is resolved by git from
+// the committer's CWD (the worktree root), which double-nests the path and
+// makes the hook unfindable. The fix stores an absolute path.
+//
+// This test uses a RELATIVE worktree path and verifies by execution — it makes
+// a real git commit and asserts the hook fires (the commit is rejected). A test
+// that only checked the config string would have passed on the old broken
+// behaviour because git accepts any string value for core.hooksPath.
+func TestInstallHooksRelativePathHookFiresByExecution(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go binary not available")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash binary not available")
+	}
+
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	// Add a valid Go file so `go build` / `go vet` pass in the worktree.
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "main.go")
+	runGit(t, dir, "commit", "-m", "add main.go")
+
+	// Create a worktree at a RELATIVE path — this is the crux of #145.
+	wt := "wt-relative"
+	runGit(t, dir, "worktree", "add", wt)
+
+	// Install hooks with the relative worktree path (as runDelegate does).
+	if err := installHooks(wt); err != nil {
+		t.Fatalf("installHooks returned error: %v", err)
+	}
+
+	// Plant a failing gate so the hook will reject the commit if it fires.
+	checksDir := filepath.Join(wt, ".mill", "checks")
+	if err := os.MkdirAll(checksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	failGate := filepath.Join(checksDir, "gate-fail")
+	if err := os.WriteFile(failGate, []byte("#!/bin/bash\necho 'FAIL test gate'\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stage a harmless file and attempt a commit from inside the worktree.
+	if err := os.WriteFile(filepath.Join(wt, "change.txt"), []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt, "add", "change.txt")
+
+	cmd := exec.Command("git", "-C", wt, "commit", "-m", "test: hook should block")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("git commit should have been blocked by the pre-commit hook but succeeded — hook did not fire")
+	}
+	if !strings.Contains(string(out), "FAIL test gate") {
+		t.Errorf("expected 'FAIL test gate' in hook output, got: %s", out)
+	}
+	if !strings.Contains(string(out), "mill: pre-commit gauntlet") {
+		t.Errorf("expected gauntlet to run, got: %s", out)
+	}
+}
+
+// TestRoleEnforceBlocksStaffGoCommitInWorktree end-to-end verifies that a
+// staff-roled agent committing internal/**.go in a delegated worktree is
+// blocked by role-enforce — proving the hooks path resolves correctly and the
+// gauntlet runs the role capability check.
+func TestRoleEnforceBlocksStaffGoCommitInWorktree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go binary not available")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash binary not available")
+	}
+
+	// Capture project root before setupTestGitRepo changes CWD, so we can
+	// copy the real role-enforce script into the worktree.
+	root, err := projectRoot()
+	if err != nil {
+		t.Skipf("cannot find project root: %v", err)
+	}
+	enforceData, err := os.ReadFile(filepath.Join(root, "checks", "role-enforce"))
+	if err != nil {
+		t.Fatalf("cannot read role-enforce: %v", err)
+	}
+
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	// Add a valid Go file so `go build` / `go vet` pass.
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "main.go")
+	runGit(t, dir, "commit", "-m", "add main.go")
+
+	// Create a worktree at a RELATIVE path (reproduces #145).
+	wt := "wt-role-enforce"
+	runGit(t, dir, "worktree", "add", wt)
+
+	if err := installHooks(wt); err != nil {
+		t.Fatalf("installHooks returned error: %v", err)
+	}
+
+	// Set .mill/role = staff in the worktree.
+	millDir := filepath.Join(wt, ".mill")
+	if err := os.MkdirAll(millDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(millDir, "role"), []byte("staff"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Staff role definition: only .md files allowed.
+	rolesDir := filepath.Join(millDir, "roles", "staff")
+	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	roleContent := []byte("---\nrole: staff\nallowed_files:\n  - .md\n---\n")
+	if err := os.WriteFile(filepath.Join(rolesDir, "ROLE.md"), roleContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Install the real role-enforce script into the worktree.
+	checksDir := filepath.Join(millDir, "checks")
+	if err := os.MkdirAll(checksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checksDir, "role-enforce"), enforceData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a violating file: internal/foo.go (staff cannot commit .go).
+	internalDir := filepath.Join(wt, "internal")
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(internalDir, "foo.go"),
+		[]byte("package internal\n\nfunc Foo() string { return \"foo\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit(t, wt, "add", "internal/foo.go")
+
+	// Commit should be blocked by role-enforce.
+	cmd := exec.Command("git", "-C", wt, "commit", "-m", "test: staff committing go")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("commit should have been blocked by role-enforce but succeeded")
+	}
+	if !strings.Contains(string(out), "BLOCKED") {
+		t.Errorf("expected 'BLOCKED' in output, got: %s", out)
+	}
+	if !strings.Contains(string(out), "role-enforce") {
+		t.Errorf("expected 'role-enforce' in output, got: %s", out)
+	}
+}
+
 func TestGateLoopRunsGatesAndSkipsLibrary(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash binary not available")

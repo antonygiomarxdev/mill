@@ -16,3 +16,4 @@ omp-session-*.html
 
 # Scratch specs and working notes, not part of the tracked history
 /local/
+.commandcode/

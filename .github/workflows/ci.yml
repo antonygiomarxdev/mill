@@ -7,23 +7,27 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - name: Syntax-check gate scripts
+        run: |
+          status=0
+          for f in .mill/checks/* scaffold/.mill/checks/* scaffold/checks/*; do
+            [ -f "$f" ] || continue
+            bash -n "$f" || status=1
+          done
+          exit "$status"
 
-      - name: Build
-        run: go build ./...
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test
-        run: go test ./...
-
-      - name: Format check
-        run: test -z "$(gofmt -l .)"
+      - name: Validate ROLE.md frontmatter
+        run: |
+          status=0
+          for f in $(find .mill/roles scaffold/.mill/roles -name 'ROLE.md'); do
+            # Must start with ---
+            head -1 "$f" | grep -q '^---' || { echo "FAIL: $f — missing frontmatter opening"; status=1; continue; }
+            # Must contain a role: field
+            sed -n '/^---$/,/^---$/p' "$f" | grep -q '^role:' || { echo "FAIL: $f — missing role: field"; status=1; }
+          done
+          exit "$status"

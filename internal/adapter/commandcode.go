@@ -107,14 +107,14 @@ func (a *CommandCodeAdapter) Dispatch(opts DispatchOpts) (Session, error) {
 		return nil, fmt.Errorf("failed to start cmd: %w", err)
 	}
 	ls := &liveSession{
-		id:        generateID(),
-		cmd:       cmd,
-		outputBuf: &out,
-		stderrBuf: &stderr,
-		startedAt: time.Now().UTC(),
-		status:    sessionStatus(domain.SessionRunning),
-		budget:    opts.Budget,
-		worktree:  opts.Worktree,
+		id:         generateID(),
+		cmd:        cmd,
+		outputBuf:  &out,
+		stderrBuf:  &stderr,
+		startedAt:  time.Now().UTC(),
+		status:     sessionStatus(domain.SessionRunning),
+		budget:     opts.Budget,
+		worktree:   opts.Worktree,
 		baseCommit: opts.BaseCommit,
 	}
 	if opts.Worktree != "" {
@@ -171,16 +171,16 @@ func buildArgs(opts DispatchOpts) []string {
 
 // liveSession implements Session for a running exec.Cmd process.
 type liveSession struct {
-	id        string
-	cmd       *exec.Cmd
-	outputBuf *bytes.Buffer
-	stderrBuf *bytes.Buffer
-	startedAt time.Time
-	status    string
-	budget    *Budget
-	worktree  string
+	id         string
+	cmd        *exec.Cmd
+	outputBuf  *bytes.Buffer
+	stderrBuf  *bytes.Buffer
+	startedAt  time.Time
+	status     string
+	budget     *Budget
+	worktree   string
 	baseCommit string
-	parse     func(string) (string, string)
+	parse      func(string) (string, string)
 
 	// Heartbeat tracking: a goroutine writes a liveness file every second
 	// while the session process is running.

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# gate-coverage — verify test coverage meets threshold
+# gate-coverage — verify project coverage meets threshold
 # Usage: gate-coverage <issue-number> [threshold]
-# Default threshold: 90
-# Exits 0 if average coverage across packages ≥ threshold, 1 otherwise.
-
+#   issue-number  identifier of the issue this gate guards (for traceability)
+#   threshold     minimum project coverage % (default 90)
+# Exits 0 when project-wide statement coverage (go tool cover -func total) is
+# >= threshold, 1 otherwise.
 set -euo pipefail
 
 ISSUE="${1:-}"
@@ -14,31 +15,35 @@ if [[ -z "$ISSUE" ]]; then
     exit 2
 fi
 
-# Collect coverage from all packages
-COVERAGES=$(go test ./... -coverprofile=/dev/null 2>/dev/null | grep -oP 'coverage: \K[0-9.]+(?=% of statements)' || echo "")
+# Project-wide coverage. `go test -coverprofile` accumulates every package into
+# a single profile, and `go tool cover -func` reports its `total:` line — the
+# aggregate statement coverage, i.e. the figure the threshold compares against.
+# The total is an order-independent aggregate, so the verdict is identical
+# across runs of the same tree. (Previously this averaged per-package
+# "coverage:" lines — a sample, not the project total.)
+# See docs/adr/0003-coverage-gate-total-not-sample.md
+coverprofile="$(mktemp -t coverage.XXXXXX)"
+trap 'rm -f "$coverprofile"' EXIT
 
-if [[ -z "$COVERAGES" ]]; then
-    echo "❌ No coverage data" >&2
+output=$(go test -count=1 -coverprofile="$coverprofile" ./... 2>&1) || {
+    echo "❌ Tests failed" >&2
+    echo "$output" >&2
+    exit 1
+}
+
+cov="$(go tool cover -func="$coverprofile" 2>/dev/null | grep '^total:' \
+    | grep -oP '[0-9]+\.[0-9]+%' | head -1 | tr -d '%' || true)"
+if [[ -z "$cov" ]]; then
+    echo "❌ Could not parse coverage total" >&2
+    echo "$output" >&2
     exit 1
 fi
 
-# Compute average
-SUM=0
-COUNT=0
-while IFS= read -r cov; do
-    SUM=$(echo "$SUM + $cov" | bc -l)
-    COUNT=$((COUNT + 1))
-done <<< "$COVERAGES"
+echo "Total coverage: ${cov}%"
 
-AVG=$(echo "scale=1; $SUM / $COUNT" | bc -l)
-
-echo "Package coverage: $(echo "$COVERAGES" | tr '\n' ' ')"
-echo "Average: ${AVG}%"
-
-if (( $(echo "$AVG >= $THRESHOLD" | bc -l) )); then
-    echo "✅ Average ${AVG}% ≥ ${THRESHOLD}%"
-    exit 0
-else
-    echo "❌ Average ${AVG}% < ${THRESHOLD}%" >&2
+if (( $(echo "$cov < $THRESHOLD" | bc -l) )); then
+    echo "❌ Total ${cov}% < ${THRESHOLD}%" >&2
     exit 1
 fi
+
+echo "✅ Total ${cov}% ≥ ${THRESHOLD}%"

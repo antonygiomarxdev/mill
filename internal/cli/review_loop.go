@@ -202,6 +202,7 @@ func runDispatchLoop54(a *App, issueNum int, taskID string, targetRole string, m
 					reviewPrompt := buildReviewPrompt54(issueBody, diffStr, buildOutput, testOutput, acceptanceCriteria, caps)
 					reviewOpts := adapter.DispatchOpts{
 						Worktree:   opts.Worktree,
+						BaseCommit: opts.BaseCommit,
 						Prompt:     reviewPrompt,
 						Model:      reviewModel,
 						ModelChain: opts.ModelChain,

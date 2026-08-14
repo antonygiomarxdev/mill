@@ -115,6 +115,7 @@ func (a *CommandCodeAdapter) Dispatch(opts DispatchOpts) (Session, error) {
 		status:    sessionStatus(domain.SessionRunning),
 		budget:    opts.Budget,
 		worktree:  opts.Worktree,
+		baseCommit: opts.BaseCommit,
 	}
 	if opts.Worktree != "" {
 		ls.startHeartbeat()
@@ -178,6 +179,7 @@ type liveSession struct {
 	status    string
 	budget    *Budget
 	worktree  string
+	baseCommit string
 	parse     func(string) (string, string)
 
 	// Heartbeat tracking: a goroutine writes a liveness file every second
@@ -294,6 +296,9 @@ func (s *liveSession) waitSimple() (SessionResult, error) {
 	staleness := s.stopHeartbeat()
 	exitCode := 0
 
+	output := s.outputBuf.String()
+	commits := countCommitsInWorktree(s.worktree, s.baseCommit)
+
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
@@ -302,6 +307,8 @@ func (s *liveSession) waitSimple() (SessionResult, error) {
 			s.status = sessionStatus(domain.SessionError)
 			return SessionResult{
 				ExitCode:           -1,
+				Commits:            commits,
+				Output:             s.extractOutput(output),
 				Stderr:             s.stderrBuf.String(),
 				HeartbeatStaleness: staleness,
 			}, err
@@ -310,18 +317,10 @@ func (s *liveSession) waitSimple() (SessionResult, error) {
 		s.status = sessionStatus(domain.SessionDone)
 	}
 
-	output := s.outputBuf.String()
-	parser := s.parse
-	if parser == nil {
-		parser = parseJSONOutput
-	}
-	finalText, _ := parser(output)
-	commits := countCommits(output)
-
 	return SessionResult{
 		ExitCode:           exitCode,
 		Commits:            commits,
-		Output:             finalText,
+		Output:             s.extractOutput(output),
 		Stderr:             s.stderrBuf.String(),
 		HeartbeatStaleness: staleness,
 	}, nil
@@ -335,12 +334,21 @@ func (s *liveSession) waitWithBudget() (SessionResult, error) {
 
 	output := s.outputBuf.String()
 
+	commits := countCommitsInWorktree(s.worktree, s.baseCommit)
+
 	if timeKilled {
 		s.status = sessionStatus(domain.SessionError)
+		stderr := s.stderrBuf.String()
+		if stderr != "" {
+			stderr = "blocked: time budget exceeded\n" + stderr
+		} else {
+			stderr = "blocked: time budget exceeded"
+		}
 		return SessionResult{
 			ExitCode:           -1,
-			Commits:            countCommits(output),
-			Stderr:             "blocked: time budget exceeded",
+			Commits:            commits,
+			Output:             s.extractOutput(output),
+			Stderr:             stderr,
 			HeartbeatStaleness: staleness,
 		}, nil
 	}
@@ -349,7 +357,8 @@ func (s *liveSession) waitWithBudget() (SessionResult, error) {
 		s.status = sessionStatus(domain.SessionError)
 		return SessionResult{
 			ExitCode:           exitErr.ExitCode(),
-			Commits:            countCommits(output),
+			Commits:            commits,
+			Output:             s.extractOutput(output),
 			Stderr:             s.stderrBuf.String(),
 			HeartbeatStaleness: staleness,
 		}, nil
@@ -358,26 +367,27 @@ func (s *liveSession) waitWithBudget() (SessionResult, error) {
 	// Process succeeded — check for analysis paralysis.
 	if s.budget.MaxTurns > 0 && detectAnalysisParalysis(output, s.budget.MaxTurns) {
 		s.status = sessionStatus(domain.SessionError)
+		stderr := s.stderrBuf.String()
+		if stderr != "" {
+			stderr = "blocked: analysis paralysis detected\n" + stderr
+		} else {
+			stderr = "blocked: analysis paralysis detected"
+		}
 		return SessionResult{
 			ExitCode:           -2,
-			Commits:            countCommits(output),
-			Stderr:             "blocked: analysis paralysis detected",
+			Commits:            commits,
+			Output:             s.extractOutput(output),
+			Stderr:             stderr,
 			HeartbeatStaleness: staleness,
 		}, nil
 	}
 
 	s.status = sessionStatus(domain.SessionDone)
-	parser := s.parse
-	if parser == nil {
-		parser = parseJSONOutput
-	}
-	finalText, _ := parser(output)
-	commits := countCommits(output)
 
 	return SessionResult{
 		ExitCode:           0,
 		Commits:            commits,
-		Output:             finalText,
+		Output:             s.extractOutput(output),
 		Stderr:             s.stderrBuf.String(),
 		HeartbeatStaleness: staleness,
 	}, nil
@@ -484,9 +494,12 @@ func isWriteFrame(frame ndjsonFrame) bool {
 }
 
 // parseJSONOutput scans NDJSON output from `cmd -p --output-format json`
-// and extracts the finalText field and sessionId from the result frame.
+// and extracts text content from message frames and/or result frames.
+// The cmd CLI emits "type":"message" frames with text in
+// message.content[].text; older formats used "type":"result" with finalText.
 func parseJSONOutput(output string) (finalText string, sessionID string) {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var textBuilder strings.Builder
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -497,23 +510,68 @@ func parseJSONOutput(output string) (finalText string, sessionID string) {
 			Type      string `json:"type"`
 			FinalText string `json:"finalText"`
 			SessionID string `json:"sessionId"`
+			Message   *struct {
+				Role    string `json:"role"`
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"message,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(line), &frame); err != nil {
 			continue
 		}
 
 		if frame.Type == "result" {
-			finalText = frame.FinalText
+			if frame.FinalText != "" {
+				textBuilder.WriteString(frame.FinalText)
+				textBuilder.WriteString("\n")
+			}
 			sessionID = frame.SessionID
 		}
+		if frame.Type == "message" && frame.Message != nil {
+			if frame.Message.Role == "assistant" {
+				for _, c := range frame.Message.Content {
+					if c.Type == "text" && c.Text != "" {
+						textBuilder.WriteString(c.Text)
+						textBuilder.WriteString("\n")
+					}
+				}
+			}
+		}
 	}
-	return finalText, sessionID
+	return textBuilder.String(), sessionID
 }
 
-// countCommits counts occurrences of "git commit" in the output text.
-// This captures tool_running events that invoke git commits.
-func countCommits(output string) int {
-	return strings.Count(strings.ToLower(output), "git commit")
+// extractOutput parses the NDJSON output buffer and returns the extracted
+// text. If parsing yields nothing, the raw output is returned as a fallback
+// so that the child's stdout is never silently discarded.
+func (s *liveSession) extractOutput(output string) string {
+	parser := s.parse
+	if parser == nil {
+		parser = parseJSONOutput
+	}
+	text, _ := parser(output)
+	if text == "" {
+		return output
+	}
+	return text
+}
+
+// countCommitsInWorktree counts commits the agent made on its branch by
+// comparing the worktree's HEAD against the base commit from which the
+// worktree was created.
+func countCommitsInWorktree(worktree, baseCommit string) int {
+	if worktree == "" || baseCommit == "" {
+		return 0
+	}
+	cmd := exec.Command("git", "-C", worktree, "rev-list", "--count", baseCommit+"..HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(output)))
+	return n
 }
 
 // generateID creates a unique session ID.

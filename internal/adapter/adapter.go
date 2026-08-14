@@ -19,6 +19,9 @@ type Budget struct {
 type DispatchOpts struct {
 	// Worktree is the directory where the agent should operate.
 	Worktree string
+	// BaseCommit is the commit the worktree was created from, used to
+	// count commits the agent makes on its branch via git rev-list.
+	BaseCommit string
 	// Prompt is the query passed to the agent via the CLI.
 	Prompt string
 	// Model is the provider model identifier (e.g. "laguna-free").

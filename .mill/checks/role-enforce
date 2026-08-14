@@ -1,63 +1,178 @@
-#!/bin/bash
-# Mill role-based capability enforcement.
-# Reads .mill/role to determine active role and blocks disallowed actions.
-# Bootstrap enforcement until runner handles this natively.
+#!/usr/bin/env bash
+# role-enforce — pre-commit capability enforcement.
+# Usage:
+#   checks/role-enforce              — git pre-commit hook
+#   checks/role-enforce --test <role> <file>  — test mode
+#
+# Exits 0 if allowed, 1 if blocked, 2 on usage error.
+
 set -euo pipefail
 
-ROLE_FILE=".mill/role"
-ROLE=$(cat "$ROLE_FILE" 2>/dev/null || echo "none")
+ROLES_DIR=".mill/roles"
 
-STAGED=$(git diff --cached --name-only 2>/dev/null || true)
-GO_FILES=$(echo "$STAGED" | grep -E '\.go$' || true)
-MD_FILES=$(echo "$STAGED" | grep -E '\.md$' || true)
-IMPL=$(echo "$STAGED" | grep -E '^(cmd/|internal/).*\.go$' || true)
+# --- helpers ----------------------------------------------------------------
 
-case "$ROLE" in
-  staff)
-    # Staff: can write docs, roles, config. Cannot write implementation.
-    if [ -n "$IMPL" ]; then
-      echo "BLOCKED: Staff does not write implementation code."
-      echo "Affected: $IMPL"
-      echo "Delegate: mill delegate <issue> --role sr-dev"
-      exit 1
+# parse_list extracts a YAML list field from ROLE.md frontmatter.
+# Args: field_name file_path → space-separated values (or empty string).
+parse_list() {
+    local field="$1" file="$2"
+    awk -v field="$field" '
+      $0 ~ "^" field ":" {
+        gsub("^" field ": *", "")
+        gsub(/[\[\]]/, "")
+        gsub(/,/, " ")
+        if ($0 != "") { print $0 }
+        else { flag=1; next }
+      }
+      flag && !/^  - /    { exit }
+      flag && /^  - /     { gsub(/^  - /, ""); print }
+    ' "$file" | xargs 2>/dev/null
+}
+
+# check_forbidden returns 0 if the file basename is NOT forbidden.
+# Args: filename forbidden_patterns
+check_forbidden() {
+    local file="$1" forbidden="$2"
+    local basename
+    basename=$(basename "$file")
+
+    if [[ -z "$forbidden" ]]; then
+        return 0
     fi
-    ;;
-  pm)
-    # PM: can write specs, docs. Cannot write code or config.
-    if [ -n "$GO_FILES" ]; then
-      echo "BLOCKED: PM does not write code."
-      echo "Delegate to Tech Lead for technical specs."
-      exit 1
-    fi
-    ;;
-  tech-lead)
-    # Tech Lead: can review specs. Cannot write implementation without Architect approval.
-    if [ -n "$IMPL" ]; then
-      echo "WARNING: Tech Lead writing implementation. Architect approval required."
-      echo "Continue? Set ARCHITECT_APPROVED=1 to bypass."
-      if [ "${ARCHITECT_APPROVED:-}" != "1" ]; then
+
+    for p in $forbidden; do
+        if [[ "$basename" == "$p" ]]; then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+# enforce_file checks a single file against role capabilities.
+# Args: role role_md_path file_path → exits on first violation.
+enforce_file() {
+    local role="$1" role_md="$2" file="$3"
+
+    # Parse frontmatter fields
+    local allowed forbidden
+    allowed=$(parse_list "allowed_files" "$role_md")
+    forbidden=$(parse_list "forbidden_patterns" "$role_md")
+
+    # 1. Check forbidden patterns first (takes precedence)
+    if ! check_forbidden "$file" "$forbidden"; then
+        local basename
+        basename=$(basename "$file")
+        echo "pre-commit: BLOCKED — role '$role' cannot modify $basename (forbidden)." >&2
         exit 1
-      fi
     fi
-    ;;
-  sr-dev*)
-    # Sr. Dev: can write code. Cannot modify roles or config.
-    ROLE_CONFIG=$(echo "$STAGED" | grep -E '^(roles/|mill\.yml|\.mill/config)' || true)
-    if [ -n "$ROLE_CONFIG" ]; then
-      echo "BLOCKED: Sr. Dev does not modify roles or config."
-      echo "Affected: $ROLE_CONFIG"
-      exit 1
+
+    # 2. Empty allowed_files → block everything with clear message
+    if [[ -z "$allowed" ]]; then
+        echo "pre-commit: BLOCKED — role '$role' has no file permissions." >&2
+        echo "  $role has an empty allowed_files list." >&2
+        echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
+        exit 1
     fi
-    ;;
-  none)
-    echo "WARNING: No role set. Run: echo 'staff' > .mill/role"
-    echo "Set role and retry."
+
+    # 3. Check extension against allowed list
+    local ext ext_lc
+    ext=".${file##*.}"
+    ext_lc=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+
+    for a in $allowed; do
+        if [[ "$a" == "$ext_lc" ]]; then
+            return 0
+        fi
+    done
+
+    # Not allowed
+    local allowed_list
+    allowed_list=$(echo "$allowed" | tr ' ' ', ')
+    echo "pre-commit: BLOCKED — role '$role' cannot commit $ext_lc files." >&2
+    echo "  $role can produce: $allowed_list" >&2
+    echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
     exit 1
-    ;;
-  *)
-    echo "Unknown role: $ROLE"
+}
+
+# --- test mode --------------------------------------------------------------
+if [[ "${1:-}" == "--test" ]]; then
+    ROLE="${2:-}"
+    FILE="${3:-}"
+    if [[ -z "$ROLE" || -z "$FILE" ]]; then
+        echo "Usage: $0 --test <role> <file>" >&2
+        exit 2
+    fi
+
+    ROLE_MD="$ROLES_DIR/$ROLE/ROLE.md"
+    if [[ ! -f "$ROLE_MD" ]]; then
+        echo "role-enforce: unknown role '$ROLE' (no $ROLE_MD)" >&2
+        exit 2
+    fi
+
+    enforce_file "$ROLE" "$ROLE_MD" "$FILE"
+    exit 0
+fi
+
+# --- pre-commit mode --------------------------------------------------------
+# Check for --no-verify
+for arg in "$@"; do
+    if [[ "$arg" == "--no-verify" ]]; then
+        exit 0
+    fi
+done
+
+# Read active role
+MILL_DIR=".mill"
+ROLE_STATE="$MILL_DIR/role"
+if [[ ! -f "$ROLE_STATE" ]]; then
+    exit 0
+fi
+
+ROLE=$(tr -d '[:space:]' < "$ROLE_STATE")
+if [[ -z "$ROLE" ]]; then
+    exit 0
+fi
+
+ROLE_MD="$ROLES_DIR/$ROLE/ROLE.md"
+if [[ ! -f "$ROLE_MD" ]]; then
+    echo "role-enforce: WARNING — no role definition for '$ROLE' at $ROLE_MD" >&2
+    exit 0
+fi
+
+# Get staged files
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)
+if [[ -z "$STAGED" ]]; then
+    exit 0
+fi
+
+# Check each staged file
+BLOCKED_FILES=""
+FIRST_BLOCKED_REASON=""
+while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+
+    # Run enforcement as subshell to capture violation without exiting main loop
+    if ! enforce_file "$ROLE" "$ROLE_MD" "$f"; then
+        # enforce_file already printed the error; capture via subshell result
+        if [[ -z "$BLOCKED_FILES" ]]; then
+            BLOCKED_FILES="$f"
+        else
+            BLOCKED_FILES="$BLOCKED_FILES $f"
+        fi
+    fi
+done <<< "$STAGED"
+
+if [[ -n "$BLOCKED_FILES" ]]; then
+    # Log enforcement
+    TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    mkdir -p "$MILL_DIR"
+    echo "[$TIMESTAMP] BLOCKED $ROLE $BLOCKED_FILES" >> "$MILL_DIR/enforcement.log"
+
+    # Re-run enforcement on first file to get the error message (it exits 1)
+    FIRST=$(echo "$BLOCKED_FILES" | cut -d' ' -f1)
+    enforce_file "$ROLE" "$ROLE_MD" "$FIRST"
     exit 1
-    ;;
-esac
+fi
 
 exit 0

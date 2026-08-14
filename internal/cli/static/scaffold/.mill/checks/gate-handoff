@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# gate-handoff — verify a non-leaf role dispatched its successor before completing
+# Usage: gate-handoff <issue-number>
+# Checks the ledger for a completed non-leaf delegation and verifies a child
+# dispatch event exists. Exits 0 if: no ledger yet, leaf role completed, or
+# a child dispatch exists for a non-leaf role. Exits 1 if a non-leaf role
+# completed with verdict "approved" but no child dispatch was recorded.
+set -euo pipefail
+
+issue="${1:-}"
+if [[ -z "$issue" ]]; then
+    echo "Usage: $0 <issue-number>" >&2
+    exit 2
+fi
+
+LEDGER=".mill/ledger/${issue}.jsonl"
+
+# No ledger yet — nothing to verify
+if [[ ! -f "$LEDGER" ]]; then
+    echo "✅ No ledger for #${issue} — delegation not started"
+    exit 0
+fi
+
+# Find the last 'complete' entry with verdict 'approved'
+# Go json.Marshal produces compact JSON: {"event":"complete","verdict":"approved",...}
+complete_lines=$(grep '"event":"complete"' "$LEDGER" | grep '"verdict":"approved"' || true)
+
+if [[ -z "$complete_lines" ]]; then
+    echo "✅ No approved completion in ledger — nothing to handoff-check"
+    exit 0
+fi
+
+# Extract the role from the last complete+approved entry
+last_complete=$(echo "$complete_lines" | tail -1)
+role=$(echo "$last_complete" | grep -o '"role":"[^"]*"' | head -1 | sed 's/"role":"//;s/"$//')
+
+if [[ -z "$role" ]]; then
+    echo "✅ Complete entry has no role field — cannot verify handoff"
+    exit 0
+fi
+
+# Check if this role is non-leaf (has delegates_to in ROLE.md)
+ROLE_FILE=".mill/roles/${role}/ROLE.md"
+if [[ ! -f "$ROLE_FILE" ]]; then
+    echo "✅ Unknown role '${role}' — cannot verify handoff"
+    exit 0
+fi
+
+# Extract delegates_to from YAML frontmatter
+# Strategy: capture from "delegates_to:" until the next top-level key
+delegates=$(awk '
+    /^delegates_to:/   { flag=1; next }
+    flag && !/^  - /   { exit }
+    flag && /^  - /    { sub(/^  - /, ""); print }
+' "$ROLE_FILE")
+
+if [[ -z "$delegates" ]]; then
+    echo "✅ Role '${role}' is a leaf role (no delegates_to) — handoff not required"
+    exit 0
+fi
+
+# Check for child dispatch events: entries with parent_issue set to this issue
+# In compact JSON: "parent_issue":153
+child_dispatches=$(grep '"parent_issue":' "$LEDGER" || true)
+
+if [[ -z "$child_dispatches" ]]; then
+    echo "❌ BLOCKED: role '${role}' completed (approved) but no child dispatch found in ledger"
+    echo "   Non-leaf roles must delegate downstream before marking complete."
+    echo "   Expected child role(s): ${delegates}"
+    echo "   Run: mill delegate ${issue} --role <successor-role>"
+    exit 1
+fi
+
+echo "✅ Role '${role}' dispatched downstream — child dispatch(s) found in ledger"
+exit 0

@@ -173,7 +173,7 @@ qa-docs     → (nobody)
 | Review needed | `stage:review`, `agent:reviewer` | Staff → Reviewer |
 | Documentation, tests | `agent:qa-docs` | Staff → QA/Docs |
 
-**Verify mechanically:** `checks/gate-route staff <role>` before every delegation.
+**Verify mechanically:** `checks/gate-route staff <role>` before every delegation; `checks/gate-handoff <issue>` before marking a non-leaf role's work approved.
 If it exits 1, the route is invalid — find the intermediate.
 
 Delegable: research, mechanical migrations, inventories, implementation from clear specs, tests, documentation.
@@ -208,3 +208,4 @@ Not delegable: HITL tickets from the decision map. An agent answering its own de
 4. Brief said "this must not change" → verify explicitly
 5. Issue is in project board with correct labels
 6. Worktree cleaned up after merge
+7. Downstream handoff verified — every non-leaf delegation (PM, Architect, Tech Lead) dispatched its successor; the ledger (`.mill/ledger/<issue>.jsonl`) shows a child dispatch event for each non-leaf role that completed with `verdict: approved`

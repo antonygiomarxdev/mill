@@ -58,3 +58,5 @@ See `roles/COMMON.md`.
 2. Alternatives documented with reasons for rejection
 3. Impact on existing system assessed
 4. Migration path defined if breaking change
+5. Delegated to Tech Lead: `mill delegate <issue> --role tech-lead`; dispatch recorded in ledger
+

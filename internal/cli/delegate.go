@@ -320,7 +320,7 @@ func (a *App) runDelegate(args []string) error {
 		// CLASS_OK and the target role delegates to subordinates, hand the
 		// worktree off to the recursive delegation engine.
 		if err == nil && classification == domain.CLASS_OK {
-			if rerr := a.runRecursionHandoff(targetRole, wt); rerr != nil {
+			if rerr := a.runRecursionHandoff(targetRole, wt, issueNum); rerr != nil {
 				return rerr
 			}
 		}
@@ -340,6 +340,13 @@ func (a *App) runDelegate(args []string) error {
 		if isIrrecoverable(classification) {
 			a.cleanupWorktree(issueNum)
 		}
+		// Post-loop recursion handoff: trigger in async path too so the
+		// delegation chain fires regardless of --wait.
+		if classification == domain.CLASS_OK {
+			if rerr := a.runRecursionHandoff(targetRole, wt, issueNum); rerr != nil {
+				fmt.Fprintf(a.Err, "warning: recursion handoff failed: %v\n", rerr)
+			}
+		}
 	}()
 	fmt.Fprintf(a.Out, "Delegated issue %d — task %s (async)\n", issueNum, taskID)
 	return nil
@@ -358,7 +365,13 @@ func isIrrecoverable(fc domain.FailureClass) bool {
 // not configured (a.Recursion nil) or the role is a leaf (empty
 // delegates_to). The result is logged to a.Err; the artifact path points at
 // the produce-loop's output.txt in the worktree.
-func (a *App) runRecursionHandoff(targetRole, worktreePath string) error {
+//
+// After the delegation tree is built, child dispatch events are recorded in
+// the parent issue's ledger so that checks/gate-handoff can verify the
+// handoff occurred. Each child node in the tree produces a "dispatch" ledger
+// entry with parent_issue and depth set, providing an audit trail for the
+// downstream delegation even before the child agent runs.
+func (a *App) runRecursionHandoff(targetRole, worktreePath string, issueNum int) error {
 	if a.Recursion == nil {
 		return nil
 	}
@@ -376,6 +389,27 @@ func (a *App) runRecursionHandoff(targetRole, worktreePath string) error {
 	}
 	if derr != nil {
 		return fmt.Errorf("recursion: %w", derr)
+	}
+
+	// Record child dispatch events in the parent issue's ledger. Each child
+	// in the delegation tree represents a subordinate role the parent
+	// dispatched to. The gate-handoff check reads these entries to verify
+	// the handoff occurred.
+	if a.Recursion.Tree != nil && a.Recursion.Tree.Root != nil {
+		for _, child := range a.Recursion.Tree.Root.Children {
+			childEntry := ledger.Entry{
+				Timestamp:   time.Now().UTC(),
+				Issue:       issueNum,
+				Event:       "dispatch",
+				Status:      string(domain.TaskRunning),
+				Role:        child.Role,
+				ParentIssue: issueNum,
+				Depth:       child.Depth,
+			}
+			if lerr := ledger.Append(a.ledgerPath(issueNum), childEntry); lerr != nil {
+				fmt.Fprintf(a.Err, "warning: failed to append child dispatch ledger entry for role %s: %v\n", child.Role, lerr)
+			}
+		}
 	}
 	return nil
 }

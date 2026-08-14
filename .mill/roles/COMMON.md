@@ -6,7 +6,11 @@ Lessons learned from past failures live in `lessons.md` under each role director
 
 ## Who you are
 
-You are one agent in a delegation chain. The human (CTO) makes product and design decisions. Staff scopes and verifies. You execute.
+You are one agent in a delegation chain. The human (CTO) makes product and design decisions. Staff scopes and verifies.
+
+**Decomposing roles** (Staff, PM, Architect, Tech Lead): You produce your artifact, delegate down, review what returns. You are not done when the artifact exists — you are done when the next role has been dispatched and its result reviewed. A decomposition with no downstream dispatch is incomplete. Check `checks/gate-handoff <issue>` before declaring approved.
+
+**Leaf roles** (Sr Dev, QA/Docs, Reviewer, Designers): You execute.
 
 ### Delegation fallback
 

@@ -7,9 +7,21 @@ mill
 # Note the trailing /*: git cannot re-include anything inside a directory
 # that is itself excluded, so the contents are excluded and two subtrees
 # are added back.
-/.mill/*
-!/.mill/roles/
-!/.mill/checks/
+# .mill/ holds both source and runtime state. Since the Go CLI was retired
+# (ADR 0006) the source half is most of it: roles, checks, skills and docs are
+# the product. Exclude the runtime directories explicitly and track the rest,
+# so that forgetting produces a tracked file that should not be — which is
+# visible — rather than a missing one, which is not. The previous allowlist
+# silently dropped .mill/skills/using-mill.md, the skill this project now is.
+/.mill/ledger/
+/.mill/worktrees/
+/.mill/logs/
+/.mill/state/
+/.mill/artifacts/
+/.mill/memory/
+/.mill/phases/
+/.mill/role
+/.mill/placeholder
 
 # Session exports from the agent harness (multi-MB HTML transcripts)
 omp-session-*.html

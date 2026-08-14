@@ -2272,7 +2272,7 @@ func TestRunRecursionHandoffNilEngineIsNoop(t *testing.T) {
 	buf := new(bytes.Buffer)
 	app := &App{MillDir: t.TempDir(), Out: buf, Err: buf}
 	// Recursion is left nil
-	err := app.runRecursionHandoff("architect", t.TempDir())
+	err := app.runRecursionHandoff("architect", t.TempDir(), 153)
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
@@ -2284,7 +2284,7 @@ func TestRunRecursionHandoffMissingRoleReturnsError(t *testing.T) {
 	app := &App{MillDir: dir, Out: buf, Err: buf}
 	app.Recursion = &recursion.Delegator{RolesRoot: filepath.Join(dir, "roles")}
 
-	err := app.runRecursionHandoff("architect", t.TempDir())
+	err := app.runRecursionHandoff("architect", t.TempDir(), 153)
 	if err == nil {
 		t.Fatal("expected error for missing role file")
 	}
@@ -2319,8 +2319,117 @@ allowed_files:
 	app := &App{MillDir: dir, Out: buf, Err: buf}
 	app.Recursion = &recursion.Delegator{RolesRoot: filepath.Join(dir, "roles")}
 
-	err := app.runRecursionHandoff("sr-dev-be", t.TempDir())
+	err := app.runRecursionHandoff("sr-dev-be", t.TempDir(), 153)
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+func TestRunRecursionHandoffRecordsChildDispatchInLedger(t *testing.T) {
+	dir := t.TempDir()
+
+	// Set up role files: architect (non-leaf) → tech-lead, qa-docs
+	rolesDir := filepath.Join(dir, "roles")
+	archDir := filepath.Join(rolesDir, "architect")
+	techDir := filepath.Join(rolesDir, "tech-lead")
+	qaDir := filepath.Join(rolesDir, "qa-docs")
+	if err := os.MkdirAll(archDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(techDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(qaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	archContent := `---
+role: architect
+model: pro
+agent: task
+reviewed_by: staff
+delegates_to:
+  - tech-lead
+  - qa-docs
+allowed_files:
+  - .md
+skills:
+  - codebase-design
+---
+# Role: Architect
+`
+	if err := os.WriteFile(filepath.Join(archDir, "ROLE.md"), []byte(archContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	techContent := `---
+role: tech-lead
+model: pro
+agent: task
+reviewed_by: architect
+delegates_to:
+  - qa-docs
+allowed_files:
+  - .go
+  - .md
+skills:
+  - tdd
+---
+# Role: Tech Lead
+`
+	if err := os.WriteFile(filepath.Join(techDir, "ROLE.md"), []byte(techContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	qaContent := `---
+role: qa-docs
+model: free→paid
+agent: task
+reviewed_by: delegator
+delegates_to: []
+allowed_files:
+  - .md
+skills:
+  - verification-before-completion
+---
+# Role: QA / Docs
+`
+	if err := os.WriteFile(filepath.Join(qaDir, "ROLE.md"), []byte(qaContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: dir, Out: buf, Err: buf}
+	app.Recursion = &recursion.Delegator{RolesRoot: rolesDir}
+
+	wt := t.TempDir()
+	err := app.runRecursionHandoff("architect", wt, 153)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+
+	// Verify child dispatch events were recorded in the ledger
+	ledgerPath := filepath.Join(dir, "ledger", "153.jsonl")
+	data, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatalf("ledger file not created: %v", err)
+	}
+	ledgerStr := string(data)
+
+	// Each child should produce a dispatch entry with parent_issue and role
+	for _, expectedChild := range []string{"tech-lead", "qa-docs"} {
+		if !strings.Contains(ledgerStr, `"role":"`+expectedChild+`"`) {
+			t.Errorf("ledger missing child dispatch for role %s", expectedChild)
+		}
+	}
+	if !strings.Contains(ledgerStr, `"parent_issue":153`) {
+		t.Error("ledger entries missing parent_issue field")
+	}
+	for _, line := range strings.Split(ledgerStr, "\n") {
+		if strings.Contains(line, `"event":"dispatch"`) && strings.Contains(line, `"parent_issue":153`) {
+			if !strings.Contains(line, `"depth":1`) {
+				t.Errorf("child dispatch line missing depth:1: %s", line)
+			}
+		}
 	}
 }

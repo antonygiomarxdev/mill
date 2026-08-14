@@ -62,3 +62,4 @@ See `roles/COMMON.md`.
 2. FRD covers all states: loading, empty, error, edge cases
 3. Priority assigned
 4. Issue labels correct
+5. FRD handed off to the owning role (PM → UX Designer for flow design, PM → Architect for technical design); child dispatch recorded in ledger (`.mill/ledger/<issue>.jsonl`)

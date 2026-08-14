@@ -80,3 +80,4 @@ See `roles/COMMON.md`.
 3. Architecture review: no dependency violations, correct layer placement
 4. Commit messages are conventional and semantic
 5. Issue comment: what passed, what needs rework, why
+6. Each decomposed task dispatched to the appropriate Sr Dev; child dispatches recorded in ledger (`.mill/ledger/<issue>.jsonl`)

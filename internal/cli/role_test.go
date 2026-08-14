@@ -307,6 +307,18 @@ func TestRoleEnforceHookTestMode(t *testing.T) {
 		{"ux-designer", "main.go", 1},
 		{"architect", "adr.yml", 0},
 		{"architect", "main.go", 1},
+		// Issue #147: cover every one of the 11 defined roles so a new role
+		// in .mill/roles/ can never regress into the unknown-role branch.
+		{"staff", "notes.md", 0},
+		{"staff", "internal.go", 1},
+		{"reviewer", "notes.md", 0},
+		{"reviewer", "notes.go", 1},
+		{"sr-dev-fe", "a.go", 0},
+		{"sr-dev-fe", "a.pen", 1},
+		{"sr-dev-data", "a.go", 0},
+		{"sr-dev-data", "a.pen", 1},
+		{"ui-designer", "w.pen", 0},
+		{"ui-designer", "w.go", 1},
 	}
 
 	for _, tc := range cases {
@@ -324,6 +336,98 @@ func TestRoleEnforceHookTestMode(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// runRoleEnforceTest runs `bash <hook> --test <role> <file>` in dir and
+// returns the combined output and exit error. A nil error means the role was
+// allowed for that file; a non-nil error means the commit would be blocked
+// (or, for an unrecognised role, refused as a usage error).
+func runRoleEnforceTest(t *testing.T, hook, dir, role, file string) (string, error) {
+	t.Helper()
+	cmd := exec.Command("bash", hook, "--test", role, file)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// TestRoleEnforceLiveMatchesCanonical guards against the exact drift that
+// caused issue #147: the live gauntlet runs .mill/checks/role-enforce, so it
+// must always match the canonical checks/role-enforce. Hand-written per-role
+// branches in either file would silently diverge from .mill/roles/*/ROLE.md.
+func TestRoleEnforceLiveMatchesCanonical(t *testing.T) {
+	root, err := projectRoot()
+	if err != nil {
+		t.Skipf("cannot find project root: %v", err)
+	}
+	canonical, err := os.ReadFile(filepath.Join(root, "checks", "role-enforce"))
+	if err != nil {
+		t.Fatalf("read canonical checks/role-enforce: %v", err)
+	}
+	live, err := os.ReadFile(filepath.Join(root, ".mill", "checks", "role-enforce"))
+	if err != nil {
+		t.Fatalf("read live .mill/checks/role-enforce: %v", err)
+	}
+	if !bytes.Equal(canonical, live) {
+		t.Errorf(".mill/checks/role-enforce has drifted from checks/role-enforce; see issue #147")
+	}
+}
+
+// TestLiveRoleEnforceFixesIssue147 verifies the gauntlet entry point
+// (.mill/checks/role-enforce) enforces role capability from ROLE.md
+// frontmatter instead of the stale hand-written case dispatch that raised
+// "Unknown role: architect" for eight of the eleven roles.
+func TestLiveRoleEnforceFixesIssue147(t *testing.T) {
+	root, err := projectRoot()
+	if err != nil {
+		t.Skipf("cannot find project root: %v", err)
+	}
+	hook := filepath.Join(root, ".mill", "checks", "role-enforce")
+	if _, err := os.Stat(hook); err != nil {
+		t.Skipf("live role-enforce not present: %v", err)
+	}
+
+	// Structural: the stale hand-written case dispatch and its "Unknown role"
+	// fallback must be gone (issue #147's root cause).
+	data, err := os.ReadFile(hook)
+	if err != nil {
+		t.Fatalf("read live role-enforce: %v", err)
+	}
+	if bytes.Contains(data, []byte("case \"$ROLE\"")) {
+		t.Errorf("live role-enforce still uses the stale hand-written case dispatch")
+	}
+	if bytes.Contains(data, []byte("Unknown role: $ROLE")) {
+		t.Errorf("live role-enforce still contains the stale unknown-role branch")
+	}
+
+	// Behavioral: architect committing a .go file is refused by an allowed_files
+	// rule (allowed_files: .md .yml .yaml), NOT by the unknown-role branch.
+	out, err := runRoleEnforceTest(t, hook, root, "architect", "main.go")
+	if err == nil {
+		t.Fatal("expected architect committing .go to be blocked, got exit 0")
+	}
+	if strings.Contains(out, "Unknown role") {
+		t.Errorf("architect hit the unknown-role branch (the #147 symptom); output:\n%s", out)
+	}
+	if !strings.Contains(out, "BLOCKED") {
+		t.Errorf("expected architect blocked by an allowed_files rule, got:\n%s", out)
+	}
+
+	// Acceptance: sr-dev-be CAN commit .go; pm CANNOT.
+	if _, err := runRoleEnforceTest(t, hook, root, "sr-dev-be", "internal/foo.go"); err != nil {
+		t.Errorf("expected sr-dev-be to commit internal/foo.go, got error: %v", err)
+	}
+	if out, err := runRoleEnforceTest(t, hook, root, "pm", "foo.go"); err == nil || !strings.Contains(out, "BLOCKED") {
+		t.Errorf("expected pm committing .go to be BLOCKED, got: %v\n%s", err, out)
+	}
+
+	// An unrecognised role is still refused (the `*` equivalent must stay).
+	out, err = runRoleEnforceTest(t, hook, root, "ninja", "foo.go")
+	if err == nil {
+		t.Fatal("expected unknown role 'ninja' to be refused, got exit 0")
+	}
+	if !strings.Contains(out, "unknown role") {
+		t.Errorf("expected refusal for unknown role, got:\n%s", out)
 	}
 }
 

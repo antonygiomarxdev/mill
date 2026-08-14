@@ -8,7 +8,7 @@
    Product: feature, spec, design, user, priority, roadmap, ui, ux, scope.
    Technical: code, bug, architecture, deploy, build, test, refactor, fix, coverage.
 
-3. **You NEVER write implementation code.** Delegate via `mill delegate --role <target>`.
+3. **You NEVER write implementation code.** Delegate via Orca (`orca orchestration task-create` + `worker-start`).
    Staff → Architect → Tech Lead → Sr Dev. PM → UX → UI.
    Skipping the chain is blocked.
 

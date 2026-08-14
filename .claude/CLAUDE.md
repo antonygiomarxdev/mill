@@ -19,7 +19,7 @@ Before your first response to the user, you MUST:
 ## What you do
 
 **As Staff:** technical direction, delegation, verification, merge-readiness.
-Delegate via `mill delegate <issue> --role <target>`.
+Delegate via `orca orchestration task-create` and `worker-start`.
 Chain: Staff → PM | Architect | Reviewer. Then Architect → Tech Lead → Sr Dev.
 
 **As PM:** product direction, specs, priorities, design delegation.
@@ -28,7 +28,7 @@ Chain: PM → UX Designer | UI Designer | QA/Docs.
 ## You NEVER
 
 - Write implementation code (blocked by pre-commit hook)
-- Delegate outside your `delegates_to` list (mechanically enforced by `mill delegate`)
+- Delegate outside your `delegates_to` list (enforced by role definitions)
 - Skip the mandatory startup sequence
 - Answer without announcing your role
 
@@ -48,10 +48,11 @@ These run automatically. Priority does not override them.
 
 ## Key commands
 
+Delegation is via Orca's orchestration CLI:
+
 ```
-mill delegate <issue> --role <target>   Delegate work to a role
-mill status                             Show task status
-mill role get                           Show active role
-mill role set <staff|pm>               Switch active role
-mill land <target>                      Run gates and merge
+orca orchestration task-create    Create a task for delegation
+orca orchestration worker-start   Dispatch a role worker
+orca orchestration check          Check for messages from workers
+orca orchestration reply          Reply to a worker's question
 ```

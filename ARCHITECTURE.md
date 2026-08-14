@@ -2,35 +2,96 @@
 
 ## Design goals
 
-1. **Framework on harness.** Mill is a skill loaded into CTO sessions, not a
-   standalone spawner. Uses native `task()` when available, CLI as fallback.
-2. **Role-driven.** 11 roles with delegation chains, frontmatter, and agent types.
+1. **Skill on substrate.** Mill is a skill plus a policy directory loaded into
+   CTO sessions. Orca provides the execution substrate.
+2. **Role-driven.** 11 roles with delegation chains, frontmatter, and
+   capabilities.
 3. **Phased + gated.** FRD → SPEC → TASKS → IMPLEMENT → REVIEW → DONE.
-   Each phase produces an artifact. Mechanical gate scripts block progress.
+   Each phase produces an artifact. Bash gate scripts block progress.
 4. **Stateful.** Task state persists to `.mill/state.json`. Ledger is
    append-only JSONL. Survives crashes and terminal closes.
-5. **Async by default.** `mill delegate` returns immediately. Agents run in
-   background. `--wait` for sync.
 
-## Architecture layers
+## Star topology
+
+The coordinator is a hub. It dispatches to a role, receives the result, decides
+the next step, and dispatches again — one-to-N, not one-to-one-to-one.
 
 ```
-CTO session (omp / claude / opencode)
-  └─ Mill skill (skills/mill.md)
-       ├─ Tool detection → copies context to harness-specific paths
-       ├─ Role classification → Staff or PM
-       ├─ Phase gating → checks/gate-{frd,spec,tasks,coverage,review}
-       └─ Delegation → native task() or CLI fallback
+                          ┌───────────┐
+                          │           │
+              ┌──────────→│ Architect │
+              │           │           │
+              │           └───────────┘
+              │
+┌───────────┐ │           ┌───────────┐
+│           │ │           │           │
+│ Coordinator├─┼──────────→│  Tech Lead│
+│           │ │           │           │
+└───────────┘ │           └───────────┘
+              │
+              │           ┌───────────┐
+              │           │           │
+              ├──────────→│  Sr Dev   │
+              │           │           │
+              │           └───────────┘
+              │
+              │           ┌───────────┐
+              │           │           │
+              └──────────→│ Reviewer  │
+                          │           │
+                          └───────────┘
 ```
 
-## Delegation
+The organisational sequence is preserved; no role other than the coordinator
+needs to know who comes next. PM becomes a worker role like the others — one
+coordinator holds the state and the mailbox.
 
-Two paths, same interface:
+This dissolves rather than fixes several problems: roles never needing to hand
+off to each other (#153), recursion complexity (#109), and fan-out (#154).
 
-| Path | When | Mechanism |
-|------|------|-----------|
-| Native `task()` | omp harness, agent type available | Harness-managed, async, auto-notify |
-| `mill delegate` CLI | Cascade chains, no harness, worktree needed | OS process, goroutine, state/ledger |
+## Mill / Orca boundary
+
+**Mill owns** (policy — Markdown and bash):
+- the eleven role definitions and their capabilities
+- the phase sequence — FRD → spec → tasks → implementation → review
+- `role-enforce`: what each role may write
+- the phase gates, including acceptance criteria
+- brief construction from role definition, issue, and upstream artifact
+- **model tier selection per dispatch** — the one substrate capability Orca does
+  not provide for non-Claude agents
+
+**Orca owns** (execution substrate):
+- spawning and supervising workers
+- worktree lifecycle
+- the message bus, and the raise-a-hand cycle
+- parallelism and its limits
+
+### Where policy lives
+
+```
+.mill/
+├── roles/          # Role definitions (Markdown + YAML frontmatter)
+│   ├── COMMON.md   # Shared rules for all roles
+│   └── <role>/
+│       ├── ROLE.md     # Role definition, model tier, delegates_to
+│       └── lessons.md  # Learned corrections (reference, not required)
+├── checks/         # Gate scripts (bash)
+│   ├── role-enforce    # Capability enforcement
+│   ├── gate-coverage   # Coverage threshold
+│   ├── gate-frd        # FRD artifact validation
+│   ├── gate-spec       # Spec artifact validation
+│   ├── gate-tasks      # Tasks artifact validation
+│   ├── gate-handoff    # Delegation completeness
+│   └── gate-review     # Review artifact validation
+├── map.json        # Role capability map
+└── role            # Active role (staff|pm)
+
+checks/             # Top-level git hook gate scripts (bash)
+```
+
+All policy is Markdown or bash. No compile step between deciding a rule and
+applying it. Enforcement happens in git hooks — `role-enforce` and the phase
+gates run at commit time.
 
 ## Phased workflow
 
@@ -45,41 +106,36 @@ frd.md       spec.md       tasks.md       (commits)    review.md
 
 Each phase gated by a script in `checks/`. No artifact → `exit 1` → blocked.
 
-## Adapter
+## How dispatch works
 
-Single implementation: `internal/adapter/commandcode.go`. Interface in
-`adapter.go` (Dispatch, Resume, Capabilities). OpenCode deleted per ADR 0001.
-The harness handles tool validation natively — `internal/repair/` deleted.
+The coordinator (Staff or PM) reads the Mill skill at session start. When it
+receives work from the CTO:
 
-## State persistence
+1. Classifies the work → selects the appropriate role
+2. Constructs a brief from the role definition, issue, and upstream artifact
+3. Dispatches via `orca orchestration task-create` + `worker-start`
+4. Monitors the worker via `orca orchestration worker-read`
+5. Receives results or raised hands via `orca orchestration check`
+6. Decides the next step: advance the phase, escalate, or re-delegate
 
-```
-.mill/
-├── state.json          # Task states (running/done/error)
-├── config.json         # Provider/model config
-├── role                # Active role (staff|pm)
-├── ledger/             # Append-only event log per issue
-├── worktrees/          # Git worktrees per delegated task
-├── phases/             # Phase artifacts (frd, spec, tasks, review)
-├── artifacts/          # Structured handoff between agents
-└── memory/             # Context window checkpoints
-```
-
-Created at `mill init`. `.mill/` is gitignored. State is derived from files
-on disk, never from a supervisor process.
+The coordinator does not write code. It orchestrates.
 
 ## Model tiers
 
-| Tier | Model | Used by |
-|------|-------|---------|
-| free | deepseek-v4-flash | Sr Dev (first pass), QA/Docs |
-| paid | deepseek-v4-pro | Sr Dev (complex work) |
-| pro | deepseek-v4-pro / claude-sonnet | Staff, PM, Architect, Tech Lead, Reviewer |
+| Tier | Used by |
+|------|---------|
+| free | Sr Dev (first pass), QA/Docs |
+| paid | Sr Dev (complex work) |
+| pro | Staff, PM, Architect, Tech Lead, Reviewer |
 
-Role frontmatter `model` field selects tier. `resolveModel()` maps to actual
-model name. `free→paid` starts cheap, escalates on complexity.
+Role frontmatter `model` field selects tier. The coordinator passes the
+appropriate `--model` flag when dispatching an Orca worker.
 
 ## Key decisions
 
 - [ADR 0001](docs/adr/0001-mill-as-framework.md) — Framework on harness
 - [ADR 0002](docs/adr/0002-budget-enforcement.md) — Budget enforcement
+- [ADR 0005](docs/adr/0005-orca-as-execution-substrate.md) — Orca as the
+  execution substrate
+- [ADR 0006](docs/adr/0006-mill-is-a-skill-not-a-binary.md) — Mill is a skill,
+  not a binary

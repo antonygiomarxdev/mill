@@ -1,11 +1,12 @@
 # Mill — Product Definition
 
-> This document is the product. `.mill/docs/PRODUCT.md` predates it, is gitignored
-> (#140), and describes an earlier framing. This file is the tracked one.
+> This document is the product definition. It is the single source of truth for
+> what Mill is and how it works.
 
 ## What Mill is
 
-Mill is an **org chart that executes**.
+Mill is an **org chart that executes** — a skill plus a policy directory that
+turns a CTO session into a structured organisation of specialised roles.
 
 You describe intent once. An organization of specialized roles turns it into
 reviewed work — decomposing it, delegating it down a chain of command, reviewing
@@ -14,6 +15,10 @@ what comes back, and telling you when your intent was not clear enough.
 It is not a better coding agent. It is the structure a company already uses,
 made executable, because that structure exists to solve exactly the problems a
 single agent has: scoping, specialization, review, and knowing who to ask.
+
+Mill carries the roles, the phase sequence, brief construction, and the dispatch
+procedure. Orca provides the execution substrate — worker spawning, supervision,
+worktree isolation, and the message bus. See [ADR 0005](../docs/adr/0005-orca-as-execution-substrate.md) and [ADR 0006](../docs/adr/0006-mill-is-a-skill-not-a-binary.md).
 
 ## Why it exists
 
@@ -27,13 +32,13 @@ Existing tools in this space (spec-kit, superpowers) start at the technical
 spec. Mill starts one step earlier, at product intent, and carries it down.
 The chain begins with *why*, not with *how*.
 
-## The chain
+## The sequence, and who walks it
+
+The organisational sequence is unchanged:
 
 ```
-CTO → PM     → Architect → Tech Lead → Sr Dev (BE/FE/Data)
-CTO → Staff  → Architect → Tech Lead → Sr Dev
-PM  → UX Designer → UI Designer
-PM  → QA / Docs
+intent → FRD → spec(s) → tasks → implementation → review
+          PM    Architect  Tech Lead   Sr Dev      Reviewer
 ```
 
 - **PM** turns intent into an FRD: what and why, with measurable acceptance
@@ -42,40 +47,44 @@ PM  → QA / Docs
   components affected.
 - **Tech Lead** decomposes one spec into granular tasks, each small enough for
   a single developer.
-- **Sr Dev, Designer, QA, Docs** are the leaves. They are the only roles that
-  execute.
+- **Sr Dev, Designer, QA, Docs** execute.
 
-Only Staff and PM speak to the CTO. Everything below is reachable only by
-delegation. This is what keeps the chain a chain, and it is enforced — a
-delegation outside a role's declared targets is rejected.
+**What walks the sequence is the coordinator, not the roles.** The topology is a
+star: the coordinator dispatches a role, receives its result, decides the next
+step, and dispatches again — one-to-N, never one-to-one-to-one. No role other
+than the coordinator needs to know who comes after it.
 
-Role assignment follows the conversation: engineering topics put the harness in
-Staff, product topics in PM. The switch is announced and recorded in tool state,
-not merely asserted in prose.
+There is **one** coordinator. The separation that matters — that product does not
+decide architecture — comes from *which role the coordinator dispatches to*, not
+from having several coordinators. PM is a worker role like the others.
 
-## Recursion
+This is why a deep chain was abandoned: it required every role to know the whole
+org chart and to delegate onward, which never happened in practice
+([ADR 0006](adr/0006-mill-is-a-skill-not-a-binary.md)). Both reference systems
+use the same star — Anthropic's lead agent spawning subagents in parallel, and
+Orca's coordinator with a mailbox against N workers.
 
-Every level performs the identical cycle: receive, review, do its own part,
-delegate down, review what comes back. There is no special case for depth. A
-level with nothing to delegate to is a leaf, and it executes.
+Fan-out is the normal case, not a special one: dispatching four workers at one
+step is the same operation as dispatching one, and the join is the coordinator
+waiting on its mailbox.
 
-## The escalation ladder
+## Raising a hand
 
-An executing role that finds the work underspecified, contradictory, or blocked
-**must not guess**. It posts a comment on the issue stating precisely what is
-missing, and stops.
+A worker that finds the work underspecified, contradictory, or blocked **must
+not guess**. It says what is missing and stops:
 
-Its observer picks the raised hand up — for a Sr Dev, that is the Tech Lead. If
-the observer can resolve it, it resolves it and re-delegates. If it cannot, it
-adds its own comment and escalates one step. This repeats until a role can
-resolve it, with the CTO as the last resort.
+```
+orca orchestration send --to run:<id> --subject "<short>" \
+     --body "<precisely what is missing>" --type question
+```
 
-Two properties matter:
+The coordinator receives it, and either resolves it and re-dispatches, or
+escalates to the CTO. Two levels, not a walk up an org chart — the coordinator
+is the only observer, and it holds the context needed to answer.
 
-- **Blocking is a first-class outcome, not a failure.** A raised hand is a
-  successful result.
-- **Escalation walks exactly one step at a time**, so each level gets the chance
-  to resolve what it is qualified to resolve.
+**Blocking is a first-class outcome, not a failure.** A raised hand is a
+successful result: it is the mechanism that stops an underspecified task from
+becoming plausible-looking wrong work.
 
 ## Everything goes through issues
 
@@ -83,9 +92,7 @@ The GitHub issue is the single record. Briefs, FRDs, specs, raised hands,
 resolutions and results are all issue content. There is no side channel. If it
 is not on the issue, it did not happen.
 
-## The economics — why Mill runs its own processes
-
-This is the constraint that determines the architecture, and it is easy to lose.
+## The economics
 
 **Expensive models think. Cheap models write. Expensive models review.**
 
@@ -93,20 +100,16 @@ The intelligence is spent on decomposition and on review; the writing is done by
 the cheapest model that can do it. Quality comes from the review step, not from
 the writer. This is deliberately where the money goes.
 
-That requirement is the reason Mill cannot be a set of templates driving the
-host agent, the way spec-kit and superpowers work. A harness runs **one** model.
-Claude Code subagents can vary the model but only within one vendor. Routing a
-role to a third-party model means spawning an external process with a chosen
-model, which means an adapter, a dispatch loop, and process coordination.
+Orca's orchestration substrate makes this possible: it spawns workers with
+different models in parallel, under supervision, in isolated worktrees. Mill's
+contribution is **model tier selection per dispatch** — the one substrate
+capability Orca does not provide for non-Claude agents. Role frontmatter declares
+the tier; the coordinator passes the appropriate `--model` flag when dispatching
+the worker.
 
-So the runtime earns its place — but only that part of it. **Policy stays in
-markdown**: the chain, the roles, who delegates to whom, the ladder. Policy is
-what changes often; it must not require a recompile. The runtime is the engine,
-not the rules.
-
-The health metric for this codebase is the ratio between the two. Production Go
-should shrink toward the irreducible core — adapter, worktree isolation,
-dispatch, review loop — and everything else should live in markdown and shell.
+**Policy stays in markdown**: the chain, the roles, who delegates to whom, the
+ladder, the gates, the acceptance criteria. Policy is what changes often; it must
+not require a recompile. The skill is the rules, not the engine.
 
 ## Learning from failure
 
@@ -152,9 +155,9 @@ it stops anyone from looking.
 
 ## The hard part
 
-Keeping the harness aware, across a long conversation, that it holds a role and
-that the tool is how it acts. That is a context problem rather than a feature,
-and it does not fall out of the rest of the design. It deserves its own line of
-work.
+Keeping the coordinator agent aware, across a long conversation, that it holds a
+role and that Orca's dispatch tools are how it acts. That is a context problem
+rather than a feature, and it does not fall out of the rest of the design. It
+deserves its own line of work.
 
 Today it works when the CTO reminds it. That is not a mechanism.

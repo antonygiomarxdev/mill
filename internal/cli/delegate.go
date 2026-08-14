@@ -301,6 +301,9 @@ func (a *App) runDelegate(args []string) error {
 			defer logFile.Close()
 		}
 		classification, err := runDispatchLoop54(a, issueNum, taskID, targetRole, modelOverride, opts, issueBody, labels, cfg, caps)
+		// Commit agent output to the worktree branch so review and rework
+		// operate on committed state, whatever the verdict.
+		a.commitWorktreeOnComplete(issueNum, wt)
 		if isIrrecoverable(classification) {
 			irrecoverable = true
 		}
@@ -322,6 +325,9 @@ func (a *App) runDelegate(args []string) error {
 			defer logFile.Close()
 		}
 		classification, _ := runDispatchLoop54(a, issueNum, taskID, targetRole, modelOverride, opts, issueBody, labels, cfg, caps)
+		// Commit agent output to the worktree branch so review and rework
+		// operate on committed state, whatever the verdict.
+		a.commitWorktreeOnComplete(issueNum, wt)
 		if isIrrecoverable(classification) {
 			a.cleanupWorktree(issueNum)
 		}
@@ -402,12 +408,77 @@ func (a *App) createWorktree(issueNum int) (string, error) {
 	return wt, nil
 }
 
+// worktreeHasChanges reports whether the worktree at wt has any uncommitted
+// changes: staged, unstaged, or untracked files.
+func worktreeHasChanges(wt string) (bool, error) {
+	cmd := exec.Command("git", "-C", wt, "status", "--porcelain", "--untracked-files=all")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("git status failed: %w\n%s", err, out)
+	}
+	return len(strings.TrimSpace(string(out))) > 0, nil
+}
+
+// scratchBranchName returns the name of the scratch branch used to preserve
+// uncommitted changes from a worktree before it is removed.
+func scratchBranchName(issueNum int) string {
+	return fmt.Sprintf("scratch/%d", issueNum)
+}
+
+// preserveChanges checks whether the worktree for issueNum has uncommitted
+// changes. If so, it stages and commits them so they are not lost when the
+// worktree is removed. Returns true if changes were committed.
+func (a *App) preserveChanges(issueNum int, wt string) bool {
+	hasChanges, err := worktreeHasChanges(wt)
+	if err != nil {
+		fmt.Fprintf(a.Err, "warning: could not check worktree status for issue %d: %v\n", issueNum, err)
+		return false
+	}
+	if !hasChanges {
+		return false
+	}
+
+	addCmd := exec.Command("git", "-C", wt, "add", "-A")
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(a.Err, "warning: git add failed while preserving changes for issue %d: %v\n%s\n", issueNum, err, out)
+		return false
+	}
+
+	commitMsg := fmt.Sprintf("scratch: preserve uncommitted changes from issue #%d delegation", issueNum)
+	commitCmd := exec.Command("git", "-C", wt, "commit", "--no-verify", "-m", commitMsg)
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		if strings.Contains(string(out), "nothing to commit") {
+			return false
+		}
+		fmt.Fprintf(a.Err, "warning: git commit failed while preserving changes for issue %d: %v\n%s\n", issueNum, err, out)
+		return false
+	}
+
+	return true
+}
+
 // cleanupWorktree removes the git worktree and prunes its branch.
-// It is best-effort: errors are logged to a.Err, not propagated.
-// Used as deferred cleanup when an agent session fails irrecoverably.
+// Before removal, any uncommitted changes are committed (via preserveChanges)
+// and a scratch branch (scratch/N) is created from the worktree HEAD so that
+// uncommitted work is not silently lost. It is best-effort: errors are logged
+// to a.Err, not propagated. Used as deferred cleanup when an agent session
+// fails irrecoverably, and during idempotent worktree re-creation.
 func (a *App) cleanupWorktree(issueNum int) {
 	wt := a.worktreePath(issueNum)
 	branch := a.worktreeBranch(issueNum)
+
+	// Preserve any uncommitted changes before removing the worktree.
+	// If changes were committed, snapshot the worktree HEAD on a scratch ref
+	// so they survive the agent-branch deletion.
+	if a.preserveChanges(issueNum, wt) {
+		scratch := scratchBranchName(issueNum)
+		scratchCmd := exec.Command("git", "-C", wt, "branch", "-f", scratch)
+		if out, err := scratchCmd.CombinedOutput(); err != nil {
+			fmt.Fprintf(a.Err, "warning: could not create scratch branch %s: %v\n%s\n", scratch, err, out)
+		} else {
+			fmt.Fprintf(a.Err, "Preserving uncommitted changes in branch %s (inspect with: git log %s)\n", scratch, scratch)
+		}
+	}
 
 	// Remove PID file.
 	pidFile := filepath.Join(wt, ".mill", "agent.pid")
@@ -423,6 +494,41 @@ func (a *App) cleanupWorktree(issueNum int) {
 	cmd = exec.Command("git", "branch", "-D", branch)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(a.Err, "cleanup: git branch -D failed: %v\n%s\n", err, out)
+	}
+}
+
+// commitWorktreeOnComplete commits all changes in the worktree to the agent
+// branch after a delegation loop finishes, regardless of verdict. This
+// ensures review operates on committed state and rework starts from a known
+// point. Changes already committed by the agent are left untouched.
+func (a *App) commitWorktreeOnComplete(issueNum int, wt string) {
+	hasChanges, err := worktreeHasChanges(wt)
+	if err != nil {
+		fmt.Fprintf(a.Err, "warning: could not check worktree status for commit: %v\n", err)
+		return
+	}
+	if !hasChanges {
+		return
+	}
+
+	addCmd := exec.Command("git", "-C", wt, "add", "-A")
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(a.Err, "warning: git add failed during completion commit for issue %d: %v\n%s\n", issueNum, err, out)
+		return
+	}
+
+	commitMsg := fmt.Sprintf("delegate: commit agent output for issue #%d", issueNum)
+	commitCmd := exec.Command("git", "-C", wt, "commit", "--no-verify", "-m", commitMsg)
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		if !strings.Contains(string(out), "nothing to commit") {
+			fmt.Fprintf(a.Err, "warning: git commit failed during completion for issue %d: %v\n%s\n", issueNum, err, out)
+		}
+		return
+	}
+
+	revCmd := exec.Command("git", "-C", wt, "rev-parse", "--short", "HEAD")
+	if revOut, err := revCmd.Output(); err == nil {
+		fmt.Fprintf(a.Err, "Committed agent output for issue #%d (%s)\n", issueNum, strings.TrimSpace(string(revOut)))
 	}
 }
 

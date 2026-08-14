@@ -2048,6 +2048,226 @@ func TestDelegateAsyncDispatch(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 }
 
+// --- Uncommitted change preservation tests (#146) ---
+
+// TestCreateWorktreePreservesUncommittedChanges verifies that re-delegating
+// onto a worktree with uncommitted changes does not silently discard them.
+// The changes should be committed to a scratch/N branch so they survive.
+func TestCreateWorktreePreservesUncommittedChanges(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	app := &App{MillDir: dir, Err: new(bytes.Buffer)}
+
+	// First creation
+	wt, err := app.createWorktree(61)
+	if err != nil {
+		t.Fatalf("first createWorktree failed: %v", err)
+	}
+
+	// Simulate uncommitted agent output
+	outputFile := filepath.Join(wt, "feature.go")
+	if err := os.WriteFile(outputFile, []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-delegate: createWorktree should preserve changes in a scratch ref
+	wt2, err := app.createWorktree(61)
+	if err != nil {
+		t.Fatalf("second createWorktree failed: %v", err)
+	}
+
+	// The file should NOT be in the fresh worktree
+	if _, err := os.Stat(filepath.Join(wt2, "feature.go")); !os.IsNotExist(err) {
+		t.Error("file should not exist in fresh worktree after re-delegation")
+	}
+
+	// The scratch branch should exist with the file content
+	scratch := scratchBranchName(61)
+	branchCmd := exec.Command("git", "-C", dir, "branch", "--list", scratch)
+	out, err := branchCmd.Output()
+	if err != nil {
+		t.Fatalf("git branch --list failed: %v", err)
+	}
+	if !strings.Contains(string(out), scratch) {
+		t.Fatalf("expected scratch branch %s to exist", scratch)
+	}
+
+	showCmd := exec.Command("git", "-C", dir, "show", scratch+":feature.go")
+	showOut, err := showCmd.Output()
+	if err != nil {
+		t.Fatalf("git show failed: %v\n%s", err, showOut)
+	}
+	if string(showOut) != "package main\n" {
+		t.Errorf("expected preserved file content 'package main\\n', got: %q", string(showOut))
+	}
+
+	// Verify preservation message was printed
+	errBuf := app.Err.(*bytes.Buffer)
+	if !strings.Contains(errBuf.String(), "Preserving uncommitted changes in branch") {
+		t.Error("expected preservation message in stderr")
+	}
+}
+
+// TestCreateWorktreeNoChangesDoesNotScratch verifies that re-delegating onto
+// a clean worktree (no uncommitted changes) does not create a scratch ref.
+func TestCreateWorktreeNoChangesDoesNotScratch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	app := &App{MillDir: dir, Err: new(bytes.Buffer)}
+
+	// First creation
+	wt, err := app.createWorktree(62)
+	if err != nil {
+		t.Fatalf("first createWorktree failed: %v", err)
+	}
+
+	// Commit the PID file so the worktree is clean
+	runGit(t, wt, "add", ".")
+	runGit(t, wt, "commit", "-m", "initial")
+
+	// Second creation — worktree is clean, no scratch ref should be created
+	_, err = app.createWorktree(62)
+	if err != nil {
+		t.Fatalf("second createWorktree failed: %v", err)
+	}
+
+	branchCmd := exec.Command("git", "-C", dir, "branch", "--list", scratchBranchName(62))
+	out, _ := branchCmd.Output()
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("expected no scratch branch for clean worktree, got: %s", out)
+	}
+}
+
+// TestCommitWorktreeOnComplete verifies that changes are committed to the
+// agent branch after delegation completes.
+func TestCommitWorktreeOnComplete(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	app := &App{MillDir: dir, Err: new(bytes.Buffer)}
+
+	wt, err := app.createWorktree(63)
+	if err != nil {
+		t.Fatalf("createWorktree failed: %v", err)
+	}
+
+	// Write uncommitted changes
+	featureFile := filepath.Join(wt, "feature.go")
+	if err := os.WriteFile(featureFile, []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit on completion
+	app.commitWorktreeOnComplete(63, wt)
+
+	// Verify the file is committed
+	cmd := exec.Command("git", "-C", wt, "log", "--oneline", "-1")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "commit agent output") {
+		t.Errorf("expected commit message about agent output, got: %s", out)
+	}
+
+	// Verify worktree is now clean (ignoring .mill/ bookkeeping)
+	statusCmd := exec.Command("git", "-C", wt, "status", "--porcelain")
+	statusOut, _ := statusCmd.Output()
+	trackedChanges := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(statusOut)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		trackedChanges = append(trackedChanges, line)
+	}
+	if len(trackedChanges) > 0 {
+		t.Errorf("expected clean worktree after commit, got: %s", statusOut)
+	}
+}
+
+// TestDelegateReDelegationPreservesUncommittedChanges is the acceptance
+// test (#146): delegate, leave changes uncommitted, delegate again, assert
+// the changes survive.
+func TestDelegateReDelegationPreservesUncommittedChanges(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	writeOnce := false
+	fa := &fakeAdapter{
+		dispatchFn: func(opts adapter.DispatchOpts) (adapter.Session, error) {
+			if !writeOnce {
+				writeOnce = true
+				outputFile := filepath.Join(opts.Worktree, "agent_output.go")
+				if err := os.WriteFile(outputFile, []byte("package main\n// agent output\n"), 0644); err != nil {
+					return nil, err
+				}
+			}
+			return &fakeSession{result: okResult()}, nil
+		},
+	}
+	buf := new(bytes.Buffer)
+	app := &App{Adapter: fa, MillDir: dir, Out: buf, Err: buf, IssueReader: defaultIssueReader}
+
+	// First delegation
+	if err := app.Run("delegate", "--wait", "116"); err != nil {
+		t.Fatalf("first delegate returned error: %v", err)
+	}
+
+	wt := app.worktreePath(116)
+
+	// Leave changes uncommitted after delegation
+	extraFile := filepath.Join(wt, "uncommitted_extra.go")
+	if err := os.WriteFile(extraFile, []byte("package main\n// extra\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second delegation — should preserve uncommitted changes
+	buf.Reset()
+	if err := app.Run("delegate", "--wait", "116"); err != nil {
+		t.Fatalf("second delegate returned error: %v\nstderr: %s", err, buf.String())
+	}
+
+	// The uncommitted file should be preserved in the scratch ref
+	scratch := scratchBranchName(116)
+	branchCmd := exec.Command("git", "-C", dir, "branch", "--list", scratch)
+	out, err := branchCmd.Output()
+	if err != nil {
+		t.Fatalf("git branch --list failed: %v", err)
+	}
+	if !strings.Contains(string(out), scratch) {
+		t.Fatalf("expected scratch branch %s to exist after re-delegation", scratch)
+	}
+
+	showCmd := exec.Command("git", "-C", dir, "show", scratch+":uncommitted_extra.go")
+	showOut, err := showCmd.Output()
+	if err != nil {
+		t.Fatalf("git show failed for preserved file: %v\n%s", err, showOut)
+	}
+	if string(showOut) != "package main\n// extra\n" {
+		t.Errorf("expected preserved file content, got: %q", string(showOut))
+	}
+
+	// Verify preservation message was printed
+	if !strings.Contains(buf.String(), "Preserving uncommitted changes in branch") {
+		t.Error("expected preservation message in output")
+	}
+}
+
 func TestRunRecursionHandoffNilEngineIsNoop(t *testing.T) {
 	buf := new(bytes.Buffer)
 	app := &App{MillDir: t.TempDir(), Out: buf, Err: buf}

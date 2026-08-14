@@ -156,7 +156,7 @@ Usage:
   role <get|set>     Show or set the active role (staff|pm)
   watch              Wait for task state changes (blocks until all settle)
   compact [--dry-run]  Compact session context to save tokens
-  clean [--all]      Remove completed/failed worktrees (--all for factory reset)
+  clean [--all] [--force]  Remove completed/failed worktrees (--all for factory reset, --force to override unmerged check)
   slots              Show slot/concurrency status
   version            Print mill version
 `)

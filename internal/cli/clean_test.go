@@ -306,3 +306,196 @@ func TestRunCleanFlagHelp(t *testing.T) {
 		t.Errorf("expected usage text, got: %s", output)
 	}
 }
+
+func TestCleanRefusesUnmergedWorktree(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	d := filepath.Join(dir, ".mill")
+
+	// Create a real git worktree on branch agent/7.
+	wtDir := filepath.Join(d, "worktrees", "issue-7")
+	cmd := exec.Command("git", "worktree", "add", "-b", "agent/7", wtDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add failed: %v\n%s", err, out)
+	}
+
+	// Make an unmerged commit in the worktree.
+	if err := os.WriteFile(filepath.Join(wtDir, "unmerged.txt"), []byte("work"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtDir, "add", "unmerged.txt")
+	runGit(t, wtDir, "commit", "-m", "unmerged work")
+
+	// Create state with a done task for issue 7.
+	s := state.New()
+	s.UpsertTask(domain.Task{ID: "t7", Issue: 7, Status: domain.TaskDone})
+	if err := s.Save(filepath.Join(d, "state.json")); err != nil {
+		t.Fatalf("failed to save state: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: d, Out: buf, Err: buf}
+	if err := app.runClean(nil); err != nil {
+		t.Fatalf("runClean failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "unmerged") {
+		t.Errorf("expected output to mention unmerged, got: %s", output)
+	}
+	if !strings.Contains(output, "--force") {
+		t.Errorf("expected output to mention --force, got: %s", output)
+	}
+
+	// Worktree should still exist.
+	if _, err := os.Stat(wtDir); os.IsNotExist(err) {
+		t.Error("expected worktree with unmerged commits to be preserved")
+	}
+
+	// Branch should still exist.
+	branchCmd := exec.Command("git", "branch", "--list", "agent/7")
+	branchCmd.Dir = dir
+	out, _ := branchCmd.Output()
+	if !strings.Contains(string(out), "agent/7") {
+		t.Error("expected branch agent/7 to still exist")
+	}
+}
+
+func TestCleanForceRemovesUnmergedWorktree(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	d := filepath.Join(dir, ".mill")
+
+	// Create a real git worktree on branch agent/8.
+	wtDir := filepath.Join(d, "worktrees", "issue-8")
+	cmd := exec.Command("git", "worktree", "add", "-b", "agent/8", wtDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add failed: %v\n%s", err, out)
+	}
+
+	// Make an unmerged commit in the worktree.
+	if err := os.WriteFile(filepath.Join(wtDir, "unmerged.txt"), []byte("work"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtDir, "add", "unmerged.txt")
+	runGit(t, wtDir, "commit", "-m", "unmerged work")
+
+	// Create state with a done task for issue 8.
+	s := state.New()
+	s.UpsertTask(domain.Task{ID: "t8", Issue: 8, Status: domain.TaskDone})
+	if err := s.Save(filepath.Join(d, "state.json")); err != nil {
+		t.Fatalf("failed to save state: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: d, Out: buf, Err: buf}
+	if err := app.runClean([]string{"--force"}); err != nil {
+		t.Fatalf("runClean --force failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Cleaned 1 worktrees") {
+		t.Errorf("expected 'Cleaned 1 worktrees', got: %s", output)
+	}
+
+	// Worktree should be removed.
+	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
+		t.Error("expected worktree to be removed with --force")
+	}
+
+	// Branch should be deleted.
+	branchCmd := exec.Command("git", "branch", "--list", "agent/8")
+	branchCmd.Dir = dir
+	out, _ := branchCmd.Output()
+	if strings.Contains(string(out), "agent/8") {
+		t.Error("expected branch agent/8 to be deleted with --force")
+	}
+}
+
+func TestCleanRemovesMergedWorktree(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	d := filepath.Join(dir, ".mill")
+
+	// Create a real git worktree on branch agent/9.
+	wtDir := filepath.Join(d, "worktrees", "issue-9")
+	cmd := exec.Command("git", "worktree", "add", "-b", "agent/9", wtDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add failed: %v\n%s", err, out)
+	}
+
+	// Make a commit and merge it back.
+	if err := os.WriteFile(filepath.Join(wtDir, "merged.txt"), []byte("done"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtDir, "add", "merged.txt")
+	runGit(t, wtDir, "commit", "-m", "merged work")
+	runGit(t, dir, "merge", "agent/9", "--no-ff", "-m", "merge agent/9")
+
+	// Create state with a done task for issue 9.
+	s := state.New()
+	s.UpsertTask(domain.Task{ID: "t9", Issue: 9, Status: domain.TaskDone})
+	if err := s.Save(filepath.Join(d, "state.json")); err != nil {
+		t.Fatalf("failed to save state: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: d, Out: buf, Err: buf}
+	if err := app.runClean(nil); err != nil {
+		t.Fatalf("runClean failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Cleaned 1 worktrees") {
+		t.Errorf("expected 'Cleaned 1 worktrees', got: %s", output)
+	}
+
+	// Worktree should be removed.
+	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
+		t.Error("expected merged worktree to be removed")
+	}
+}
+
+func TestCleanAllRemovesOrphanBranches(t *testing.T) {
+	dir := t.TempDir()
+	setupTestGitRepo(t, dir)
+
+	d := filepath.Join(dir, ".mill")
+
+	// Create orphan agent/* and scratch/* branches.
+	runGit(t, dir, "checkout", "-b", "agent/100")
+	runGit(t, dir, "checkout", "feature")
+	runGit(t, dir, "checkout", "-b", "agent/200")
+	runGit(t, dir, "checkout", "feature")
+	runGit(t, dir, "checkout", "-b", "scratch/100")
+	runGit(t, dir, "checkout", "feature")
+
+	// Create empty state (no tasks).
+	s := state.New()
+	statePath := filepath.Join(d, "state.json")
+	if err := s.Save(statePath); err != nil {
+		t.Fatalf("failed to save state: %v", err)
+	}
+
+	// Create the worktrees directory so ReadDir doesn't fail.
+	os.MkdirAll(filepath.Join(d, "worktrees"), 0755)
+
+	buf := new(bytes.Buffer)
+	app := &App{MillDir: d, Out: buf, Err: buf, In: strings.NewReader("y\n")}
+	if err := app.runClean([]string{"--all"}); err != nil {
+		t.Fatalf("runClean --all failed: %v", err)
+	}
+
+	// Orphan branches should be removed.
+	for _, branch := range []string{"agent/100", "agent/200", "scratch/100"} {
+		cmd := exec.Command("git", "branch", "--list", branch)
+		cmd.Dir = dir
+		out, _ := cmd.Output()
+		if strings.Contains(string(out), branch) {
+			t.Errorf("expected orphan branch %s to be removed", branch)
+		}
+	}
+}

@@ -315,6 +315,9 @@ func (a *App) runDelegate(args []string) error {
 		a.commitWorktreeOnComplete(issueNum, wt)
 		if isIrrecoverable(classification) {
 			irrecoverable = true
+		} else {
+			// Clean up worktree if the branch was merged or has no commits.
+			a.cleanupWorktreeIfSafe(issueNum, wt)
 		}
 		// Post-loop recursion handoff: when the produce-review loop ends with
 		// CLASS_OK and the target role delegates to subordinates, hand the
@@ -339,6 +342,9 @@ func (a *App) runDelegate(args []string) error {
 		a.commitWorktreeOnComplete(issueNum, wt)
 		if isIrrecoverable(classification) {
 			a.cleanupWorktree(issueNum)
+		} else {
+			// Clean up worktree if the branch was merged or has no commits.
+			a.cleanupWorktreeIfSafe(issueNum, wt)
 		}
 		// Post-loop recursion handoff: trigger in async path too so the
 		// delegation chain fires regardless of --wait.
@@ -538,6 +544,46 @@ func (a *App) cleanupWorktree(issueNum int) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(a.Err, "cleanup: git branch -D failed: %v\n%s\n", err, out)
 	}
+}
+
+// cleanupWorktreeIfSafe removes the worktree and its branch when the
+// delegation's work has been merged into the base branch or the branch has
+// no commits beyond the base. This is called after commitWorktreeOnComplete
+// so the agent's output is committed before we inspect.
+func (a *App) cleanupWorktreeIfSafe(issueNum int, wt string) {
+	branch := a.worktreeBranch(issueNum)
+
+	// Check if the branch is merged into the current HEAD branch.
+	headCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	headOut, err := headCmd.Output()
+	if err != nil {
+		return
+	}
+	base := strings.TrimSpace(string(headOut))
+	if base == "" || base == "HEAD" {
+		return
+	}
+
+	// Is the branch merged?
+	mergedCmd := exec.Command("git", "branch", "--merged", base)
+	mergedOut, err := mergedCmd.Output()
+	if err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(mergedOut)), "\n") {
+			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "* "))
+			if line == branch {
+				a.cleanupWorktree(issueNum)
+				return
+			}
+		}
+	}
+
+	// Does the branch have zero commits beyond the base?
+	if !worktreeBranchHasUnmergedCommits(branch) {
+		a.cleanupWorktree(issueNum)
+		return
+	}
+
+	// Branch has unmerged work — leave it for `mill clean` or manual review.
 }
 
 // commitWorktreeOnComplete commits all changes in the worktree to the agent

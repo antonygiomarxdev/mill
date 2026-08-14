@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -141,10 +142,33 @@ echo '{"type":"result","subtype":"success","sessionId":"real-session-1","stopRea
 func TestCommandCodeDispatchParseJSONOutput(t *testing.T) {
 	dir := t.TempDir()
 
+	// Set up git repo with a base commit so countCommitsInWorktree works.
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "test@test.com")
+	runGit(t, dir, "config", "user.name", "Test")
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("initial"), 0o644)
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial commit")
+
+	// Capture base commit before the agent runs.
+	baseOut, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("failed to get base commit: %v", err)
+	}
+	baseCommit := strings.TrimSpace(string(baseOut))
+
+	// The fake cmd echoes NDJSON containing three "git commit" mentions in
+	// tool descriptions (which the old countCommits would count as 3) AND
+	// makes two actual git commits. This verifies Commits comes from git
+	// rev-list, not from substring counting.
 	fakeBin := filepath.Join(dir, "cmd")
 	script := `#!/bin/sh
-echo '{"type":"event","event":{"type":"tool_running","toolName":"shell","description":"git commit -m test"}}'
+echo '{"type":"event","event":{"type":"tool_running","toolName":"shell","description":"git commit -m fix1"}}'
+echo '{"type":"event","event":{"type":"tool_running","toolName":"shell","description":"git commit -m fix2"}}'
+echo '{"type":"event","event":{"type":"tool_running","toolName":"shell","description":"git commit -m fix3"}}'
 echo '{"type":"result","subtype":"success","sessionId":"sess-abc","stopReason":"end_turn","finalText":"APPROVED"}'
+git commit --allow-empty -m "commit 1"
+git commit --allow-empty -m "commit 2"
 `
 	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write fake binary: %v", err)
@@ -155,10 +179,11 @@ echo '{"type":"result","subtype":"success","sessionId":"sess-abc","stopReason":"
 	a := &CommandCodeAdapter{}
 
 	opts := DispatchOpts{
-		Worktree: t.TempDir(),
-		Prompt:   "do work",
-		Model:    "gpt-5",
-		MaxTurns: 5,
+		Worktree:   dir,
+		BaseCommit: baseCommit,
+		Prompt:     "do work",
+		Model:      "gpt-5",
+		MaxTurns:   5,
 	}
 
 	s, err := a.Dispatch(opts)
@@ -171,8 +196,9 @@ echo '{"type":"result","subtype":"success","sessionId":"sess-abc","stopReason":"
 		t.Fatalf("Wait failed: %v", err)
 	}
 
-	if result.Commits != 1 {
-		t.Errorf("expected 1 commit, got %d", result.Commits)
+	// Commits should be 2 (actual git commits), NOT 3 (substring count).
+	if result.Commits != 2 {
+		t.Errorf("expected 2 commits from git, got %d", result.Commits)
 	}
 
 	if !strings.Contains(result.Output, "APPROVED") {
@@ -290,22 +316,163 @@ func TestParseJSONOutputInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestCountCommits(t *testing.T) {
-	output := `some text
-{"type":"event","event":{"type":"tool_running","toolName":"shell","description":"git commit -m fix1"}}
-{"type":"event","event":{"type":"tool_running","toolName":"shell","description":"git commit -m fix2"}}
-more text`
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
 
-	if got := countCommits(output); got != 2 {
+func TestCountCommitsInWorktree(t *testing.T) {
+	// Empty worktree or base commit returns 0 without invoking git.
+	if got := countCommitsInWorktree("", "abc123"); got != 0 {
+		t.Errorf("expected 0 for empty worktree, got %d", got)
+	}
+	if got := countCommitsInWorktree(t.TempDir(), ""); got != 0 {
+		t.Errorf("expected 0 for empty baseCommit, got %d", got)
+	}
+
+	// Non-git directory: git fails, function returns 0.
+	nonGitDir := t.TempDir()
+	if got := countCommitsInWorktree(nonGitDir, "abc123"); got != 0 {
+		t.Errorf("expected 0 for non-git directory, got %d", got)
+	}
+
+	// Valid git repo: two commits on top of base should be counted.
+	gitDir := t.TempDir()
+	runGit(t, gitDir, "init")
+	runGit(t, gitDir, "config", "user.email", "test@test.com")
+	runGit(t, gitDir, "config", "user.name", "Test")
+	os.WriteFile(filepath.Join(gitDir, "f.txt"), []byte("x"), 0o644)
+	runGit(t, gitDir, "add", ".")
+	runGit(t, gitDir, "commit", "-m", "base")
+
+	baseOut, err := exec.Command("git", "-C", gitDir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("failed to get base commit: %v", err)
+	}
+	base := strings.TrimSpace(string(baseOut))
+
+	if got := countCommitsInWorktree(gitDir, base); got != 0 {
+		t.Errorf("expected 0 new commits, got %d", got)
+	}
+
+	runGit(t, gitDir, "commit", "--allow-empty", "-m", "c1")
+	runGit(t, gitDir, "commit", "--allow-empty", "-m", "c2")
+
+	if got := countCommitsInWorktree(gitDir, base); got != 2 {
 		t.Errorf("expected 2 commits, got %d", got)
 	}
 }
 
-func TestCountCommitsZero(t *testing.T) {
-	output := "no commits here"
+// TestCountCommitsInWorktreeInvalidBase ensures the function returns 0
+// when the base commit is a non-existent hash.
+func TestCountCommitsInWorktreeInvalidBase(t *testing.T) {
+	gitDir := t.TempDir()
+	runGit(t, gitDir, "init")
+	runGit(t, gitDir, "config", "user.email", "test@test.com")
+	runGit(t, gitDir, "config", "user.name", "Test")
 
-	if got := countCommits(output); got != 0 {
-		t.Errorf("expected 0 commits, got %d", got)
+	// A non-existent base commit causes git to error.
+	if got := countCommitsInWorktree(gitDir, "nonexistent0123456789abcdef"); got != 0 {
+		t.Errorf("expected 0 for invalid base commit, got %d", got)
+	}
+}
+
+func TestParseJSONOutputFromMessageFrame(t *testing.T) {
+	// The real cmd CLI emits "type":"message" frames with text in
+	// message.content[].text, NOT "type":"result" with finalText.
+	output := `{"type":"session","version":3,"id":"6aeac1e8","timestamp":"2026-08-14T00:00:00Z"}
+{"type":"session_info","id":"0cd99e2c","parentId":null,"timestamp":"2026-08-14T00:00:01Z","name":"test"}
+{"type":"message","id":"1","parentId":"0cd99e2c","timestamp":"2026-08-14T00:00:02Z","message":{"role":"user","content":[{"type":"text","text":"fix the bug"}]}}
+{"type":"message","id":"2","parentId":"1","timestamp":"2026-08-14T00:00:03Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"analyzing"},{"type":"text","text":"APPROVED - task complete"}]}}`
+
+	text, _ := parseJSONOutput(output)
+
+	if !strings.Contains(text, "APPROVED - task complete") {
+		t.Errorf("expected text to contain APPROVED, got: %q", text)
+	}
+}
+
+func TestDispatchCapturesOutputStderrAndCommits(t *testing.T) {
+	dir := t.TempDir()
+
+	// Initialize a git repo with one base commit.
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "test@test.com")
+	runGit(t, dir, "config", "user.name", "Test")
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("initial"), 0o644)
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial commit")
+
+	// Capture the base commit (main repo HEAD) before the worktree is used.
+	baseOut, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("failed to get base commit: %v", err)
+	}
+	baseCommit := strings.TrimSpace(string(baseOut))
+
+	// Fake cmd that mimics the real cmd CLI: writes NDJSON with message frames
+	// (containing text in message.content[].text), writes to stderr, makes two
+	// actual git commits, and exits non-zero.
+	fakeBin := filepath.Join(dir, "cmd")
+	script := `#!/bin/sh
+echo '{"type":"session","version":3,"id":"sess-1","timestamp":"2026-08-14T00:00:00Z"}'
+echo '{"type":"message","id":"m1","timestamp":"2026-08-14T00:00:01Z","message":{"role":"user","content":[{"type":"text","text":"fix the bug"}]}}'
+echo '{"type":"message","id":"m2","timestamp":"2026-08-14T00:00:02Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"analyzing"},{"type":"text","text":"APPROVED - work done"}]}}'
+echo "ERROR: agent crashed" >&2
+git commit --allow-empty -m "agent commit 1"
+git commit --allow-empty -m "agent commit 2"
+exit 1
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write fake binary: %v", err)
+	}
+
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	a := &CommandCodeAdapter{}
+	opts := DispatchOpts{
+		Worktree:   dir,
+		BaseCommit: baseCommit,
+		Prompt:     "fix the bug",
+		Model:      "test-model",
+		MaxTurns:   10,
+	}
+
+	s, err := a.Dispatch(opts)
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	result, err := s.Wait()
+	if err != nil {
+		t.Fatalf("Wait failed: %v", err)
+	}
+
+	// Output must contain the agent's actual text, not be empty.
+	if !strings.Contains(result.Output, "APPROVED - work done") {
+		t.Errorf("expected Output to contain agent text, got: %q", result.Output)
+	}
+
+	// Stderr must contain the known stderr text.
+	if !strings.Contains(result.Stderr, "ERROR: agent crashed") {
+		t.Errorf("expected Stderr to contain error text, got: %q", result.Stderr)
+	}
+
+	// Commits must be 2 (from git rev-list), not from substring counting.
+	if result.Commits != 2 {
+		t.Errorf("expected 2 commits from git, got %d", result.Commits)
+	}
+
+	// Exit code must reflect the child's non-zero exit.
+	if result.ExitCode != 1 {
+		t.Errorf("expected ExitCode 1, got %d", result.ExitCode)
 	}
 }
 

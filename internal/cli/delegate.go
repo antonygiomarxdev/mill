@@ -207,6 +207,14 @@ func (a *App) runDelegate(args []string) error {
 	if err := ledger.Append(a.ledgerPath(issueNum), dispatchEntry); err != nil {
 		return fmt.Errorf("failed to append ledger entry: %w", err)
 	}
+	// Capture the base commit (main repo HEAD) before creating the worktree,
+	// so the adapter can count commits made on the worktree's branch.
+	baseBytes, berr := exec.Command("git", "rev-parse", "HEAD").Output()
+	if berr != nil {
+		return fmt.Errorf("failed to capture base commit: %w", berr)
+	}
+	baseCommit := strings.TrimSpace(string(baseBytes))
+
 	// Create a real git worktree for branch isolation.
 	wt, err := a.createWorktree(issueNum)
 	if err != nil {
@@ -247,6 +255,7 @@ func (a *App) runDelegate(args []string) error {
 	prompt := buildIssueContextPrompt(issueNum, issueBody, ac, targetRole, caps)
 	opts := adapter.DispatchOpts{
 		Worktree:   wt,
+		BaseCommit: baseCommit,
 		Prompt:     prompt,
 		Model:      modelChain[0],
 		ModelChain: modelChain,

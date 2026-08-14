@@ -2,7 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -140,7 +140,10 @@ func (a *App) resolveModel(targetRole string, modelOverride string, cfg config.C
 		}
 		tier := modelOverride
 		for !modelAvailableFn(model) {
-			log.Printf("Model tier %q unavailable, escalating", tier)
+			a.logger().Debug("model tier unavailable, escalating",
+				slog.String("tier", tier),
+				slog.String("model", model),
+			)
 			nextTier, err := escalateTier(tier)
 			if err != nil {
 				if m, found := a.adapterModelFallback(tier); found {
@@ -295,7 +298,10 @@ func (a *App) resolveModel(targetRole string, modelOverride string, cfg config.C
 
 	// Step 6: Availability check with escalation
 	for !modelAvailableFn(model) {
-		log.Printf("Model tier %q unavailable, escalating", tier)
+		a.logger().Debug("model tier unavailable, escalating",
+			slog.String("tier", tier),
+			slog.String("model", model),
+		)
 		nextTier, err := escalateTier(tier)
 		if err != nil {
 			if m, found := a.adapterModelFallback(tier); found {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,10 +42,12 @@ func (a *App) runDelegate(args []string) error {
 	var wait bool
 	var priority bool
 	var maxTurns int
+	var logLevelFlag string
 	fs.BoolVar(&priority, "priority", false, "preempt next available slot (staff only)")
 	fs.StringVar(&model, "model", modelFlag, "model to use (default: from config)")
 	fs.IntVar(&maxTurns, "max-turns", 100, "max conversation turns")
 	fs.BoolVar(&wait, "wait", false, "wait for agent to finish (default: async)")
+	fs.StringVar(&logLevelFlag, "log-level", "", "log level (debug|info|warn|error)")
 
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -149,6 +152,34 @@ func (a *App) runDelegate(args []string) error {
 		return err
 	}
 
+	// Set up per-issue structured logging: JSON to .mill/logs/<issue>.jsonl
+	// and human-readable text to stderr. Falls back to the default logger
+	// (text to stderr) when the file cannot be opened.
+	var logFile *os.File
+	{
+		level := slogLevelFromString(logLevelFlag)
+		if logLevelFlag == "" {
+			level = logLevelFromEnv()
+		}
+		issueLogger, lf, lerr := a.newIssueLogger(issueNum, level)
+		if lerr != nil {
+			fmt.Fprintf(a.Err, "warning: failed to open log file for issue %d: %v\n", issueNum, lerr)
+			logFile = nil
+		} else {
+			a.Logger = issueLogger
+			logFile = lf
+		}
+	}
+
+	// Record binary provenance once per run so a stale binary is visible
+	// in the log (#137).
+	a.logger().Info("mill run started",
+		slog.String("binary", binaryProvenance()),
+		slog.Int("issue", issueNum),
+		slog.String("role", targetRole),
+		slog.String("model", modelChain[0]),
+	)
+
 	// Initialize slot manager if not already set.
 	// mill.yml's concurrency.max-slots takes precedence over config.json.
 	if a.slots == nil {
@@ -222,6 +253,17 @@ func (a *App) runDelegate(args []string) error {
 		MaxTurns:   maxTurns,
 		Budget:     cfg.Budget,
 	}
+	// Record the dispatched prompt (hash + length) so an agent that failed
+	// can be distinguished from a brief that never arrived.
+	a.logger().Info("dispatch",
+		slog.String("phase", "produce"),
+		slog.Int("issue", issueNum),
+		slog.String("role", targetRole),
+		slog.String("model", opts.Model),
+		slog.Int("max_turns", opts.MaxTurns),
+		slog.Int("prompt_length", len(prompt)),
+		slog.String("prompt_sha256", promptHash(prompt)),
+	)
 	// Acquire slot before dispatching (blocks if all slots occupied).
 	ctx := context.Background()
 	maxSlots := MaxSlotsFromConfig(cfg)
@@ -255,6 +297,9 @@ func (a *App) runDelegate(args []string) error {
 
 	if wait {
 		defer a.slots.Release()
+		if logFile != nil {
+			defer logFile.Close()
+		}
 		classification, err := runDispatchLoop54(a, issueNum, taskID, targetRole, modelOverride, opts, issueBody, labels, cfg, caps)
 		if isIrrecoverable(classification) {
 			irrecoverable = true
@@ -273,6 +318,9 @@ func (a *App) runDelegate(args []string) error {
 	// Async: fire and forget. Agent runs in background goroutine.
 	go func() {
 		defer a.slots.Release()
+		if logFile != nil {
+			defer logFile.Close()
+		}
 		classification, _ := runDispatchLoop54(a, issueNum, taskID, targetRole, modelOverride, opts, issueBody, labels, cfg, caps)
 		if isIrrecoverable(classification) {
 			a.cleanupWorktree(issueNum)
@@ -405,6 +453,7 @@ func (a *App) retryDispatch(
 	phase string,
 	issueNum int,
 	task domain.Task,
+	targetRole string,
 	cfg config.Config,
 ) (adapter.SessionResult, domain.FailureClass, error) {
 	chain := opts.ModelChain
@@ -454,6 +503,9 @@ func (a *App) retryDispatch(
 			}
 			return adapter.SessionResult{}, domain.EXECUTION_FAILURE, fmt.Errorf("%s session failed: %w", phase, err)
 		}
+
+		// Persist the full SessionResult per dispatch attempt.
+		a.logSessionResult(phase, model, targetRole, task.Round, result)
 
 		// Auto-compact session context if enabled and near threshold.
 		a.maybeAutoCompactSession(session, opts.Model, issueNum, opts.Worktree, cfg)

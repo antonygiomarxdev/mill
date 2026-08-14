@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +88,19 @@ func runDispatchLoop54(a *App, issueNum int, taskID string, targetRole string, m
 		return "", fmt.Errorf("failed to resolve review model: %w", err)
 	}
 
+	// Record the model resolved per phase — this is the only proof that the
+	// cost model is or is not working (#116).
+	a.logger().Info("model resolved",
+		slog.String("phase", "produce"),
+		slog.String("role", targetRole),
+		slog.String("model", produceModel),
+	)
+	a.logger().Info("model resolved",
+		slog.String("phase", "review"),
+		slog.String("role", "reviewer"),
+		slog.String("model", reviewModel),
+	)
+
 	maxRounds := cfg.MaxRounds
 	if maxRounds <= 0 {
 		maxRounds = 4
@@ -105,7 +119,14 @@ func runDispatchLoop54(a *App, issueNum int, taskID string, targetRole string, m
 			produceOpts.Prompt = fmt.Sprintf("REWORK REQUESTED:\n%s\n\nOriginal task:\n%s", reworkFeedback, opts.Prompt)
 		}
 		produceOpts.Model = produceModel
-		produceResult, produceClass, perr := a.retryDispatch(produceOpts, "produce", issueNum, task, cfg)
+		// Record the dispatched prompt (hash + length) for this produce attempt.
+		a.logger().Debug("dispatching produce session",
+			slog.String("phase", "produce"),
+			slog.String("model", produceModel),
+			slog.Int("prompt_length", len(produceOpts.Prompt)),
+			slog.String("prompt_sha256", promptHash(produceOpts.Prompt)),
+		)
+		produceResult, produceClass, perr := a.retryDispatch(produceOpts, "produce", issueNum, task, targetRole, cfg)
 
 		if perr != nil {
 			finalClass = domain.EXECUTION_FAILURE
@@ -187,7 +208,14 @@ func runDispatchLoop54(a *App, issueNum int, taskID string, targetRole string, m
 						MaxTurns:   opts.MaxTurns,
 						Budget:     opts.Budget,
 					}
-					reviewResult, reviewClass, rerr := a.retryDispatch(reviewOpts, "review", issueNum, task, cfg)
+					// Record the dispatched review prompt (hash + length).
+					a.logger().Debug("dispatching review session",
+						slog.String("phase", "review"),
+						slog.String("model", reviewModel),
+						slog.Int("prompt_length", len(reviewPrompt)),
+						slog.String("prompt_sha256", promptHash(reviewPrompt)),
+					)
+					reviewResult, reviewClass, rerr := a.retryDispatch(reviewOpts, "review", issueNum, task, targetRole, cfg)
 
 					if rerr != nil {
 						finalClass = domain.EXECUTION_FAILURE

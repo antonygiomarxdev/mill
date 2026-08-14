@@ -6,6 +6,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -23,6 +24,7 @@ type App struct {
 	Out         io.Writer
 	Err         io.Writer
 	In          io.Reader
+	Logger      *slog.Logger
 	slots       *slots.Manager
 	IssueReader func(issueNum int) (body string, labels []string, err error)
 	// Recursion is the recursive delegation engine, initialized only when
@@ -41,6 +43,7 @@ func NewApp() *App {
 		MillDir:     ".mill",
 		Out:         os.Stdout,
 		Err:         os.Stderr,
+		Logger:      slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevelFromEnv()})),
 		IssueReader: issue.ReadBody,
 	}
 }

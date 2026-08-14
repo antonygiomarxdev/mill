@@ -80,6 +80,9 @@ func TestNewApp(t *testing.T) {
 	if app.Err == nil {
 		t.Error("expected non-nil Err")
 	}
+	if app.Logger == nil {
+		t.Error("expected non-nil Logger")
+	}
 	if app.MillDir != ".mill" {
 		t.Errorf("expected MillDir %q, got %q", ".mill", app.MillDir)
 	}

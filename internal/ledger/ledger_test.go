@@ -660,6 +660,96 @@ func TestAppendParentDepthFieldsOmitEmpty(t *testing.T) {
 	}
 }
 
+func TestReadEntriesNonExistentFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "no-such-file.jsonl")
+
+	entries, err := ReadEntries(path)
+	if err != nil {
+		t.Fatalf("expected nil error for non-existent file, got: %v", err)
+	}
+	if entries != nil {
+		t.Errorf("expected nil entries for non-existent file, got %d", len(entries))
+	}
+}
+
+func TestReadEntriesPermissionDenied(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("permission check ineffective as root")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "locked.jsonl")
+	if err := os.WriteFile(path, []byte(`{"issue":1}`), 0o000); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	_, err := ReadEntries(path)
+	if err == nil {
+		t.Fatal("expected error when file is unreadable, got nil")
+	}
+}
+
+func TestReadEntriesSkipsEmptyLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger.jsonl")
+
+	content := "{\"issue\":1,\"event\":\"a\",\"status\":\"ok\"}\n\n{\"issue\":2,\"event\":\"b\",\"status\":\"ok\"}\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	entries, err := ReadEntries(path)
+	if err != nil {
+		t.Fatalf("ReadEntries failed: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries (empty lines skipped), got %d", len(entries))
+	}
+	if entries[0].Issue != 1 || entries[1].Issue != 2 {
+		t.Errorf("unexpected issues: %d, %d", entries[0].Issue, entries[1].Issue)
+	}
+}
+
+func TestReadEntriesSkipsMalformedLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger.jsonl")
+
+	content := "{\"issue\":1,\"event\":\"a\",\"status\":\"ok\"}\nNOT JSON\n{\"issue\":3,\"event\":\"c\",\"status\":\"ok\"}\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	entries, err := ReadEntries(path)
+	if err != nil {
+		t.Fatalf("ReadEntries failed: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries (malformed line skipped), got %d", len(entries))
+	}
+	if entries[0].Issue != 1 {
+		t.Errorf("expected first entry issue 1, got %d", entries[0].Issue)
+	}
+	if entries[1].Issue != 3 {
+		t.Errorf("expected second entry issue 3, got %d", entries[1].Issue)
+	}
+}
+
+func TestReadEntriesEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.jsonl")
+	if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	entries, err := ReadEntries(path)
+	if err != nil {
+		t.Fatalf("ReadEntries failed: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries from empty file, got %d", len(entries))
+	}
+}
+
 func TestAppendMonotonicOrdering(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ledger", "1.jsonl")

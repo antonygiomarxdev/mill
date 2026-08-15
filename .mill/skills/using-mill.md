@@ -214,11 +214,10 @@ Notes measured in practice:
 
 - `--agent` must be an identifier Orca has configured. `command-code` works;
   `commandcode` and `cmd` are rejected with "A configured --agent is required".
-- **The brief is injected but often not submitted.** Observed with
-  `--agent command-code --worktree current` (nothing injected at all) and with
-  `--agent claude --worktree new-child` (injected, left sitting at the prompt).
-  It is not a function of the worktree selector; the condition is not yet
-  identified. Always confirm, and submit if needed:
+- **`--agent claude` does not submit the brief** — it lands as a draft and the
+  worker never starts (upstream #14505). `--agent command-code` submits on its
+  own with `--worktree new-child`, and injects nothing at all with
+  `--worktree current`. Always confirm, and submit if needed:
 
   ```bash
   orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000
@@ -394,7 +393,8 @@ Found by running it. None lose work; all cost time if you do not know them.
 
 | Defect | Symptom | What to do |
 |---|---|---|
-| The brief is not always submitted | Worker sits at an empty prompt, or the `=== TASK ===` block is visible and unsent. Seen with several agent/worktree combinations; the condition is not identified. | Read the terminal after dispatch. `orca terminal send --terminal <handle> --enter` |
+| The brief is not submitted, with `--agent claude` | The `=== TASK ===` block sits in the input box as an unsubmitted draft; the worker never starts. Upstream [#14505](https://github.com/stablyai/orca/issues/14505), which reports the same for Claude and not for Codex. Confirmed here on Linux with both `--worktree new-child` and `current`, so it is the agent, not the selector. `--agent command-code` submits on its own. | Read the terminal after dispatch. `orca terminal send --terminal <handle> --enter` |
+| Nothing injected at all, with `--agent command-code --worktree current` | The TUI launches on an empty prompt; no TASK block appears. Distinct from the above. | Send the brief yourself: `orca terminal send --terminal <handle> --text "<brief>" --enter` |
 | A dead worker looks like a busy one | `task-list` reads `[dispatched]`, `worker-show` reads `[ready] stage=input_accepted`. Nothing distinguishes "thinking" from "died on a provider error". | Read the terminal. `⚠ Error:` with a Trace ID means dead — resume with `--text "continue" --enter` |
 | The message counter does not clear | The session is told "You have N orchestration messages" indefinitely. `check --ack`, replying, and closing the originating task all fail to consume the delivery. | **Ignore the counter; read the inbox.** `orca orchestration inbox --limit 5 --full` is accurate and ordered |
 | `skills get` is unreachable while Orca runs | `[single-instance] Another Orca instance is already running` — from both `orca` and `orca-ide` | Ask the human to run `orca skills get orca-cli` from an Orca-managed terminal |

@@ -119,6 +119,11 @@ Every dispatched task gets a brief. Read the worker's `ROLE.md` first — it tel
 
 > **Role:** <role-name> | **Model:** <tier>
 
+Read first, in order:
+- `.mill/roles/<role>/ROLE.md` — what you produce and what you may write
+- `.mill/roles/<role>/lessons.md` — what this role learned the hard way. Its
+  entries bind this task. If one contradicts the brief, say so before starting.
+
 ## Context
 <!-- what the agent needs to know: relevant files, decisions, constraints -->
 
@@ -149,6 +154,8 @@ Every dispatched task gets a brief. Read the worker's `ROLE.md` first — it tel
 - Criteria are countable. Numbers, greps, measurements — never adjectives. A criterion satisfiable by editing a string was never a criterion.
 - Open with the deliverable in the imperative. "Write `<path>`. It does not exist yet." Then the diagnosis as justification.
 - Briefs must be short. Reference files instead of inlining their content. A worker given its `ROLE.md` and a brief has everything it needs.
+- **The lessons line is not optional.** `.mill/roles/<role>/lessons.md` held seventeen entries that no dispatch ever read (#137) — learning that existed, was versioned, and reached nobody. The brief is the only place it can arrive.
+- **Promote what holds.** When a lesson survives a dispatch or two uncontradicted, move it into the role's `ROLE.md` — or `COMMON.md` if it binds every role — and delete it from `lessons.md`. That is the curation step: `ROLE.md` is what `role-enforce` reads, so a promoted lesson stops being advice and becomes a rule.
 
 ### Dispatch protocol
 

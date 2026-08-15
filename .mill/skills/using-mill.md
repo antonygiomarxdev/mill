@@ -399,6 +399,14 @@ Found by running it. None lose work; all cost time if you do not know them.
 | The message counter does not clear | The session is told "You have N orchestration messages" indefinitely. `check --ack`, replying, and closing the originating task all fail to consume the delivery. | **Ignore the counter; read the inbox.** `orca orchestration inbox --limit 5 --full` is accurate and ordered |
 | `skills get` is unreachable while Orca runs | `[single-instance] Another Orca instance is already running` — from both `orca` and `orca-ide` | Ask the human to run `orca skills get orca-cli` from an Orca-managed terminal |
 | `orchestration ask` outside a worker | `The Dispatch capability is missing` | Expected: `ask` is for dispatched workers. Coordinators use `reply` |
+| Mail to a bare terminal handle has no reader | `send --to term_...` returns `ok: true` and the recipient can never read it, once its pane is bound to a Run — which every worker's is. Upstream [stablyai/orca#13656](https://github.com/stablyai/orca/issues/13656). | Address workers by `--to dispatch:<ctx_id>`, or reply to a message they sent. Never by bare terminal handle |
+
+Three of these are already filed upstream: the unsubmitted prompt is
+[#14505](https://github.com/stablyai/orca/issues/14505), the mailbox addressing
+is [#13656](https://github.com/stablyai/orca/issues/13656), and a related
+stdin defect is [#12630](https://github.com/stablyai/orca/issues/12630).
+**Search that tracker before diagnosing an Orca behaviour** — all three were
+rediscovered here the expensive way.
 
 A counter that always reads the same number is not a signal. Read the inbox.
 

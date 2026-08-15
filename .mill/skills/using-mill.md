@@ -388,6 +388,20 @@ stopped.
 Left undone, this accumulates: 13 worktrees and 63 MB built up in a single
 session before anyone looked.
 
+## Known Orca defects
+
+Found by running it. None lose work; all cost time if you do not know them.
+
+| Defect | Symptom | What to do |
+|---|---|---|
+| The brief is not always submitted | Worker sits at an empty prompt, or the `=== TASK ===` block is visible and unsent. Seen with several agent/worktree combinations; the condition is not identified. | Read the terminal after dispatch. `orca terminal send --terminal <handle> --enter` |
+| A dead worker looks like a busy one | `task-list` reads `[dispatched]`, `worker-show` reads `[ready] stage=input_accepted`. Nothing distinguishes "thinking" from "died on a provider error". | Read the terminal. `⚠ Error:` with a Trace ID means dead — resume with `--text "continue" --enter` |
+| The message counter does not clear | The session is told "You have N orchestration messages" indefinitely. `check --ack`, replying, and closing the originating task all fail to consume the delivery. | **Ignore the counter; read the inbox.** `orca orchestration inbox --limit 5 --full` is accurate and ordered |
+| `skills get` is unreachable while Orca runs | `[single-instance] Another Orca instance is already running` — from both `orca` and `orca-ide` | Ask the human to run `orca skills get orca-cli` from an Orca-managed terminal |
+| `orchestration ask` outside a worker | `The Dispatch capability is missing` | Expected: `ask` is for dispatched workers. Coordinators use `reply` |
+
+A counter that always reads the same number is not a signal. Read the inbox.
+
 ## The record
 
 Orca holds the dispatch record. It survives compaction; trust it over your own

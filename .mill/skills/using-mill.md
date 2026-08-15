@@ -122,6 +122,20 @@ orca orchestration task-list --run <run_id>
 A task that exists but was never dispatched is started with `worker-start`; do
 not create a second task for the same work.
 
+### After any Orca restart: rebind the Run
+
+The terminal-to-Run binding does not survive a restart, and losing it is silent.
+Messages keep arriving at the Run; the coordinator simply stops being told about
+them, and only notices by polling — which is the thing this skill forbids.
+
+```bash
+orca orchestration run-current            # "No Run is bound to this terminal."
+orca orchestration run-use --id <run_id>  # note: --id, not --run
+```
+
+Check this whenever notifications stop, and after every Orca update. It cost
+several hours here before anyone thought to look, because the symptom is silence.
+
 ## The cycle
 
 ### 1. Read the issue

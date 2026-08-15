@@ -1,31 +1,46 @@
 ---
 name: Bug Report
-about: Report a bug in Mill
-title: "bug: "
-labels: ["bug", "stage:dev", "needs:tech-review"]
+about: Something in Mill does not behave as documented
+title: "[BUG] "
+labels: ["bug"]
 assignees: []
 ---
 
 ## What happened
 
-<!-- describe the bug -->
+<!-- One paragraph. What you did, what you expected, what occurred instead. -->
 
-## What should have happened
+## Reproduction
 
-<!-- expected behavior -->
+<!-- The exact commands, in order. Paste the real output, not a description of it.
+     If a command produced no output, say so — silence is often the defect. -->
 
-## Steps to reproduce
+```
+$ 
+```
 
-1.
-2.
-3.
+## Where it broke
+
+<!-- If this happened while following a document, say which and which step.
+     "README, install step 3" is more useful than "during installation". -->
 
 ## Environment
 
-- Mill version: <!-- `mill --version` or commit hash -->
-- Harness: <!-- omp / claude code / opencode / copilot -->
-- OS: <!-- linux / macos -->
+- **Orca version**: <!-- grep -ao '"version": *"[0-9.]*"' /tmp/.mount_orca*/resources/app.asar | head -1 -->
+- **Agent**: <!-- command-code / claude / codex — and the model, if you know it -->
+- **OS**:
+- **Mill commit**: <!-- git -C <your mill checkout> rev-parse --short HEAD -->
 
-## Evidence
+## Already checked
 
-<!-- logs, screenshots, error messages -->
+<!-- Mill depends on Orca; several behaviours that look like Mill bugs are Orca's,
+     and some are already fixed upstream. Before filing, please check:
+
+     - Is the Orca version current?  gh release list --repo stablyai/orca --limit 3
+     - Is it already reported?       gh search issues --repo stablyai/orca "<symptom>" --state all
+
+     If either applies, say so here. Both checks were skipped during development
+     and cost hours. -->
+
+- [ ] Orca is on the latest release
+- [ ] Searched the Orca tracker for this symptom

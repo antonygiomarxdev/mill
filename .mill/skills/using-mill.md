@@ -171,9 +171,8 @@ Notes measured in practice:
   With `--worktree current` it is not — send it yourself:
   `orca terminal send --terminal <handle> --text "<brief>" --enter`
 - `--model` accepts Claude, Codex and Cursor identifiers only. For other agents
-  the model is whatever the agent's own configuration selects.
-```bash
-```
+  the model is whatever the agent's own configuration selects. See
+  **Model selection** below — the tier is chosen by picking the agent.
 
 ### 6. Handle questions
 

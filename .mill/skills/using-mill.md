@@ -355,11 +355,26 @@ reason this project exists, so it has to survive contact with the tooling.
 
 **Select the tier by choosing the agent, not by passing a model flag.**
 
-| Role | Tier | Dispatch with |
+**The tier follows the work, not the role.** A role that "thinks" still produces
+by volume when it writes a document or reads a codebase, and volume is what the
+cheap agent is for.
+
+| Work | Tier | Dispatch with |
 |------|------|---------------|
-| PM, Architect, Tech Lead, Reviewer | thinks | `--agent claude --model <id>` |
-| Sr Dev (BE/FE/Data), QA/Docs | writes | `--agent command-code` |
-| UX Designer, UI Designer | thinks | `--agent claude --model <id>` |
+| Producing — code, tests, docs, specs, FRDs, research | writes | `--agent command-code` |
+| Judging — reviewing a result, deciding between options, verifying a claim | thinks | `--agent claude --model <id>` |
+
+An Architect writing 300 lines of research is producing. The same Architect
+deciding whether a spec answers its FRD is judging. Dispatch the first cheap and
+the second expensive, whatever the role's name.
+
+This is the original economics: cheap models write, expensive models review.
+Quality comes from the review step, not from the writer — so that is where the
+money goes and nowhere else.
+
+Getting this wrong is expensive and silent. Two document-production tasks were
+dispatched to `claude-opus-4-5` because a per-role table said PM and Architect
+"think".
 
 ### Why not `--model` on every dispatch
 

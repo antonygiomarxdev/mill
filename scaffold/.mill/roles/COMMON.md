@@ -1,27 +1,117 @@
-# Common Role Instructions
+# Common — All Roles
 
-These instructions apply to all mill agent roles.
+Read this first, then your `ROLE.md`. Role-specific rules include this by reference — no rule appears in both.
 
-## Role categories
+Lessons learned from past failures live in `lessons.md` under each role directory. That file is reference material, not required reading. A lesson that can be mechanised must be — prose is not enforcement.
 
-Roles fall into two categories:
+## Topology
 
-- **Decomposing roles** (Staff, PM, Architect, Tech Lead): You produce your
-  artifact, delegate down, review what returns. You are not done when the
-  artifact exists — you are done when the next role has been dispatched and
-  its result reviewed. A decomposition with no downstream dispatch is
-  incomplete. Check `checks/gate-handoff <issue>` before declaring approved.
-- **Leaf roles** (Sr Dev, QA/Docs, Reviewer, Designers): You execute.
+One coordinator dispatches work to worker roles. Workers execute and report back. No worker dispatches other workers.
 
-## General Principles
+```
+coordinator (Staff)
+  ├── PM
+  ├── Architect
+  ├── Tech Lead
+  ├── Sr Dev (BE / FE / Data)
+  ├── Reviewer
+  ├── QA / Docs
+  ├── UX Designer
+  └── UI Designer
+```
 
-- Work autonomously and make reasonable engineering decisions.
-- Follow existing code conventions and patterns in the codebase.
-- Ask for clarification only when requirements are genuinely ambiguous.
-- Leave the codebase better than you found it.
+The coordinator holds the sequencing state. Workers do not need to know who comes next — the coordinator decides after each result arrives. A worker that finishes its brief is done. It does not hand off, route, or delegate onward.
 
-## Communication
+**Who you are depends on your role file.** If your `ROLE.md` identifies you as the coordinator, you sequence and dispatch. Otherwise, you execute your brief and report.
 
-- Be direct and concise.
-- Explain your reasoning.
-- End your response with a verdict: APPROVED, NEEDS CHANGES, or REJECTED.
+## Reporting
+
+Every worker reports its result through the Orca orchestration CLI:
+
+```
+orca orchestration send \
+  --from <your-terminal> \
+  --dispatch-capability <dcap> \
+  --type worker_done \
+  --subject "<short status>" \
+  --body "<3-sentence summary: what you did, what you found, what's left>" \
+  --task-id <task-id> --dispatch-id <dispatch-id> \
+  --outcome succeeded|failed \
+  --files-modified "path/a,path/b"
+```
+
+The body is an executive summary — three sentences. If you produced a long-form artifact (report, spec, plan), include its path as `--report-path` so the coordinator can find it without a file search.
+
+## Raising a hand
+
+Before starting work, if anything in your brief is unclear, ask:
+
+```
+orca orchestration send \
+  --from <your-terminal> \
+  --dispatch-capability <dcap> \
+  --type question \
+  --subject "<short>" \
+  --body "<your question>" \
+  --task-id <task-id> --dispatch-id <dispatch-id>
+```
+
+**Ask before starting, not after guessing.** If the brief has ambiguity, missing acceptance criteria, conflicting constraints, or references you cannot find — ask. A wrong assumption costs more than a question.
+
+**Ask during work too.** If you encounter something unexpected that changes the approach, stop and ask. Do not silently pivot.
+
+## Evidence over authority
+
+- **Any role can challenge any decision.** Authority does not determine correctness.
+- **Every challenge requires evidence.** Measurement, research, source citation — never "because I said so."
+- **Evidence lives locally.** Research findings are committed to `docs/research/`. Cite local docs, not external URLs. A URL that breaks, rate-limits, or changes is not evidence.
+- **If evidence does not exist, spawn research first.** Debate from local sources, not from memory or web searches mid-argument.
+- **Disagree and commit.** Once decided, execute. The ADR captures the decision and the reasoning.
+
+## Quality gates are non-negotiable
+
+- **Coverage ≥90% minimum.** No exceptions for priority.
+- **Mutation testing on main.** Every mutant must be killed.
+- **Priority does not override quality.** PM says P0. Tech Lead says "not without tests."
+- **Gates run automatically.** pre-commit: build + vet. pre-push: test + coverage. land: mutation.
+
+## Briefs for free models
+
+- **Free models need explicit DO NOT sections.** "stdlib flag only, NOT cobra." "Classify from exit codes, NOT text output." The cheaper the model, the more specific the constraints must be.
+- **Ambiguity is the enemy of cheap models.** A pro model fills gaps correctly. A free model fills them creatively — and wrong.
+
+## What you can invoke
+
+Your `ROLE.md` frontmatter declares which skills are in your roster. Skills not declared are not prohibited, but must not be invoked without an explicit decision. See your role file for the list.
+
+## Rules
+
+### Code
+
+- **`CONTEXT.md` and `docs/conventions/` govern.** No `any` / `unknown` / `Record<string,T>` / `object`. Named types. Declarative. One export per file.
+- **Gate before delivery**, zero errors: lint, type-check, build. No delivery in red.
+- **Tests that catch regressions.** No `expect(x).toBeTruthy()`. Countable assertions.
+
+### Git
+
+- **Conventional Commits.** Subject `<= 72 characters`. Atomic, incremental commits.
+- **Never push. Never open a PR.** Commit on the worktree branch and nothing more.
+
+### Scope
+
+- **What is not in the brief, you do not do.** Report shortfalls; do not expand scope.
+- **Already-made decisions are not reopened.** They are in ADRs and the decision map.
+- **Explicit permission to contradict.** If your research contradicts the brief, say so. Correction over obedience.
+- **Explicit permission to mark dubious.** Five honest ambiguous cases over forty falsely certain decisions.
+
+### Language
+
+**Everything is English except Spanish prose.** Identifiers, function names, constants, comments, commit messages, config files, file and directory names, issue titles, branch names — all English.
+
+The single exception: body text of human documentation under `docs/` and issue comments may be in Spanish. A Spanish document still lives in an English-named file.
+
+### Comments and progress
+
+- **Comment on the issue when you:** start work, find something, finish, or get blocked.
+- **Link PRs and ADRs** in issue comments.
+- **Never leave an assigned issue silent** for more than a few hours without a status update.

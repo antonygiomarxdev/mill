@@ -494,23 +494,23 @@ and have described a file as never having existed when it was simply untracked.
 
 A concrete cycle, from issue to landing.
 
-**Issue:** #42 — `internal/ledger` is at 77.1% coverage; project minimum is 90%.
+**Issue:** #42 — a small backend feature on the API; project gates must pass.
 
 **1. Read the issue.** Stage `stage:dev`, implementation work, backend. Role:
-Sr Dev BE. Acceptance: coverage ≥90% in `internal/ledger`, gates clean.
+Sr Dev BE. Acceptance: feature implemented, project gates clean.
 
 **2. Build the brief** from `.mill/roles/sr-dev-be/ROLE.md` plus context
-("the package sits at 77.1%, COMMON.md requires 90%"), acceptance criteria
+(the API has no health endpoint), acceptance criteria
 (greps and gate commands, never adjectives), and a "Do not touch" note.
 
 **3. Dispatch** (Orca up first):
 
 ```bash
-RUN=$(orca orchestration run-create --objective "coverage" --json | grep -oE 'run_[a-z0-9]+' | head -1)
-TASK=$(orca orchestration task-create --run $RUN --task-title "Raise ledger coverage" \
+RUN=$(orca orchestration run-create --objective "feature" --json | grep -oE 'run_[a-z0-9]+' | head -1)
+TASK=$(orca orchestration task-create --run $RUN --task-title "Add health endpoint" \
   --spec "$(cat brief.md)" --json | grep -oE 'task_[a-z0-9]+' | head -1)
 orca orchestration worker-start --run $RUN --task $TASK \
-  --agent command-code --worktree new-child --name ledger-cov --repo path:$(pwd)
+  --agent command-code --worktree new-child --name health-ep --repo path:$(pwd)
 orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 300000
 ```
 
@@ -518,15 +518,15 @@ orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 300000
 
 ```bash
 orca orchestration inbox --limit 5 --full          # the worker_done report
-bash .mill/checks/gate-coverage                    # run the gate yourself
+bash .mill/checks/gate-review 42                    # run the gate yourself
 ```
 
 **5. Land, then close the worker down** — nothing is cleaned up automatically:
 
 ```bash
 orca orchestration worker-release --dispatch <ctx_id>
-orca worktree rm --worktree name:ledger-cov        # read any refusal before --force
+orca worktree rm --worktree name:health-ep        # read any refusal before --force
 ```
 
-**Result:** coverage from 77.1% to 94.3% in one dispatch — the run that
-demonstrated Mill's policy layer working with Orca's substrate (see ADR 0006).
+**Result:** a feature shipped through the coordinator in one dispatch — the
+shape of every Mill run (see ADR 0006).

@@ -90,24 +90,25 @@ Per project, the skill is present exactly where Mill is.
 
 ## Usage
 
-A worked example — raising test coverage in one package.
+A worked example — adding a small backend feature.
 
 **1. Build a brief** from the role's `ROLE.md` and the acceptance criteria. Keep
 it short; reference files rather than inlining them.
 
 ```markdown
-# Task: raise test coverage in internal/ledger
+# Task: add a health endpoint to the API
 
 You are acting as **sr-dev-be**. Read your role first:
 `.mill/roles/sr-dev-be/ROLE.md`
 
 ## Context
-internal/ledger is at 77.1%. COMMON.md requires 90%.
+The API has no health endpoint. The acceptance criteria in COMMON.md apply:
+gates must pass before delivery.
 
 ## Acceptance criteria
-1. `go test ./internal/ledger/ -cover` reports >= 90%
-2. `go build ./... && go vet ./... && gofmt -l .` are clean
-3. No non-test file under internal/ledger is modified
+1. `pnpm test -- src/health` passes
+2. `pnpm lint && pnpm type-check` are clean
+3. No file outside `src/` is modified
 
 ## Before you begin
 If anything above is unclear, ask now:
@@ -179,9 +180,10 @@ orca worktree rm --worktree name:ledger-cov
 
 - `--agent` must name an agent Orca has configured. `command-code` works;
   `commandcode` and `cmd` are rejected with *"A configured --agent is required"*.
-- `--worktree new-child` injects the brief and submits it. `--worktree current`
-  does not — send it yourself with
-  `orca terminal send --terminal <handle> --text "<brief>" --enter`.
+- **The brief is injected but not always submitted.** With `--agent claude` it
+  lands as an unsubmitted draft and the worker never starts — reproduced on Orca
+  v1.4.183, upstream issue #14505. Confirm after dispatch and submit if needed:
+  `orca terminal send --terminal <handle> --enter`.
 - `--model` accepts Claude, Codex and Cursor model identifiers only. For other
   agents the model is whatever that agent's own configuration selects, so
   per-dispatch tier selection is not available for them.
@@ -200,7 +202,7 @@ orca worktree rm --worktree name:ledger-cov
 
 ```
 .mill/
-├── roles/              # 11 role definitions + COMMON.md, with YAML frontmatter
+├── roles/              # 12 role definitions + COMMON.md, with YAML frontmatter
 ├── checks/             # gate scripts (bash) — this is core.hooksPath
 ├── skills/
 │   └── using-mill.md   # the coordinator's procedure

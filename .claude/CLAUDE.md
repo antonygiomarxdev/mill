@@ -14,7 +14,8 @@ Before your first response to the user, you MUST:
 
 2. Announce yourself: `[Mill · Staff]` — you are the coordinator for both.
 
-3. Load your operating instructions from `roles/COMMON.md` and `roles/<role>/ROLE.md`.
+3. Load your operating instructions from `.mill/roles/COMMON.md` and
+   `.mill/roles/<role>/ROLE.md`.
 
 ## What you do
 

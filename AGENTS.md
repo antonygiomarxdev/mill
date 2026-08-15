@@ -2,45 +2,61 @@
 
 If the user says "using mill" or wants to delegate, load:
 
-@skills/using-mill.md
+@.mill/skills/using-mill.md
 
-Then follow its instructions to bootstrap or activate Mill.
+Then follow its instructions: read `.mill/roles/COMMON.md` first, then run the
+dispatch procedure.
 
 ## Role files
 
-@roles/COMMON.md
+@.mill/roles/COMMON.md
 
-Your specific role is determined by the Mill skill at session start.
-Load the appropriate file when directed:
+Your specific role is determined by the coordinator at dispatch time.
+Workers read their own role file when the brief says so:
 
-- Staff: @roles/staff/ROLE.md
-- PM: @roles/pm/ROLE.md
+- Staff: @.mill/roles/staff/ROLE.md
+- PM: @.mill/roles/pm/ROLE.md
 
-## Delegation chain
+## Topology
+
+One coordinator (Staff) dispatches workers and sequences the work. Workers
+execute and report; no worker dispatches another worker.
 
 ```
-CTO → Staff → Architect → Tech Lead → Sr Dev (BE/FE/Data)
-CTO → Staff → Reviewer → QA/Docs
-CTO → Staff → PM
-CTO → PM → UX Designer → UI Designer → QA/Docs
+coordinator (Staff)
+  ├── PM
+  ├── Architect
+  ├── Tech Lead
+  ├── Sr Dev (BE / FE / Data)
+  ├── Reviewer
+  ├── QA / Docs
+  ├── UX Designer
+  ├── UI Designer
+  └── Policy Author
 ```
+
+The organisational sequence is preserved as pipeline stages, not delegation
+handoffs: `FRD → spec → tasks → implementation → review`.
 
 ## Quality gates
 
-- Pre-commit: build + vet (automatic, <30s)
-- Pre-push: test + coverage ≥90% (automatic, <5min)
-- Land: mutation testing (automatic, <15min)
-- Phase gates: `checks/gate-{frd,spec,tasks,coverage,review}`
-- Role enforcement: `checks/role-enforce` blocks wrong-role actions
+- Phase gates: `.mill/checks/gate-{frd,spec,tasks,coverage,review,handoff}`
+- Role enforcement: `.mill/checks/role-enforce` blocks wrong-role actions
+- Pre-commit/pre-push hooks run from `.mill/checks/` via `core.hooksPath`
+- What "build", "test" and "coverage" mean is per project — Mill ships no
+  language-specific tooling of its own (ADR 0006)
 
 ## Project layout
 
 ```
-mill.yml         — project config (targets, models, gates)
-roles/            — role definitions (ROLE.md + lessons.md)
-checks/           — gauntlet hooks + phase gates
-skills/           — agent skills (using-mill.md is the entry point)
-docs/             — ADRs, conventions, research, PRODUCT.md
-.mill/            — local state: role, state.json, ledger/, phases/
+.mill/            — the Mill framework (roles, checks, skills, docs)
+  roles/          — role definitions (ROLE.md + lessons.md)
+  checks/         — gate scripts + role-enforce (core.hooksPath)
+  skills/         — agent skills (using-mill.md is the entry point)
+  docs/           — ADRs, PRODUCT.md
+  phases/         — phase artifacts (frd, spec, tasks, review)
+checks/           — gate scripts shipped to scaffolded projects
+scaffold/         — the template copied into a new project
 .omp/             — harness config: RULES.md (sticky), AGENTS.md (context)
+docs/             — ADRs, research, FINDINGS, ROADMAP
 ```

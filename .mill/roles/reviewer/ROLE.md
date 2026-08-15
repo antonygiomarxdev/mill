@@ -56,7 +56,8 @@ See `roles/COMMON.md`.
 - **Tests assert behavior, not implementation.** No `expect(x).toBeTruthy()`. Countable assertions.
 
 ### Gate
-- **Run the gates yourself.** `go test ./...`, `go build`, lint. Do not trust the Sr. Dev's report.
+- **Run the gates yourself.** Lint, type-check, build, test — the project's own
+  gate commands. Do not trust the Sr. Dev's report.
 - **If a gate fails, CHANGES.** No exceptions.
 
 ## Raising a hand

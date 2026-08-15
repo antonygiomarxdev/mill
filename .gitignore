@@ -23,6 +23,8 @@ mill
 # never reaches the role that needs it (#128).
 /.mill/memory/
 /.mill/role
+/.mill/map.json
+/.mill/session.md
 /.mill/placeholder
 
 # Session exports from the agent harness (multi-MB HTML transcripts)

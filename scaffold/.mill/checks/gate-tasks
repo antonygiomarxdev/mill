@@ -4,6 +4,6 @@ set -euo pipefail
 issue="${1:?usage: $0 <issue-number>}"
 mkdir -p ".mill/phases/${issue}"
 tasks=".mill/phases/${issue}/tasks.md"
-test -f "$tasks" || { echo "gate-tasks: tasks.md missing for #${issue}. Spawn Tech Lead." >&2; exit 1; }
-grep -q 'role:' "$tasks" || { echo "gate-tasks: tasks.md has no role assignments" >&2; exit 1; }
+test -f "$tasks" || { echo "BLOCKED: tasks.md missing for #${issue}. Spawn Tech Lead."; exit 1; }
+grep -q 'role:' "$tasks" || { echo "BLOCKED: tasks.md has no role assignments"; exit 1; }
 echo "TASKS gate passed for #${issue}"

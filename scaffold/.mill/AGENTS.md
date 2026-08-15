@@ -1,20 +1,15 @@
 # Mill — Agent Delegation Harness
 
-You are inside a Mill-managed repository. Load the Mill framework skill:
+If the user says "using mill" or wants to delegate, load:
 
-@skills/mill.md
+@.mill/skills/using-mill.md
 
-## Startup
+Then follow its instructions: read `.mill/roles/COMMON.md` first, then run the
+dispatch procedure.
 
-1. The Mill skill handles role classification, tool detection, and context delivery.
-2. Load `roles/COMMON.md` for shared rules.
-3. Load `roles/<role>/ROLE.md` for your specific instructions.
-4. Load `roles/<role>/lessons.md` for past failures (if it exists).
+## Role files
 
-## Key commands
+@.mill/roles/COMMON.md
 
-```
-mill delegate <issue> --role <target>   Delegate work to a role
-mill status                             Show task status
-mill land <target>                      Run gates and merge
-```
+Your specific role is determined by the coordinator at dispatch time.
+Workers read their own role file when the brief says so.

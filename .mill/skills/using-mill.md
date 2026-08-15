@@ -156,6 +156,9 @@ orca orchestration worker-start --run <run_id> --task $TASK \
   --agent command-code \
   --worktree new-child --name <name> --repo path:<repo>
 
+# Wait natively — do not poll with shell loops
+orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 300000
+
 # Watch it work — reasoning, tool calls and all
 orca orchestration worker-read --dispatch <ctx_id>
 
@@ -167,9 +170,17 @@ Notes measured in practice:
 
 - `--agent` must be an identifier Orca has configured. `command-code` works;
   `commandcode` and `cmd` are rejected with "A configured --agent is required".
-- With `--worktree new-child` the brief is injected and submitted automatically.
-  With `--worktree current` it is not — send it yourself:
-  `orca terminal send --terminal <handle> --text "<brief>" --enter`
+- **The brief is injected but often not submitted.** Observed with
+  `--agent command-code --worktree current` (nothing injected at all) and with
+  `--agent claude --worktree new-child` (injected, left sitting at the prompt).
+  It is not a function of the worktree selector; the condition is not yet
+  identified. Always confirm, and submit if needed:
+
+  ```bash
+  orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000
+  orca orchestration worker-read --dispatch <ctx_id>   # is the TASK block still unsent?
+  orca terminal send --terminal <handle> --enter        # submit it
+  ```
 - `--model` accepts Claude, Codex and Cursor identifiers only. For other agents
   the model is whatever the agent's own configuration selects. See
   **Model selection** below — the tier is chosen by picking the agent.

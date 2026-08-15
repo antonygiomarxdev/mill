@@ -220,40 +220,65 @@ Notes measured in practice:
   `--worktree current`. Always confirm, and submit if needed:
 
   ```bash
-  orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000
-  orca orchestration worker-read --dispatch <ctx_id>   # is the TASK block still unsent?
-  orca terminal send --terminal <handle> --enter        # submit it
+  orca orchestration worker-read --dispatch <ctx_id> --limit 20 --json
+  orca terminal send --terminal <handle> --enter   # submit the draft
   ```
 - `--model` accepts Claude, Codex and Cursor identifiers only. For other agents
   the model is whatever the agent's own configuration selects. See
   **Model selection** below — the tier is chosen by picking the agent.
 
-### 5. Read the state — idle is not done
+### 5. Wait, and read what came back
 
-`terminal wait --for tui-idle` returning `satisfied: true` means **the TUI is
-not busy**. It does not mean the work finished. Read the terminal and decide
-which of three states you are in:
-
-| State | How it looks | What to do |
-|---|---|---|
-| Delivered | a message in `inbox` with an `outcome` | verify it |
-| Waiting for input | prompt empty, or the TASK block still unsent, or `Type "continue" to try again` | send it: `orca terminal send --terminal <handle> --enter` |
-| Died | `⚠ Error: …` with a Trace ID in the output | resume with `--text "continue" --enter`, or re-dispatch |
+The supervision loop is documented in Orca's own guide — `skill-guides/orchestration.md`
+in `stablyai/orca`, or `orca skills get orca-cli`. Follow it rather than inventing one:
 
 ```bash
-orca orchestration worker-read --dispatch <ctx_id> | tail -20
+orca orchestration check --wait --types worker_done,escalation,question \
+  --timeout-ms 900000 --json
 ```
 
-Nothing surfaces a dead worker on its own. A provider connection error leaves
-`task-list` reading `[dispatched]` and `worker-show` reading `[ready]
-stage=input_accepted` — identical to a worker that is thinking. One agent sat
-in that state after a `Connection error` and was only found by reading its
-terminal.
+`check` returns the Run's oldest Delivery and **replays that exact batch until
+acknowledged by id**. Process every message, reply to any question, then
+acknowledge and keep waiting in one call:
+
+```bash
+orca orchestration check --ack <delivery_id> --wait \
+  --types worker_done,escalation,question --timeout-ms 900000 --json
+```
+
+`--ack` takes the delivery id. Bare `--ack` acknowledges nothing, and the
+session is then told it has messages indefinitely.
+
+**What is not a failure**, per the guide:
+
+- a `check --wait` timeout, or `{count: 0}` — that is a checkpoint. Coding tasks
+  routinely run 15–60 minutes. Keep waiting with rolling waits.
+- heartbeats or visible terminal activity — they mean alive, not done.
+- **TUI idle state** — the guide lists it explicitly as a reason *not* to release
+  a worker. `terminal wait --for tui-idle` answers "is the interface busy", which
+  a parked worker also answers no to. It is not a completion signal.
+
+Stop waiting only on `worker_done` or `escalation`, on the terminal exiting or
+disappearing, or when the human says so.
+
+**A valid `worker_done` completes the task and dispatch automatically.** Never
+follow it with `task-update --status completed` — a manual update on a settled
+task is how one ends up `blocked`.
+
+To see what an agent actually did, read its transcript rather than raw terminal
+scrollback:
+
+```bash
+orca orchestration worker-read --dispatch <ctx_id> --limit 50 --json
+```
+
+`--source auto` returns the hook-reported transcript when Orca can prove the
+session, otherwise bounded terminal output with a typed `fallbackReason`.
+Continue with the returned `cursor`.
 
 **Never write a shell loop to poll for a result.** Four were written in one
-session and all four failed, each waiting on an exact subject line a worker was
-never obliged to send — one of them for 78 minutes after its task had already
-completed. Use `terminal wait`, then read.
+session and all four failed, each waiting on an exact subject line no worker
+was obliged to send — one of them for 78 minutes after its task had completed.
 
 ### 6. Handle questions
 
@@ -396,7 +421,7 @@ Found by running it. None lose work; all cost time if you do not know them.
 | The brief is not submitted, with `--agent claude` | The `=== TASK ===` block sits in the composer as a draft, `0 tokens` sent, and the worker never starts. **Still reproduces on v1.4.183**, which contains the fix from [#14342](https://github.com/stablyai/orca/pull/14342) — verified after updating, not assumed. `--agent command-code` submits on its own. Upstream issue: [#14505](https://github.com/stablyai/orca/issues/14505). | Read the terminal after dispatch and `orca terminal send --terminal <handle> --enter`. The agent then runs normally |
 | Nothing injected at all, with `--agent command-code --worktree current` | The TUI launches on an empty prompt; no TASK block appears. Distinct from the above. | Send the brief yourself: `orca terminal send --terminal <handle> --text "<brief>" --enter` |
 | A dead worker looks like a busy one | `task-list` reads `[dispatched]`, `worker-show` reads `[ready] stage=input_accepted`. Nothing distinguishes "thinking" from "died on a provider error". | Read the terminal. `⚠ Error:` with a Trace ID means dead — resume with `--text "continue" --enter` |
-| The message counter does not clear | The session is told "You have N orchestration messages" indefinitely. `check --ack`, replying, and closing the originating task all fail to consume the delivery. | **Ignore the counter; read the inbox.** `orca orchestration inbox --limit 5 --full` is accurate and ordered |
+| ~~The message counter does not clear~~ | **Not a defect — a usage error.** `check --ack` takes the delivery id: `check --ack <delivery_id>`. Bare `--ack` acknowledges nothing and the Delivery replays forever. | `orca orchestration check --ack <delivery_id> --wait --types worker_done,escalation,question` |
 | `skills get` is unreachable while Orca runs | `[single-instance] Another Orca instance is already running` — from both `orca` and `orca-ide` | Ask the human to run `orca skills get orca-cli` from an Orca-managed terminal |
 | `orchestration ask` outside a worker | `The Dispatch capability is missing` | Expected: `ask` is for dispatched workers. Coordinators use `reply` |
 | Mail to a bare terminal handle has no reader | `send --to term_...` returns `ok: true` and the recipient can never read it, once its pane is bound to a Run — which every worker's is. Upstream [stablyai/orca#13656](https://github.com/stablyai/orca/issues/13656). | Address workers by `--to dispatch:<ctx_id>`, or reply to a message they sent. Never by bare terminal handle |
@@ -443,8 +468,10 @@ and have described a file as never having existed when it was simply untracked.
 |---------|----------------|-----|
 | Dispatching the next role before verifying the current result | The cycle looks sequential; the result looks done | Verify (step 8) before you dispatch again |
 | Trusting the worker's report instead of re-running the gates | The report says "all pass" and it is cheaper to believe it | Recalculate every quantitative claim and run the gates yourself |
-| Polling with a shell loop for a result | A wait command exists but the loop is habit | Use `terminal wait --for tui-idle`, then read the terminal |
-| Taking "idle" for "done" | `tui-idle` sounds like completion | Read the terminal: delivered, waiting for input, or died |
+| Polling with a shell loop for a result | A wait command exists but the loop is habit | `orca orchestration check --wait --types worker_done,escalation,question` |
+| Taking "idle" for "done" | `tui-idle` sounds like completion | The guide says not to act on idle. Wait for `worker_done` |
+| Marking a task completed by hand | The status looks stale after a report | `worker_done` already settled it; a manual `task-update` leaves it `blocked` |
+| Diagnosing Orca from `--help` | The guide is not in the CLI stub | Read `skill-guides/orchestration.md` in `stablyai/orca` |
 | Re-dispatching without changing anything | The failure looked like bad luck | Every re-dispatch changes the brief, the context, or the tier |
 | Delegating work that is faster to do yourself | Mill is available, so it is the default | Apply the boundary: small edits and cold-start-heavy work stay local |
 

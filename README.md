@@ -59,8 +59,8 @@ coordinator answers or escalates to you.
 ```bash
 cd your-project
 
-# 1. Install Mill: copy the policy directory and the gates, adopt git's hooks,
-#    and link the skill. Non-destructive — see below.
+# 1. Install Mill: copy the policy directory and the gates, link the skill.
+#    Mill's gates run at the dispatch boundary, not from git hooks — see below.
 /path/to/mill/scaffold/.mill/checks/mill-install /path/to/mill/scaffold
 
 # 2. Tell the gauntlet how to build and test your project
@@ -73,23 +73,28 @@ $EDITOR .mill/role-capabilities
 ```
 
 The install script does what the manual steps used to do — copy `.mill/` and
-`checks/`, set `core.hooksPath` to `.mill/checks`, and symlink the skill into
-`.claude/skills/using-mill/` — but it **checks first and never destroys what is
-already there**. See [ADR 0008](docs/adr/0008-non-destructive-install.md) for
-the design.
+`checks/`, and symlink the skill into `.claude/skills/using-mill/` — but it
+**checks first and never destroys what is already there**. Every change is
+recorded in `.mill/install.json` and reversed by `mill-uninstall`. See
+[ADR 0009](docs/adr/0009-gauntlet-at-the-dispatch-boundary.md) for the design.
 
-**It refuses to overwrite an existing `core.hooksPath`.** `core.hooksPath`
-holds exactly one directory, so installing Mill over a husky, lefthook or
-hand-written hook setup would silently stop running those hooks. If yours is
-set, the installer stops and tells you exactly what is configured and how to
-proceed. Your hooks are never touched by the refusal.
+**Mill does not take your git hooks.** Mill's gates are not a pre-commit
+framework: the coordinator runs `.mill/checks/mill-verify --worktree <path>
+--role <role> [--files-modified <list>]` against a worker's worktree after
+every dispatch, and that is where the gauntlet and `role-enforce` live. Your
+hooks — husky, lefthook, hand-written — stay yours, untouched and unmentioned
+(ADR 0009).
 
-If you decide Mill's gauntlet should take over, re-run with the explicit flag;
-the previous hooks path is recorded so you can get it back:
+A project that has no hooks configured and explicitly asks for them can still
+point git at Mill's gauntlet with the opt-in flag. The previous hooks path is
+recorded so you can get it back:
 
 ```bash
-/path/to/mill/scaffold/.mill/checks/mill-install /path/to/mill/scaffold --replace-hooks
+/path/to/mill/scaffold/.mill/checks/mill-install /path/to/mill/scaffold --with-hooks
 ```
+
+If `core.hooksPath` is already set, `--with-hooks` refuses — Mill never chains
+and never replaces: git holds one value.
 
 **The skill link coexists with existing skills.** `.claude/skills/` is a
 directory, so Mill's `using-mill` link lands beside whatever else is there —
@@ -99,16 +104,18 @@ project that gitignores `.claude/` is fine. The versioned artifact is
 `.mill/skills/using-mill.md` (see "Why the skill is hooked up per project").
 
 **Undo.** Every change the installer makes is recorded in `.mill/install.json`.
-To remove Mill's hooks and skill link and restore the previous hooks path:
+To remove the skill link and any hooks pointer Mill set, and restore the
+previous hooks path:
 
 ```bash
 .mill/checks/mill-uninstall
 ```
 
-This restores your previous `core.hooksPath` (or unsets it), removes the skill
-link, and deletes the manifest. The `.mill/` policy files remain — remove them
-with `rm -rf .mill checks` if you want them gone. A project installed before
-manifests existed gets the manual undo printed instead.
+This removes the skill link (and, if `--with-hooks` was used, restores your
+previous `core.hooksPath` or unsets it) and deletes the manifest. The `.mill/`
+policy files remain — remove them with `rm -rf .mill checks` if you want them
+gone. A project installed before manifests existed gets the manual undo printed
+instead.
 
 **Re-running is safe.** An already-installed project is a no-op that says so.
 
@@ -122,16 +129,17 @@ lint="npm run lint"
 test="npm test"
 ```
 
-Skip it and the hooks say so and pass; they never guess. Whatever you write
-runs on every commit, so `role-enforce` and the phase gates protect the repo
-from the first commit onward.
+Skip it and `mill-verify` says so and passes; it never guesses. Whatever you
+write runs against every worker's output at the dispatch boundary, so
+`role-enforce` and the phase gates protect the repo from the first dispatch
+onward.
 
 `.mill/role-capabilities` is the same shape — plain bash mapping each role
 capability category (`code`, `docs`, `config`, `policy`, `scripts`, `design`)
 to the file patterns that category may touch in your project. Roles declare
 categories, never languages, so the same role contracts work in any project;
 only this one file names your file types. Skip it and `role-enforce` blocks
-every commit with a message saying exactly what to create — it fails closed,
+every change with a message saying exactly what to create — it fails closed,
 never open.
 
 ### Why the skill is hooked up per project
@@ -266,7 +274,7 @@ orca worktree rm --worktree name:ledger-cov
 ```
 .mill/
 ├── roles/              # 12 role definitions + COMMON.md, with YAML frontmatter
-├── checks/             # gate scripts (bash) — this is core.hooksPath
+├── checks/             # gate scripts (bash) — incl. mill-verify at the dispatch boundary
 ├── skills/
 │   └── using-mill.md   # the coordinator's procedure
 └── docs/
@@ -297,3 +305,5 @@ not a diff across every role.
   capabilities are declared by category, not file extension
 - [ADR 0008](docs/adr/0008-non-destructive-install.md) — install detects what
   is there and never destroys it
+- [ADR 0009](docs/adr/0009-gauntlet-at-the-dispatch-boundary.md) — the gauntlet
+  runs at the dispatch boundary, not from git hooks

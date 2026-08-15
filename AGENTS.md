@@ -41,8 +41,9 @@ handoffs: `FRD → spec → tasks → implementation → review`.
 ## Quality gates
 
 - Phase gates: `.mill/checks/gate-{frd,spec,tasks,coverage,review,handoff}`
-- Role enforcement: `.mill/checks/role-enforce` blocks wrong-role actions
-- Pre-commit/pre-push hooks run from `.mill/checks/` via `core.hooksPath`
+- Verification at the dispatch boundary: `.mill/checks/mill-verify` runs the
+  gauntlet (build/lint/test) and enforces role permissions over a worker's
+  change set — not git hooks (ADR 0009)
 - What "build", "test" and "coverage" mean is per project — Mill ships no
   language-specific tooling of its own (ADR 0006)
 
@@ -51,7 +52,7 @@ handoffs: `FRD → spec → tasks → implementation → review`.
 ```
 .mill/            — the Mill framework (roles, checks, skills, docs)
   roles/          — role definitions (ROLE.md + lessons.md)
-  checks/         — gate scripts + role-enforce (core.hooksPath)
+  checks/         — gate scripts + role-enforce + mill-verify
   skills/         — agent skills (using-mill.md is the entry point)
   docs/           — ADRs, PRODUCT.md
   phases/         — phase artifacts (frd, spec, tasks, review)

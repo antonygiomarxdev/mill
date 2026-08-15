@@ -1,23 +1,23 @@
 #!/bin/bash
 # Mill gauntlet configuration — copy to .mill/gauntlet and edit.
 #
-# Each gauntlet step is a shell command run by the corresponding hook
-# (.mill/checks/pre-commit, pre-push). The gauntlet structure — build, lint,
-# test, coverage, each a named check that blocks — is language-agnostic; only
-# the commands are ecosystem-specific, and they are declared here.
+# Each gauntlet step is a shell command run by .mill/checks/mill-verify, the
+# verification entry point the coordinator invokes against a worker's worktree
+# after every dispatch. The gauntlet structure — build, lint, test, coverage,
+# each a named check that blocks — is language-agnostic; only the commands are
+# ecosystem-specific, and they are declared here.
 #
 # Leave a step unset to skip it. A project with no .mill/gauntlet file at all
-# gets no checks (the hooks say so and exit 0).
+# gets no build/lint/test checks (mill-verify says so and skips them); role
+# enforcement still runs.
 #
 # Environment variables in commands are expanded at run time, so
 # `test="go test $PKG"` works. The step must exit 0 on success.
 
-# pre-commit steps:
+# verification steps:
 build="npm run build"
 lint="npm run lint"
-
-# pre-push steps:
 test="npm test"
 # Optional: a command whose output contains a percentage (e.g. "87.3%"). The
-# lowest percentage seen must be >= 90, else the push is rejected.
+# lowest percentage seen must be >= 90, else the verification is rejected.
 # coverage="npm run coverage"

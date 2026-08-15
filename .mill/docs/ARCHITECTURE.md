@@ -92,10 +92,10 @@ sequenceDiagram
     Staff->>Runner: mill delegate --role sr-dev-fe 390
     Runner->>SD: spawn in worktree
     SD->>SD: implement from brief
-    SD->>SD: pre-commit gauntlet
     SD->>SD: raise hand if blocked
     SD-->>Runner: done — code committed
-    
+    Runner->>Staff: worker_done (files-modified)
+    Staff->>Staff: mill-verify --worktree --role --files-modified
     Staff->>Staff: verify (7-step checklist)
     Staff->>CTO: "ready to land"
 ```
@@ -107,4 +107,4 @@ sequenceDiagram
 3. **`mill delegate` validates the delegation chain.** Staff → Tech Lead ✅. Staff → Sr. Dev ❌.
 4. **Spawned agents don't know who spawned them.** They know their role, their task, and their `reviewed_by` (from frontmatter).
 5. **If a spawned agent has doubts → BLOCKED → escalation chain → resolved → resume.**
-6. **The runner enforces everything mechanically.** Pre-commit hooks, delegation validation, classification.
+6. **The coordinator verifies everything mechanically.** `mill-verify` at the dispatch boundary, delegation validation, classification.

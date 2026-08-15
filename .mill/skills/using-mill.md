@@ -156,7 +156,7 @@ orca orchestration worker-start --run <run_id> --task $TASK \
   --agent command-code \
   --worktree new-child --name <name> --repo path:<repo>
 
-# Wait natively — do not poll with shell loops
+# Wait natively — never poll with a shell loop
 orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 300000
 
 # Watch it work — reasoning, tool calls and all
@@ -184,6 +184,33 @@ Notes measured in practice:
 - `--model` accepts Claude, Codex and Cursor identifiers only. For other agents
   the model is whatever the agent's own configuration selects. See
   **Model selection** below — the tier is chosen by picking the agent.
+
+### 5b. Read the state — idle is not done
+
+`terminal wait --for tui-idle` returning `satisfied: true` means **the TUI is
+not busy**. It does not mean the work finished. Read the terminal and decide
+which of three states you are in:
+
+| State | How it looks | What to do |
+|---|---|---|
+| Delivered | a message in `inbox` with an `outcome` | verify it |
+| Waiting for input | prompt empty, or the TASK block still unsent, or `Type "continue" to try again` | send it: `orca terminal send --terminal <handle> --enter` |
+| Died | `⚠ Error: …` with a Trace ID in the output | resume with `--text "continue" --enter`, or re-dispatch |
+
+```bash
+orca orchestration worker-read --dispatch <ctx_id> | tail -20
+```
+
+Nothing surfaces a dead worker on its own. A provider connection error leaves
+`task-list` reading `[dispatched]` and `worker-show` reading `[ready]
+stage=input_accepted` — identical to a worker that is thinking. One agent sat
+in that state after a `Connection error` and was only found by reading its
+terminal.
+
+**Never write a shell loop to poll for a result.** Four were written in one
+session and all four failed, each waiting on an exact subject line a worker was
+never obliged to send — one of them for 78 minutes after its task had already
+completed. Use `terminal wait`, then read.
 
 ### 6. Handle questions
 

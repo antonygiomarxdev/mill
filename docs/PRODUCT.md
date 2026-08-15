@@ -86,6 +86,34 @@ is the only observer, and it holds the context needed to answer.
 successful result: it is the mechanism that stops an underspecified task from
 becoming plausible-looking wrong work.
 
+## What Mill verifies, and what it leaves alone
+
+**The gauntlet checks the code Mill produced. It does not touch the project's
+own tooling.**
+
+Mill's authority ends at the dispatch boundary. It judges what a worker wrote,
+in that worker's worktree, against the role that wrote it and the acceptance
+criteria it was given. That is the whole of its remit.
+
+It does not own the project's commit path. `core.hooksPath` is a single slot,
+and a project that has husky, lefthook or its own hooks has them for reasons
+Mill knows nothing about — commitlint, migrations, staging checks with no
+equivalent here. Taking that slot does not add Mill's checks to theirs; it
+deletes theirs.
+
+This was learned by doing it wrong. Mill took `core.hooksPath` at install, and
+then a worker running `npm install` triggered husky's `prepare`, which took it
+back — disabling Mill's own gates repository-wide while doing exactly what its
+brief asked. Three parties writing one global slot.
+
+The deeper error was that the hook never guarded what it claimed to. It applied
+to the coordinator's commits and the human's; workers commit in worktrees that
+do not inherit it. Mill was paying for a project's configuration to enforce
+something that never reached the thing it existed to check.
+
+**A tool that damages the project it was installed into has failed, whatever
+else it does.**
+
 ## Everything goes through issues
 
 The GitHub issue is the single record. Briefs, FRDs, specs, raised hands,

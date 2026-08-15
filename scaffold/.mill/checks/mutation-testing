@@ -6,6 +6,13 @@ set -euo pipefail
 
 echo "mill: mutation testing"
 
+# go-mutesting is Go-specific. A non-Go project has nothing to mutate with it;
+# report that clearly rather than failing on a missing binary.
+if [[ ! -f go.mod ]]; then
+    echo "mill: mutation-testing: no go.mod — not a Go project, skipping (language-agnostic gauntlet: see .mill/gauntlet)"
+    exit 0
+fi
+
 go-mutesting ./... 2>&1 | tail -5
 
 # go-mutesting exits non-zero if any mutant survives

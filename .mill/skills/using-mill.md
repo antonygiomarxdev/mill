@@ -231,19 +231,45 @@ If a worker reports `--outcome failed` or BLOCKED:
 
 Never ignore a failure. Never re-dispatch without changing something.
 
-## Model selection
+## Model selection — the tier is the agent
 
-Use the least powerful model that can handle each role:
+Expensive models decompose and review; cheap models write. That split is the
+reason this project exists, so it has to survive contact with the tooling.
 
-| Role | Default tier |
-|------|-------------|
-| PM, Architect, Tech Lead | pro |
-| Sr Dev (BE/FE/Data) | free→paid |
-| Reviewer | pro |
-| QA/Docs | free→paid |
-| UX Designer, UI Designer | pro |
+**Select the tier by choosing the agent, not by passing a model flag.**
 
-Escalate when a free model fails on a task that needs judgment. The coordinator decides per-dispatch.
+| Role | Tier | Dispatch with |
+|------|------|---------------|
+| PM, Architect, Tech Lead, Reviewer | thinks | `--agent claude --model <id>` |
+| Sr Dev (BE/FE/Data), QA/Docs | writes | `--agent command-code` |
+| UX Designer, UI Designer | thinks | `--agent claude --model <id>` |
+
+### Why not `--model` on every dispatch
+
+`worker-start --model` accepts Claude, Codex and Cursor identifiers only. For any
+other agent the model is whatever that agent's own configuration selects — a
+`command-code` worker reports `xiaomi/mimo-v2.5-pro`, read from the global
+`~/.commandcode/config.json`.
+
+Measured, so nobody re-derives it:
+
+| Approach | Result |
+|---|---|
+| `worker-start --model <id>` with `--agent command-code` | ignored |
+| `.commandcode/config.json` inside the project | not read; the global wins |
+| `command-code --config model=<id>` on the command line | **works** |
+| Orca passing extra args through to the agent | no mechanism |
+
+So the per-model route is closed until Orca can pass arguments through. Choosing
+the agent is open, gives the two tiers the cost model needs, and requires nothing
+from anyone else.
+
+Do **not** rewrite `~/.commandcode/config.json` between dispatches to fake a
+tier. It is global, and parallel workers would race on it.
+
+Escalate a role to the thinking tier when a cheap dispatch fails on judgment
+rather than on execution. Record which tier ran — it is the only evidence the
+cost model is working at all.
 
 ## Worktree and worker lifecycle
 

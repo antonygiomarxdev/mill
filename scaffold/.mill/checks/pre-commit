@@ -6,6 +6,10 @@ set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$DIR/common.sh"
 
+# Capability enforcement first — blocks files outside the active role's
+# categories. No-op when no role is active (.mill/role absent).
+"$DIR/role-enforce"
+
 echo "mill: pre-commit gauntlet"
 load_gauntlet
 

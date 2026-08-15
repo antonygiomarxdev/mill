@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# mill-uninstall — undo a mill-install, using the manifest it wrote.
+# Reverses exactly what install.json records: restores the previous
+# core.hooksPath (or unsets it), removes the skill link, deletes the manifest.
+# The .mill/ policy files are left in place.
+#
+# Without a manifest this refuses and prints the manual undo — a project
+# installed before the manifest existed still has a defined way back.
+set -euo pipefail
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "error: not a git repository" >&2
+    exit 1
+fi
+
+top="$(git rev-parse --show-toplevel)"
+cd "$top"
+
+MANIFEST=".mill/install.json"
+
+if [[ ! -f "$MANIFEST" ]]; then
+    echo "error: no $MANIFEST — nothing recorded to undo." >&2
+    echo "  If Mill was installed before manifests existed, undo by hand:" >&2
+    echo "    git config core.hooksPath <your-previous-value>   # or: git config --unset core.hooksPath" >&2
+    echo "    rm -f .claude/skills/using-mill/SKILL.md" >&2
+    echo "    rmdir .claude/skills/using-mill 2>/dev/null || true" >&2
+    exit 1
+fi
+
+# Read manifest fields. Previous hooks path is quoted JSON; extract between
+# the quotes. Skill link likewise.
+previous="$(sed -n 's/^  "previousHooksPath": "\(.*\)",$/\1/p' "$MANIFEST" | head -1)"
+skill_link="$(sed -n 's/^  "skillLink": "\(.*\)",$/\1/p' "$MANIFEST" | head -1)"
+
+echo "mill: uninstalling from $top"
+
+# 1. Restore the previous hooks path, or unset if there was none.
+if [[ -n "$previous" ]]; then
+    git config core.hooksPath "$previous"
+    echo "mill: restored core.hooksPath=$previous"
+elif git config --get core.hooksPath >/dev/null 2>&1; then
+    git config --unset core.hooksPath
+    echo "mill: unset core.hooksPath (no previous value)"
+else
+    echo "mill: core.hooksPath not set — nothing to restore"
+fi
+
+# 2. Remove the skill link we created, and the now-empty directories.
+if [[ -n "$skill_link" && -L "$skill_link" ]]; then
+    rm "$skill_link"
+    echo "mill: removed $skill_link"
+    # Tidy empty parents: using-mill/ then skills/ (never past .claude/).
+    dir="$(dirname "$skill_link")"
+    while [[ "$dir" != "." && "$dir" != ".claude" ]]; do
+        rmdir "$dir" 2>/dev/null && echo "mill: removed $dir/" || true
+        dir="$(dirname "$dir")"
+    done
+elif [[ -n "$skill_link" ]]; then
+    echo "mill: $skill_link not found or not a symlink — leaving it alone"
+fi
+
+# 3. Remove the manifest — the undo record is consumed.
+rm "$MANIFEST"
+echo "mill: removed $MANIFEST"
+echo "mill: uninstall complete. The .mill/ policy files remain; remove them with: rm -rf .mill checks"

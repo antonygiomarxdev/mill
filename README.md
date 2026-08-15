@@ -59,26 +59,58 @@ coordinator answers or escalates to you.
 ```bash
 cd your-project
 
-# 1. Copy the policy directory and the gates
-cp -r /path/to/mill/scaffold/.mill  .
-cp -r /path/to/mill/scaffold/checks .
-chmod +x .mill/checks/* checks/*
+# 1. Install Mill: copy the policy directory and the gates, adopt git's hooks,
+#    and link the skill. Non-destructive — see below.
+/path/to/mill/scaffold/.mill/checks/mill-install /path/to/mill/scaffold
 
-# 2. Point git at the gauntlet
-git config core.hooksPath .mill/checks
-
-# 3. Tell the gauntlet how to build and test your project
+# 2. Tell the gauntlet how to build and test your project
 cp .mill/gauntlet.example .mill/gauntlet
 $EDITOR .mill/gauntlet
 
-# 4. Map role capabilities to your project's file types
+# 3. Map role capabilities to your project's file types
 cp .mill/role-capabilities.example .mill/role-capabilities
 $EDITOR .mill/role-capabilities
-
-# 5. Hook up the skill so the session discovers it
-mkdir -p .claude/skills/using-mill
-ln -s ../../../.mill/skills/using-mill.md .claude/skills/using-mill/SKILL.md
 ```
+
+The install script does what the manual steps used to do — copy `.mill/` and
+`checks/`, set `core.hooksPath` to `.mill/checks`, and symlink the skill into
+`.claude/skills/using-mill/` — but it **checks first and never destroys what is
+already there**. See [ADR 0008](docs/adr/0008-non-destructive-install.md) for
+the design.
+
+**It refuses to overwrite an existing `core.hooksPath`.** `core.hooksPath`
+holds exactly one directory, so installing Mill over a husky, lefthook or
+hand-written hook setup would silently stop running those hooks. If yours is
+set, the installer stops and tells you exactly what is configured and how to
+proceed. Your hooks are never touched by the refusal.
+
+If you decide Mill's gauntlet should take over, re-run with the explicit flag;
+the previous hooks path is recorded so you can get it back:
+
+```bash
+/path/to/mill/scaffold/.mill/checks/mill-install /path/to/mill/scaffold --replace-hooks
+```
+
+**The skill link coexists with existing skills.** `.claude/skills/` is a
+directory, so Mill's `using-mill` link lands beside whatever else is there —
+nothing is overwritten. The link is **per-developer state**: it is what makes
+*your* sessions discover the skill, it does not need to be committed, and a
+project that gitignores `.claude/` is fine. The versioned artifact is
+`.mill/skills/using-mill.md` (see "Why the skill is hooked up per project").
+
+**Undo.** Every change the installer makes is recorded in `.mill/install.json`.
+To remove Mill's hooks and skill link and restore the previous hooks path:
+
+```bash
+.mill/checks/mill-uninstall
+```
+
+This restores your previous `core.hooksPath` (or unsets it), removes the skill
+link, and deletes the manifest. The `.mill/` policy files remain — remove them
+with `rm -rf .mill checks` if you want them gone. A project installed before
+manifests existed gets the manual undo printed instead.
+
+**Re-running is safe.** An already-installed project is a no-op that says so.
 
 **There is no build step.** Installing Mill is copying files.
 
@@ -106,7 +138,10 @@ never open.
 
 The skill lives in `.mill/skills/using-mill.md` — versioned with the repository,
 reviewed like any other policy. The harness discovers skills under
-`.claude/skills/`, so step 4 links one to the other.
+`.claude/skills/`, so the installer links one to the other. The link is
+**per-developer state**: it makes the session in *this* working copy discover
+the skill, it does not need to be committed, and a project that gitignores
+`.claude/` is fine — the versioned source is the `.mill/` file.
 
 **Do not install it globally** (`~/.claude/skills/`) unless you mean it. Its
 description is written to trigger on any request to build, fix, spec or review —
@@ -258,3 +293,7 @@ not a diff across every role.
   execution substrate
 - [ADR 0006](docs/adr/0006-mill-is-a-skill-not-a-binary.md) — Mill is a skill,
   not a binary
+- [ADR 0007](docs/adr/0007-role-capabilities-by-category.md) — role
+  capabilities are declared by category, not file extension
+- [ADR 0008](docs/adr/0008-non-destructive-install.md) — install detects what
+  is there and never destroys it

@@ -1,3 +1,8 @@
+---
+name: using-mill
+description: Use when delegating work to specialised roles — dispatching a worker, building a brief from a ROLE.md, answering a raised hand, verifying a worker's result against phase gates, or deciding which role comes next. Triggers on "delegate this", "dispatch a worker", "who should do this", "hand this to the architect", and on any request to build a feature, fix a bug, write a spec or review work where the work should go to a role rather than be done in this session.
+---
+
 # Using Mill
 
 Dispatch worker roles through Orca's orchestration CLI. One coordinator (Staff) sequences work; workers execute and report.

@@ -1,151 +1,223 @@
 # Mill
 
-A skill plus a policy directory that turns an AI agent into a Staff Engineer or
-Product Manager. Mill defines the roles, the phase sequence, and the dispatch
-procedure. Orca provides the execution substrate.
+An org chart that executes. Mill is a **skill plus a policy directory** — role
+definitions in Markdown, gate scripts in bash — that turns one AI session into a
+coordinator dispatching specialised workers.
 
-## What Mill is
+Mill defines *who does what, in what order, and what "done" means*.
+[Orca](https://onorca.dev) runs the workers.
 
-Mill is **not a binary**. It is a set of Markdown role definitions, bash gate
-scripts, and a skill file that an agent reads at session start. When loaded, the
-agent becomes one of two roles:
-
-- **[Mill · Staff]** — for technical work: delegates to Architect → Tech Lead →
-  Sr Dev. Verifies results, declares merge-readiness.
-- **[Mill · PM]** — for product work: delegates to UX → UI → QA/Docs. Writes
-  specs, manages priorities.
-
-You speak naturally. Mill handles the rest.
-
-See [docs/PRODUCT.md](docs/PRODUCT.md) for the full product definition and
-[ADR 0006](docs/adr/0006-mill-is-a-skill-not-a-binary.md) for why the Go CLI
-was retired.
-
-## Prerequisites
-
-- **Orca** — the execution substrate. Handles worker spawning, supervision,
-  worktree isolation, and the message bus. Install from
-  [orca.sh](https://orca.sh).
-- **A configured CLI agent** — `command-code`, Claude, or another agent Orca
-  supports. The agent must be registered with Orca before it can be dispatched
-  (`command-code` works out of the box; other agents need explicit registration).
-- **Git** — for worktree isolation and gate enforcement.
-
-## Install
-
-Copy the Mill skill and policy directory into your project:
-
-```
-your-project/
-├── .mill/
-│   ├── roles/          # 11 role definitions (Markdown)
-│   ├── checks/         # Gate scripts (bash)
-│   ├── map.json        # Role capability map
-│   └── role            # Active role file
-├── checks/             # Top-level gate scripts
-└── .omp/
-    └── AGENTS.md       # Agent context (loads the Mill skill)
-```
-
-Then open the project in your harness. The agent discovers `AGENTS.md` and loads
-the Mill skill automatically.
-
-**You're done.** Start speaking naturally to your agent. It becomes Mill Staff
-or Mill PM and begins delegating.
+There is no binary. See [ADR 0006](docs/adr/0006-mill-is-a-skill-not-a-binary.md)
+for why the Go CLI was retired, and [docs/PRODUCT.md](docs/PRODUCT.md) for the
+full product definition.
 
 ## How it works
 
-```
-CTO session (Orca + command-code / claude / etc.)
-  └─ Mill skill ← loaded at session start
-       ├─ Classifies user message → Staff or PM
-       ├─ Delegates via orca orchestration dispatch
-       └─ Orchestrates chain: Architect → Tech Lead → Sr Dev → QA
-```
-
-### Star topology
-
-One coordinator dispatches to role workers — one-to-N, not a linear chain.
-The coordinator holds the state and the mailbox; PM becomes a worker role like
-the others. The organisational sequence is preserved: the coordinator decides
-who comes next, not the roles themselves.
-
-### Delegation chain
+You talk to one session. That session is the **coordinator**. It reads the issue,
+picks the role that should do the work next, builds a brief from that role's
+`ROLE.md`, dispatches a worker through Orca, verifies what comes back against the
+phase gates, and decides what happens next.
 
 ```
-CTO → Staff → Architect → Tech Lead → Sr Dev (BE/FE/Data)
-CTO → Staff → Reviewer → QA/Docs
-CTO → Staff → PM
-CTO → PM → UX Designer → UI Designer → QA/Docs
+                    ┌─ PM            FRD, priorities
+                    ├─ Architect     ADRs, specs
+   you ─→ coordinator ─┼─ Tech Lead     task decomposition
+                    ├─ Sr Dev        implementation
+                    ├─ Reviewer      verdict
+                    └─ QA/Docs, UX, UI
 ```
 
-Each role has a `delegates_to` list in its frontmatter. Chain validation is
-mechanical — you can't delegate outside your authorized targets.
+**The topology is a star, not a chain.** The coordinator dispatches one-to-N and
+holds the sequence. No worker dispatches another worker — which is why workers
+need to know nothing about the org chart.
 
-### Phased workflow
+The organisational sequence is preserved:
 
 ```
-PM           Architect       Tech Lead      Sr Dev        Reviewer
-─────        ──────────      ──────────     ───────       ────────
-FRD ──────→ SPEC ─────────→ TASKS ──────→ IMPLEMENT ──→ REVIEW → DONE
-  │             │              │              │             │
-  ▼             ▼              ▼              ▼             ▼
-frd.md       spec.md       tasks.md       (commits)    review.md
+intent → FRD → spec(s) → tasks → implementation → review
+          PM    Architect  Tech Lead   Sr Dev      Reviewer
 ```
 
-Each phase is gated by a script in `checks/`. No artifact → blocked.
+Each phase is gated by a script in `.mill/checks/`. No artifact, or an artifact
+missing its required sections, and the phase does not pass.
 
-### Model tiers
+**Blocking is a first-class outcome.** A worker that finds the brief
+underspecified does not guess — it says what is missing and stops. The
+coordinator answers or escalates to you.
 
-| Tier | Used by |
-|------|---------|
-| free | Sr Dev (first pass), QA/Docs |
-| paid | Sr Dev (complex work) |
-| pro | Staff, PM, Architect, Tech Lead, Reviewer |
+## Prerequisites
 
-Role frontmatter `model` field selects tier. The coordinator passes the
-appropriate `--model` flag when dispatching an Orca worker.
+- **[Orca](https://onorca.dev)** — the execution substrate: worker spawning,
+  supervision, worktree isolation, and the message bus.
+- **At least one CLI agent registered with Orca.** Registration is per machine
+  and happens once: a login or an API key. Orca ships hooks for Claude,
+  Command Code, Codex, Copilot, Cursor, Gemini, Grok and others.
+- **Git.**
+
+## Install
+
+```bash
+cd your-project
+
+# 1. Copy the policy directory and the gates
+cp -r /path/to/mill/scaffold/.mill  .
+cp -r /path/to/mill/scaffold/checks .
+chmod +x .mill/checks/* checks/*
+
+# 2. Point git at the gauntlet
+git config core.hooksPath .mill/checks
+
+# 3. Hook up the skill so the session discovers it
+mkdir -p .claude/skills/using-mill
+ln -s ../../../.mill/skills/using-mill.md .claude/skills/using-mill/SKILL.md
+```
+
+**There is no build step.** Installing Mill is copying files.
+
+### Why the skill is hooked up per project
+
+The skill lives in `.mill/skills/using-mill.md` — versioned with the repository,
+reviewed like any other policy. The harness discovers skills under
+`.claude/skills/`, so step 3 links one to the other.
+
+**Do not install it globally** (`~/.claude/skills/`) unless you mean it. Its
+description is written to trigger on any request to build, fix, spec or review —
+which is correct inside a Mill project and wrong everywhere else. In a repository
+with no `.mill/` and no Orca, it would have a session trying to dispatch workers
+against nothing.
+
+Per project, the skill is present exactly where Mill is.
+
+## Usage
+
+A worked example — raising test coverage in one package.
+
+**1. Build a brief** from the role's `ROLE.md` and the acceptance criteria. Keep
+it short; reference files rather than inlining them.
+
+```markdown
+# Task: raise test coverage in internal/ledger
+
+You are acting as **sr-dev-be**. Read your role first:
+`.mill/roles/sr-dev-be/ROLE.md`
+
+## Context
+internal/ledger is at 77.1%. COMMON.md requires 90%.
+
+## Acceptance criteria
+1. `go test ./internal/ledger/ -cover` reports >= 90%
+2. `go build ./... && go vet ./... && gofmt -l .` are clean
+3. No non-test file under internal/ledger is modified
+
+## Before you begin
+If anything above is unclear, ask now:
+`orca orchestration send --to run:RUN --subject "<short>" --body "<q>" --type question`
+
+## When done
+`orca orchestration send --to run:RUN --subject "Done" --body "<real output>" --outcome succeeded`
+```
+
+**2. Make sure Orca is up**, before dispatching rather than after a failure:
+
+```bash
+orca status | grep -q "runtimeReachable: true" || orca open
+```
+
+**3. Dispatch.**
+
+```bash
+RUN=$(orca orchestration run-create --objective "coverage" --json | grep -oE 'run_[a-z0-9]+' | head -1)
+
+TASK=$(orca orchestration task-create --run $RUN \
+  --task-title "Raise ledger coverage" \
+  --spec "$(cat brief.md)" --json | grep -oE 'task_[a-z0-9]+' | head -1)
+
+orca orchestration worker-start --run $RUN --task $TASK \
+  --agent command-code \
+  --worktree new-child --name ledger-cov --repo path:$(pwd)
+```
+
+**4. Watch it work** — reasoning, tool calls and all:
+
+```bash
+orca orchestration worker-read --dispatch <ctx_id>
+```
+
+**5. Read what it reports.** Workers report through the mailbox with a
+structured payload — `outcome`, `filesModified`, `taskId`:
+
+```bash
+orca orchestration inbox --limit 5 --full
+```
+
+If a worker raised a hand instead, answer it:
+
+```bash
+orca orchestration reply --id <msg_id> --body "<your answer>"
+```
+
+**6. Verify it yourself.** A report is not evidence. Run the acceptance commands
+in the worker's worktree, then the phase gates:
+
+```bash
+bash .mill/checks/gate-coverage
+```
+
+**7. Land it, then close the worker down.** Nothing is cleaned up
+automatically, and that is deliberate — a finished worker's terminal and
+worktree may hold something you have not looked at yet.
+
+```bash
+orca orchestration worker-release --dispatch <ctx_id>
+orca worktree rm --worktree name:ledger-cov
+```
+
+`worktree rm` refuses when there are uncommitted changes and names the files.
+**Read them before passing `--force`.**
+
+## Things measured in practice
+
+- `--agent` must name an agent Orca has configured. `command-code` works;
+  `commandcode` and `cmd` are rejected with *"A configured --agent is required"*.
+- `--worktree new-child` injects the brief and submits it. `--worktree current`
+  does not — send it yourself with
+  `orca terminal send --terminal <handle> --text "<brief>" --enter`.
+- `--model` accepts Claude, Codex and Cursor model identifiers only. For other
+  agents the model is whatever that agent's own configuration selects, so
+  per-dispatch tier selection is not available for them.
+
+## Limits
+
+- **Mill needs a session to drive it.** The coordinator is you plus an agent.
+  There is no unattended mode: no cron, no CI without a session.
+- **Orca must be running.** A dispatch against a stopped runtime fails partway,
+  sometimes after the task has already been created.
+- **Nothing forces the coordinator to follow the sequence.** The gates enforce
+  what may be committed — the part that matters — but the procedure itself is
+  instructions, not a program.
 
 ## Project structure
 
 ```
 .mill/
-├── roles/              # Role definitions with YAML frontmatter
-│   ├── COMMON.md       # Shared rules for all roles
-│   ├── staff/ROLE.md   # Staff: orchestrator, never writes code
-│   ├── pm/ROLE.md      # PM: product specs, design delegation
-│   ├── architect/      # Architect: system design, ADRs
-│   ├── tech-lead/      # Tech Lead: code review, decomposition
-│   ├── reviewer/       # Reviewer: spec compliance, verdict
-│   ├── sr-dev-be/      # Sr Dev Backend: implementation
-│   ├── sr-dev-fe/      # Sr Dev Frontend
-│   ├── sr-dev-data/    # Sr Dev Data
-│   ├── qa-docs/        # QA/Docs: tests, changelogs, docs
-│   ├── ux-designer/    # UX: flows, wireframes
-│   └── ui-designer/    # UI: components, design tokens
-├── checks/             # Gate validation scripts (bash)
-├── map.json            # Role capability map
-└── role                # Active role (staff|pm)
+├── roles/              # 11 role definitions + COMMON.md, with YAML frontmatter
+├── checks/             # gate scripts (bash) — this is core.hooksPath
+├── skills/
+│   └── using-mill.md   # the coordinator's procedure
+└── docs/
 
-checks/                 # Top-level gate scripts (bash)
+checks/                 # gate scripts shipped to scaffolded projects
+scaffold/               # the template copied into a new project
 docs/
-├── PRODUCT.md          # Product definition
-├── FINDINGS-2026-08.md # Defect patterns from live testing
-└── adr/                # Architecture Decision Records
-mill.yml                # Project config (targets, gates)
+├── PRODUCT.md          # the product definition
+├── FINDINGS-2026-08.md # failure patterns found running Mill against itself
+├── adr/                # architecture decisions
+└── plans/
 ```
 
-## Configuration
-
-`mill.yml`:
-
-```yaml
-name: my-project
-
-targets:
-  develop:
-    gates: [lint, type-check, build]
-```
+Every role's `ROLE.md` declares what it produces, its acceptance criteria, its
+`allowed_files`, and how to report. `.mill/checks/role-enforce` derives
+capabilities from those frontmatters, so adding a role requires no code change.
 
 ## Architecture Decision Records
 

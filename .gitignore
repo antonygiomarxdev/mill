@@ -18,8 +18,10 @@ mill
 /.mill/logs/
 /.mill/state/
 /.mill/artifacts/
+# Note: .mill/phases/ is NOT excluded. FRDs, specs and tasks are source — a
+# delegated worktree materialises only tracked files, so an untracked frd.md
+# never reaches the role that needs it (#128).
 /.mill/memory/
-/.mill/phases/
 /.mill/role
 /.mill/placeholder
 

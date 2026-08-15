@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# mill-verify — check a worker's output against its role's constraints.
+# Called by the coordinator after worker_done.
+#   mill-verify <worktree> <role>
+# Exits 0 if clean; 1 naming the failure otherwise.
+set -euo pipefail
+
+worktree="${1:-}"
+role="${2:-}"
+
+if [[ -z "$worktree" || -z "$role" ]]; then
+    echo "usage: mill-verify <worktree> <role>" >&2
+    exit 2
+fi
+
+if [[ ! -d "$worktree" ]]; then
+    echo "error: no such worktree: $worktree" >&2
+    exit 1
+fi
+
+cd "$worktree" || exit 1
+
+# Role capabilities come from ROLE.md frontmatter, parsed by role-enforce.
+role_enforce="$(cd "$(dirname "$0")" && pwd)/role-enforce"
+if [[ ! -x "$role_enforce" ]]; then
+    echo "error: role-enforce not found next to mill-verify" >&2
+    exit 1
+fi
+
+# Empty diff → nothing was produced. Base = the worktree's branch point,
+# i.e. its oldest reflog entry, which is where the worker started.
+base="$(git reflog --format=%H | tail -1)"
+if [[ -z "$base" || "$(git cat-file -t "$base" 2>/dev/null)" != "commit" ]]; then
+    echo "error: cannot determine worktree base commit" >&2
+    exit 1
+fi
+if [[ -z "$(git diff --name-only "$base" HEAD)" ]]; then
+    echo "error: no changes since the worktree base commit $base" >&2
+    exit 1
+fi
+
+# 1. Every changed file must match the role's allowed_files (and forbidden
+#    patterns), via role-enforce's own frontmatter parsing.
+# 2. Nothing may be left uncommitted.
+uncommitted="$(git status --porcelain)"
+violation=0
+while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    if ! "$role_enforce" --test "$role" "$f" >/dev/null 2>&1; then
+        echo "error: $f is not allowed for role '$role'" >&2
+        violation=1
+    fi
+done < <(git diff --name-only "$base" HEAD)
+if [[ -n "$uncommitted" ]]; then
+    echo "error: uncommitted work left in the worktree:" >&2
+    echo "$uncommitted" | sed 's/^/  /' >&2
+    violation=1
+fi
+
+exit "$violation"

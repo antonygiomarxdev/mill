@@ -67,18 +67,34 @@ chmod +x .mill/checks/* checks/*
 # 2. Point git at the gauntlet
 git config core.hooksPath .mill/checks
 
-# 3. Hook up the skill so the session discovers it
+# 3. Tell the gauntlet how to build and test your project
+cp .mill/gauntlet.example .mill/gauntlet
+$EDITOR .mill/gauntlet
+
+# 4. Hook up the skill so the session discovers it
 mkdir -p .claude/skills/using-mill
 ln -s ../../../.mill/skills/using-mill.md .claude/skills/using-mill/SKILL.md
 ```
 
 **There is no build step.** Installing Mill is copying files.
 
+`.mill/gauntlet` is plain bash — three lines naming your project's commands:
+
+```bash
+build="npm run build"
+lint="npm run lint"
+test="npm test"
+```
+
+Skip it and the hooks say so and pass; they never guess. Whatever you write
+runs on every commit, so `role-enforce` and the phase gates protect the repo
+from the first commit onward.
+
 ### Why the skill is hooked up per project
 
 The skill lives in `.mill/skills/using-mill.md` — versioned with the repository,
 reviewed like any other policy. The harness discovers skills under
-`.claude/skills/`, so step 3 links one to the other.
+`.claude/skills/`, so step 4 links one to the other.
 
 **Do not install it globally** (`~/.claude/skills/`) unless you mean it. Its
 description is written to trigger on any request to build, fix, spec or review —

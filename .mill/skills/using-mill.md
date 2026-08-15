@@ -20,6 +20,38 @@ coordinator (Staff)
 
 The coordinator is the hub. It dispatches to a role, receives the result, decides the next step, and dispatches again. No worker dispatches other workers.
 
+## Precondition: Orca must be up
+
+Every dispatch depends on the Orca runtime. When it is down, commands fail with
+`Orca is not running. Run 'orca open' first.` — mid-dispatch, after a task may
+already have been created.
+
+Check and start it before dispatching anything, not after a failure:
+
+```bash
+orca status 2>/dev/null | grep -q "runtimeReachable: true" || orca open
+```
+
+Wait for readiness before continuing:
+
+```bash
+until orca status 2>/dev/null | grep -q "runtimeReachable: true"; do sleep 2; done
+```
+
+`orca open` launches the desktop app. `orca serve` starts a headless runtime and
+is the right choice where no desktop session exists — it is untested here
+(ADR 0005).
+
+If a dispatch failed because the runtime dropped, check whether the task was
+created before re-creating it:
+
+```bash
+orca orchestration task-list --run <run_id>
+```
+
+A task that exists but was never dispatched is started with `worker-start`; do
+not create a second task for the same work.
+
 ## The cycle
 
 ### 1. Read the issue
@@ -100,29 +132,42 @@ Rules:
 - Criteria are countable. Numbers, greps, measurements — never adjectives.
 - Open with the deliverable in the imperative.
 - Briefs must be short. A worker given its `ROLE.md` and a brief has everything it needs.
-- Free models need explicit DO NOT sections. The cheaper the model, the more specific the constraints.
+- State requirements rather than prohibitions where you can. Whether prohibitions
+  underperform is under investigation (#160); what is measured here is that a
+  brief saying "keep role-enforce and the gate loop exactly as they are, do not
+  touch them" produced a result that deleted both. The reference implementer
+  template Orca ships is 142 lines with no prohibition section at all.
 
 ### 5. Dispatch
 
 ```bash
-# Create the task
-orca orchestration task-create --subject "<task name>"
+# Create the task — the brief IS the spec
+TASK=$(orca orchestration task-create --run <run_id> \
+  --task-title "<short title>" \
+  --spec "$(cat brief.md)" --json | grep -oE 'task_[a-z0-9]+' | head -1)
 
-# Start the worker
-orca orchestration worker-start \
-  --agent <agent-id> \
-  --worktree <worktree-path> \
-  --model <model-tier> \
-  --timeout-ms <timeout>
+# Start a supervised worker in its own worktree
+orca orchestration worker-start --run <run_id> --task $TASK \
+  --agent command-code \
+  --worktree new-child --name <name> --repo path:<repo>
 
-# Inject the brief
-orca terminal send --text "<brief>" --enter
+# Watch it work — reasoning, tool calls and all
+orca orchestration worker-read --dispatch <ctx_id>
 
-# Monitor output
-orca orchestration worker-read
+# Read reports and questions
+orca orchestration inbox --limit 5 --full
+```
 
-# Check for questions
-orca orchestration check --terminal <terminal-id>
+Notes measured in practice:
+
+- `--agent` must be an identifier Orca has configured. `command-code` works;
+  `commandcode` and `cmd` are rejected with "A configured --agent is required".
+- With `--worktree new-child` the brief is injected and submitted automatically.
+  With `--worktree current` it is not — send it yourself:
+  `orca terminal send --terminal <handle> --text "<brief>" --enter`
+- `--model` accepts Claude, Codex and Cursor identifiers only. For other agents
+  the model is whatever the agent's own configuration selects.
+```bash
 ```
 
 ### 6. Handle questions
@@ -195,19 +240,46 @@ Use the least powerful model that can handle each role:
 
 Escalate when a free model fails on a task that needs judgment. The coordinator decides per-dispatch.
 
-## Worktree lifecycle
+## Worktree and worker lifecycle
 
-- One worktree per dispatched task
-- When PR merges: `git worktree remove <path>` and `git branch -D agent/<issue>`
-- Never leave orphan worktrees
-- Verify with `git worktree list` before and after cleanup
+Orca owns both. A finished worker is not cleaned up automatically, and that is
+deliberate: its terminal may hold context worth reading, and its worktree may
+hold work the coordinator has not verified yet. **Close it explicitly, after
+verifying.**
 
-## Ledger
+```bash
+orca orchestration worker-release --dispatch <ctx_id>   # archives output, frees the terminal
+orca worktree rm --worktree name:<name>                 # removes the worktree
+```
 
-Track every dispatch in the ledger (`.mill/ledger/<issue>.jsonl`):
-- Role dispatched, model used, task ID
-- Outcome: succeeded, failed, blocked
-- Gate results
-- Any questions and answers
+`worktree rm` refuses when the worktree has uncommitted changes, naming the
+files. **Never pass `--force` without looking at them first.** A refusal means
+something is there that was not landed — read it, land it or discard it
+deliberately, and only then force.
 
-The ledger survives compaction. Trust it over your own recollection.
+`worker-retain` keeps a terminal alive when a failure is worth investigating.
+`worker-abandon` fences a worker whose state is uncertain without claiming it
+stopped.
+
+Left undone, this accumulates: 13 worktrees and 63 MB built up in a single
+session before anyone looked.
+
+## The record
+
+Orca holds the dispatch record. It survives compaction; trust it over your own
+recollection.
+
+```bash
+orca orchestration task-list --run <run_id>    # every task and its state
+orca orchestration inbox --limit N --full      # reports, questions, answers
+orca orchestration worker-read --dispatch <id> # what an agent did, live or after
+```
+
+Worker reports carry a structured payload — `outcome`, `filesModified`,
+`taskId`, `dispatchId` — which is what makes a result checkable rather than
+narrated.
+
+**A report is not evidence.** Read the files and run the commands yourself
+before landing anything. Reports have claimed passing acceptance criteria while
+the central document still contradicted the decision it was meant to implement,
+and have described a file as never having existed when it was simply untracked.

@@ -314,12 +314,28 @@ The worker reports back with `worker_done`. Read:
 
 ### 8. Verify
 
-Before accepting the result:
+Before accepting the result, run the verification entry point in the worker's
+worktree. It is the gauntlet plus role enforcement in one command — the hook
+never was this (see ADR 0009):
+
+```bash
+.mill/checks/mill-verify --worktree <worktree-path> --role <role> \
+  --files-modified "<comma-separated paths from worker_done>"
+```
+
+`mill-verify` runs the configured build, lint and test steps (from
+`.mill/gauntlet`) in that worktree, then enforces the role's `allowed_files`
+over the change set — `--files-modified` when given (the `worker_done` payload
+is the authoritative record), otherwise the git diff since the worktree's base
+commit — and rejects any uncommitted work left behind. Pass only with real
+output, not the worker's numbers:
 
 1. **Read the report** (or `--report-path` artifact)
 2. **Recalculate every quantitative claim** — do not trust the worker's numbers
-3. **Run the gates** — lint, type-check, build, test. Run them yourself.
-4. **Check `allowed_files`** — verify `git diff --stat` against the role's file permissions
+3. **Run the gates yourself** — `mill-verify` is the command that does; run it
+   in the worker's worktree
+4. **Check `allowed_files`** — `mill-verify` enforces the role over the change
+   set; `git diff --stat` shows you the scope it judged
 5. **Check scope** — nothing outside the brief was touched
 
 If the role was non-leaf (PM, Architect, Tech Lead), decide what role dispatches next based on the pipeline stage.

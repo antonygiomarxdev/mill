@@ -1,5 +1,7 @@
 #!/bin/bash
-# Shared helpers for mill gauntlet hooks.
+# Shared helpers for the mill gauntlet. Used by mill-verify (the verification
+# entry point at the dispatch boundary) and, when a project opts in with
+# --with-hooks, by the git hooks.
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -13,12 +15,12 @@ fail() { echo -e "${RED}FAIL${NC} $*"; exit 1; }
 #
 # The gauntlet config lives at .mill/gauntlet in the project root. Why there:
 # .mill/ is what `mill init` copies into a new project (see README "Install"),
-# so the template ships with the hooks that read it; and it is the directory
-# core.hooksPath already points at, so a project that installs Mill has one
-# place to look. It is plain bash that the hooks source with `source` — no
-# parser, no new dependency. A project that configures nothing is a project
-# with no gauntlet: load_gauntlet reports that and exits 0, so a fresh install
-# never breaks the first commit.
+# so the template ships with the checks that read it; and it is the directory
+# core.hooksPath points at when a project opts into hooks. It is plain bash
+# that the checks source with `source` — no parser, no new dependency. A
+# project that configures nothing is a project with no gauntlet:
+# load_gauntlet reports that and returns 0, so a fresh install never breaks
+# the first commit and mill-verify still enforces the role.
 #
 # The config declares one shell command per gauntlet step, e.g.:
 #
@@ -35,7 +37,7 @@ load_gauntlet() {
     if [[ ! -f "$GAUNTLET_CONFIG" ]]; then
         echo "mill: no .mill/gauntlet — no gauntlet commands configured for this project"
         echo "mill: (copy the example from .mill/gauntlet.example and set build/lint/test)"
-        exit 0
+        return 0
     fi
     # shellcheck disable=SC1090
     source "$GAUNTLET_CONFIG"
@@ -43,7 +45,7 @@ load_gauntlet() {
 
 # run_step runs one named gauntlet step: the command from $stepname, or a clear
 # skip when the config does not define one. Failure of a configured command
-# rejects the commit/push.
+# fails the verification (or rejects the commit, in the opt-in hook path).
 run_step() {
     local stepname="$1"
     local cmd

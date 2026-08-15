@@ -4,43 +4,68 @@
 # overwritten, every change is recorded in .mill/install.json, and
 # mill-uninstall reverses it.
 #
-#   mill-install <scaffold-dir>              — install (refuse if hooks exist)
-#   mill-install <scaffold-dir> --replace-hooks
-#                                            — adopt git's hooks pointer even if
-#                                              the project has one, recording
-#                                              the previous value for undo. The
-#                                              old hook files stay on disk.
+#   mill-install <scaffold-dir>              — install (no git hooks)
+#   mill-install <scaffold-dir> --with-hooks — also point git's core.hooksPath
+#                                              at .mill/checks, only when the
+#                                              project has no hooks configured.
+#
+# Mill's gates do not run from git hooks (see ADR 0009). The coordinator runs
+# .mill/checks/mill-verify against a worker's worktree after every dispatch;
+# the project's own hooks stay the project's. core.hooksPath is adopted only
+# when a project explicitly asks for it AND has no value to displace.
+#
+# Validation happens before any copy: if any precondition fails, nothing has
+# been changed.
 #
 # Steps:
-#   1. Copy .mill/ and checks/ from the scaffold (additive; Mill owns .mill/).
-#   2. Adopt core.hooksPath — refuse by default if the project already has one
-#      set to something else; with --replace-hooks, record the previous value
-#      in the manifest and take over. Never chain: git holds one value.
-#   3. Link the skill into .claude/skills/using-mill/ — create the directory if
+#   1. Validate: git repo, scaffold has .mill/, skill source present.
+#   2. Copy .mill/ and checks/ from the scaffold (additive; Mill owns .mill/).
+#   3. Optionally (--with-hooks) adopt core.hooksPath — only if unset. Never
+#      chain, never overwrite, never replace: git holds one value.
+#   4. Link the skill into .claude/skills/using-mill/ — create the directory if
 #      needed, refuse if something is already there, never overwrite.
-#   4. Write .mill/install.json so mill-uninstall can undo all of it.
+#   5. Write .mill/install.json so mill-uninstall can undo all of it.
 #
 # Re-running on an already-installed project is a no-op that says so.
 set -euo pipefail
 
 scaffold="${1:-}"
-replace_hooks=0
-if [[ "${2:-}" == "--replace-hooks" ]]; then
-    replace_hooks=1
+with_hooks=0
+if [[ "${2:-}" == "--with-hooks" ]]; then
+    with_hooks=1
 fi
 
 if [[ -z "$scaffold" || ! -d "$scaffold/.mill" ]]; then
-    echo "usage: mill-install <scaffold-dir> [--replace-hooks]" >&2
+    echo "usage: mill-install <scaffold-dir> [--with-hooks]" >&2
     echo "  <scaffold-dir> is a Mill scaffold (contains .mill/ and checks/)" >&2
-    echo "  --replace-hooks adopts git's hooks pointer even if one is set," >&2
-    echo "                 recording the previous value for mill-uninstall" >&2
+    echo "  --with-hooks also adopts git's hooks pointer (core.hooksPath -> .mill/checks)," >&2
+    echo "              only when no hooks are configured. Mill's gates run from the" >&2
+    echo "              dispatch boundary (mill-verify), not from git hooks (ADR 0009)." >&2
     exit 2
 fi
 
-# Refuse to run outside a git repository — hooks are a git feature.
+# --- 1. Validate before copying anything -------------------------------------
+# Every precondition below must pass before a single file is copied. A failed
+# install prints "Nothing has been changed." and it is true.
+
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "error: not a git repository. Mill's gates are git hooks; run this in a repo." >&2
+    echo "error: not a git repository. Run this inside the project to install into." >&2
     exit 1
+fi
+
+if [[ ! -f "$scaffold/.mill/skills/using-mill.md" ]]; then
+    echo "error: $scaffold/.mill/skills/using-mill.md is missing from the scaffold" >&2
+    exit 1
+fi
+
+if [[ "$with_hooks" -eq 1 ]]; then
+    current="$(git config --get core.hooksPath 2>/dev/null || true)"
+    if [[ -n "$current" ]]; then
+        echo "error: this project already has git hooks configured (core.hooksPath='$current')." >&2
+        echo "  Mill's gates do not run from git hooks (ADR 0009) and will not replace yours." >&2
+        echo "  Nothing has been changed." >&2
+        exit 1
+    fi
 fi
 
 top="$(git rev-parse --show-toplevel)"
@@ -51,47 +76,39 @@ CHANGES=0
 
 echo "mill: installing into $top"
 
-# --- 1. Copy the policy directory and the gates -----------------------------
+# --- 2. Copy the policy directory and the gates ------------------------------
 # Additive: everything copied lands under .mill/ or checks/, both Mill's own.
 cp -r "$scaffold/.mill" .
 cp -r "$scaffold/checks" .
 chmod +x .mill/checks/* checks/* 2>/dev/null || true
 
-# --- 2. Hooks — adopt core.hooksPath, never chain, refuse by default ---------
-# Capture the pre-install value before any mutation: it is the undo record.
+# --- 3. Hooks — opt-in only, and only when nothing is configured -------------
+# The pre-set value is the undo record: capture it before any mutation and
+# write it to the manifest, so mill-uninstall restores what was there before
+# Mill, not what Mill set.
 previous="$(git config --get core.hooksPath 2>/dev/null || true)"
-current="$previous"
-mill_hooks=".mill/checks"
-
-if [[ -z "$current" ]]; then
-    git config core.hooksPath "$mill_hooks"
-    echo "mill: git now runs the gauntlet from $mill_hooks (core.hooksPath)"
-    CHANGES=1
-elif [[ "$current" == "$mill_hooks" ]]; then
-    echo "mill: core.hooksPath already points at $mill_hooks — nothing to do"
-elif [[ "$replace_hooks" -eq 1 ]]; then
-    # Explicit confirmation. The previous value is recorded in the manifest,
-    # the old hook files stay on disk, and mill-uninstall restores the value.
-    git config core.hooksPath "$mill_hooks"
-    echo "mill: replaced core.hooksPath '$current' -> '$mill_hooks' (recorded for undo)"
-    echo "mill: your old hooks at '$current' were NOT deleted — they are simply no"
-    echo "mill: longer run by git. Restore them any time with: mill-uninstall"
-    CHANGES=1
+if [[ "$with_hooks" -eq 1 ]]; then
+    mill_hooks=".mill/checks"
+    if [[ -z "$previous" ]]; then
+        git config core.hooksPath "$mill_hooks"
+        echo "mill: git now runs the gauntlet from $mill_hooks (core.hooksPath)"
+        CHANGES=1
+    elif [[ "$previous" == "$mill_hooks" ]]; then
+        echo "mill: core.hooksPath already points at $mill_hooks — nothing to do"
+    else
+        # Validated above; this branch is unreachable in practice.
+        echo "error: core.hooksPath is set to '$previous'; refusing to replace it." >&2
+        echo "  Mill never chains and never replaces: git holds one value." >&2
+        exit 1
+    fi
 else
-    echo "error: this project already has git hooks configured (core.hooksPath='$current')." >&2
-    echo "  Mill will NOT replace them. Nothing has been changed." >&2
-    echo "  Decide how to proceed:" >&2
-    echo "    - keep your current hooks and skip Mill's gate hooks:" >&2
-    echo "        git config core.hooksPath '$current'   # already the case" >&2
-    echo "    - let Mill's gauntlet take over (your old hooks stop running, but" >&2
-    echo "      are not deleted; the previous path is saved for undo):" >&2
-    echo "        mill-install <scaffold-dir> --replace-hooks" >&2
-    echo "  Re-run mill-install after deciding. The skill link step below was" >&2
-    echo "  skipped; your existing hooks were not touched." >&2
-    exit 1
+    echo "mill: no hooks installed. Mill's gates run from the dispatch boundary:"
+    echo "  mill-verify --worktree <path> --role <role> --files-modified <list>"
+    echo "  (see .mill/checks/mill-verify and ADR 0009). Add --with-hooks to also"
+    echo "  adopt core.hooksPath, only when the project has no hooks configured."
 fi
 
-# --- 3. Skill — install beside, never overwrite ------------------------------
+# --- 4. Skill — install beside, never overwrite ------------------------------
 skill_link=".claude/skills/using-mill/SKILL.md"
 skill_source=".mill/skills/using-mill.md"
 
@@ -123,7 +140,7 @@ else
     CHANGES=1
 fi
 
-# --- 4. Manifest — the undo record -------------------------------------------
+# --- 5. Manifest — the undo record -------------------------------------------
 if [[ "$CHANGES" -eq 0 ]]; then
     echo "mill: nothing to change — Mill is already installed"
     exit 0

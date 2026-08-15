@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # mill-uninstall — undo a mill-install, using the manifest it wrote.
 # Reverses exactly what install.json records: restores the previous
-# core.hooksPath (or unsets it), removes the skill link, deletes the manifest.
-# The .mill/ policy files are left in place.
+# core.hooksPath (or unsets it) when --with-hooks was used, removes the skill
+# link, deletes the manifest. The .mill/ policy files are left in place.
 #
 # Without a manifest this refuses and prints the manual undo — a project
 # installed before the manifest existed still has a defined way back.
@@ -21,7 +21,6 @@ MANIFEST=".mill/install.json"
 if [[ ! -f "$MANIFEST" ]]; then
     echo "error: no $MANIFEST — nothing recorded to undo." >&2
     echo "  If Mill was installed before manifests existed, undo by hand:" >&2
-    echo "    git config core.hooksPath <your-previous-value>   # or: git config --unset core.hooksPath" >&2
     echo "    rm -f .claude/skills/using-mill/SKILL.md" >&2
     echo "    rmdir .claude/skills/using-mill 2>/dev/null || true" >&2
     exit 1
@@ -34,15 +33,18 @@ skill_link="$(sed -n 's/^  "skillLink": "\(.*\)",$/\1/p' "$MANIFEST" | head -1)"
 
 echo "mill: uninstalling from $top"
 
-# 1. Restore the previous hooks path, or unset if there was none.
+# 1. Restore the previous hooks path, or unset if there was none. With the
+#    default (no --with-hooks) install, install.json records the empty string
+#    and this branch leaves any current core.hooksPath alone — it was never
+#    Mill's to change, and it must not be unset on Mill's behalf.
 if [[ -n "$previous" ]]; then
     git config core.hooksPath "$previous"
     echo "mill: restored core.hooksPath=$previous"
-elif git config --get core.hooksPath >/dev/null 2>&1; then
+elif [[ "$(git config --get core.hooksPath 2>/dev/null || true)" == ".mill/checks" ]]; then
     git config --unset core.hooksPath
     echo "mill: unset core.hooksPath (no previous value)"
 else
-    echo "mill: core.hooksPath not set — nothing to restore"
+    echo "mill: core.hooksPath not set by Mill — leaving it alone"
 fi
 
 # 2. Remove the skill link we created, and the now-empty directories.

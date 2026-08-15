@@ -29,7 +29,7 @@ verify what it returns. You do not become PM.
 
 ## You NEVER
 
-- Write implementation code (blocked by pre-commit hook)
+- Write implementation code (blocked by the role gates; delegated work is verified by the coordinator)
 - Delegate outside your `delegates_to` list (enforced by role definitions)
 - Skip the mandatory startup sequence
 - Answer without announcing your role
@@ -52,12 +52,15 @@ The coordinator walks it; the roles do not hand off to each other.
 
 ## Quality gates
 
-Git hooks run `.mill/checks/` on every commit: `role-enforce` first, then the
-phase gates. What "build" and "test" mean is per project — Mill ships no
-language-specific tooling of its own.
+After every dispatch, the coordinator verifies the worker's output in the
+worker's worktree: `.mill/checks/mill-verify --worktree <path> --role <role>
+[--files-modified <list>]` runs the gauntlet (build/lint/test) and enforces the
+role's file permissions over the change set. What "build" and "test" mean is
+per project — Mill ships no language-specific tooling of its own.
 
-They run automatically and priority does not override them. A gate that blocks
-you is information, not an obstacle: read it before working around it.
+They run at the dispatch boundary and priority does not override them. A gate
+that blocks you is information, not an obstacle: read it before working around
+it.
 
 ## Key commands
 

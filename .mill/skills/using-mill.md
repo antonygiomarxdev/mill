@@ -1,29 +1,95 @@
 ---
 name: using-mill
-description: Use when delegating work to specialised roles — dispatching a worker, building a brief from a ROLE.md, answering a raised hand, verifying a worker's result against phase gates, or deciding which role comes next. Triggers on "delegate this", "dispatch a worker", "who should do this", "hand this to the architect", and on any request to build a feature, fix a bug, write a spec or review work where the work should go to a role rather than be done in this session.
+# Description design — docs/research/skill-authoring.md §4.5 documents two
+# contradicting camps: superpowers says descriptions must be triggers only
+# ("what" makes agents shortcut past the body), while Anthropic's published
+# guidance says include both "what" and "when". We follow Anthropic: one-line
+# "what" opener plus explicit trigger phrases.
+description: >-
+  Coordinate multi-role work through Mill's delegation framework.
+  Use when dispatching a worker role, building a brief from a ROLE.md,
+  answering a raised hand, verifying a worker's result against phase
+  gates, deciding which role comes next, or when the user says
+  "delegate this", "dispatch a worker", "who should do this", "hand
+  this to the architect", or asks to build a feature, fix a bug, write
+  a spec, or review work where the work should go to a role rather
+  than be done in this session.
 ---
 
 # Using Mill
 
-Dispatch worker roles through Orca's orchestration CLI. One coordinator (Staff) sequences work; workers execute and report.
+Dispatch worker roles through Orca's orchestration CLI. One coordinator (Staff)
+sequences work; workers execute and report.
 
-## Topology
+The topology, reporting, and raising-a-hand rules live in
+`.mill/roles/COMMON.md` — read it first. This skill is the coordinator's
+procedure on top of it.
+
+## When to use Mill — and when not to
+
+**Use Mill when the work is delegable:** it is well-scoped, a role owns it, and
+its acceptance criteria are countable. That is almost all feature, bug, spec,
+design, review, and documentation work.
+
+**Do it yourself when:** the work is one small edit or a simple question, you
+are mid-verification and already hold the context, or it is the policy-author
+role's own recurring maintenance of `.mill/`. Ask: *would a worker start colder
+than I am right now?* If yes, delegate. If the worker would spend more time
+reading context than doing the work, do it yourself.
+
+## Glossary
+
+| Term | Meaning |
+|------|---------|
+| **FRD** | Functional Requirements Document. PM's product spec: user need, numbered functional requirements, out-of-scope, priority. Gate: `gate-frd`. |
+| **ADR** | Architecture Decision Record. A cross-cutting technical decision with context, decision, alternatives, consequences. Lives in `docs/adr/`, immutable once accepted. |
+| **Spec** | Technical specification (the Architect's `spec.md`): architecture, components affected, risks, ADR links. Gate: `gate-spec`. |
+| **Brief** | The task description a coordinator writes from a `ROLE.md` plus issue context. The brief is the spec — `task-create --spec "$(cat brief.md)"`. |
+| **Stage** | Pipeline position: `stage:spec` → `stage:design` → `stage:dev` → `stage:review`. Decides which role is next. |
+| **Gate** | A mechanical check in `.mill/checks/` that blocks a phase transition until it passes. A gate that is never exercised is documentation, not enforcement. |
+
+## Picking a role
+
+| Stage | Role | Produces |
+|-------|------|----------|
+| `stage:spec` | PM | FRD with measurable acceptance criteria |
+| `stage:design` | Architect | ADR + spec.md |
+| `stage:dev` | Tech Lead | Task decomposition + code review |
+| `stage:dev` (implementation) | Sr Dev (BE/FE/Data) | Code, tests, commits |
+| `stage:review` | Reviewer | APPROVED or CHANGES verdict |
+| any | QA/Docs | Tests, changelogs, documentation |
+| `stage:design` (UX) | UX Designer | Flows, wireframes, interaction specs |
+| `stage:design` (UI) | UI Designer | Tokens, component specs, redlines |
+| `.mill/**` | Policy Author | Coherent policy, no contradictions |
+
+The table maps stages to roles, but real dispatch decisions are more nuanced.
+Walk the questions instead of matching labels:
 
 ```
-coordinator (Staff)
-  ├── PM              — FRDs, backlog, priorities
-  ├── Architect       — ADRs, specs, system boundaries
-  ├── Tech Lead       — decomposition, code review, quality gates
-  ├── Sr Dev BE       — backend implementation
-  ├── Sr Dev FE       — frontend implementation
-  ├── Sr Dev Data     — database implementation
-  ├── Reviewer        — spec compliance, code quality
-  ├── QA / Docs       — tests, changelogs, documentation
-  ├── UX Designer     — flows, wireframes, interaction specs
-  └── UI Designer     — tokens, components, visual specs
+Is the work product code, or a decision?
+├── A decision / document the CTO or user asked for
+│   ├── Product decision? ────────────────→ PM
+│   ├── Cross-cutting technical decision? ──→ Architect
+│   └── Task decomposition / review plan? ─→ Tech Lead
+├── Product code
+│   ├── Backend? ──→ Sr Dev BE
+│   ├── Frontend? ──→ Sr Dev FE
+│   └── Data / DB? ─→ Sr Dev Data
+├── Reviewing work? ────────────────────────→ Reviewer
+├── Tests, changelogs, or docs? ────────────→ QA/Docs
+├── User flows / wireframes? ───────────────→ UX Designer
+├── Tokens / component specs / redlines? ───→ UI Designer
+└── Maintaining .mill/** (roles, skill, gates)? ─→ Policy Author
 ```
 
-The coordinator is the hub. It dispatches to a role, receives the result, decides the next step, and dispatches again. No worker dispatches other workers.
+Multi-role sequences for a feature:
+
+```
+PM (FRD) → Architect (spec) → Tech Lead (decomposition) → Sr Dev (implementation) → Reviewer (verification)
+```
+
+Dispatch one role at a time. Do not dispatch the next until the current one
+reports back and you verify its output.
 
 ## Precondition: Orca must be up
 
@@ -44,8 +110,7 @@ until orca status 2>/dev/null | grep -q "runtimeReachable: true"; do sleep 2; do
 ```
 
 `orca open` launches the desktop app. `orca serve` starts a headless runtime and
-is the right choice where no desktop session exists — it is untested here
-(ADR 0005).
+is the right choice where no desktop session exists — it is untested here.
 
 If a dispatch failed because the runtime dropped, check whether the task was
 created before re-creating it:
@@ -66,28 +131,7 @@ Read the issue (or FRD, or task description). Identify:
 - Which role should work on it next
 - What the acceptance criteria are (or what they should be, if the role is PM)
 
-### 2. Pick the role
-
-| Stage | Role | Produces |
-|-------|------|----------|
-| `stage:spec` | PM | FRD with measurable acceptance criteria |
-| `stage:design` | Architect | ADR + spec.md |
-| `stage:dev` | Tech Lead | Task decomposition + code review |
-| `stage:dev` (implementation) | Sr Dev (BE/FE/Data) | Code, tests, commits |
-| `stage:review` | Reviewer | APPROVED or CHANGES verdict |
-| any | QA/Docs | Tests, changelogs, documentation |
-| `stage:design` (UX) | UX Designer | Flows, wireframes, interaction specs |
-| `stage:design` (UI) | UI Designer | Tokens, component specs, redlines |
-
-Multi-role sequences for a feature:
-
-```
-PM (FRD) → Architect (spec) → Tech Lead (decomposition) → Sr Dev (implementation) → Reviewer (verification)
-```
-
-Dispatch one role at a time. Do not dispatch the next until the current one reports back and you verify its output.
-
-### 3. Read the role's ROLE.md
+### 2. Read the role's ROLE.md
 
 Before building the brief, read the worker's `.mill/roles/<role>/ROLE.md`. It tells you:
 - What the role produces
@@ -97,7 +141,7 @@ Before building the brief, read the worker's `.mill/roles/<role>/ROLE.md`. It te
 
 The ROLE.md is the worker's contract. Your brief adds the specific context for this task.
 
-### 4. Build the brief
+### 3. Build the brief
 
 Compose a brief that a worker can execute without asking you for context. Keep it short — reference files instead of inlining content.
 
@@ -143,7 +187,7 @@ Rules:
   touch them" produced a result that deleted both. The reference implementer
   template Orca ships is 142 lines with no prohibition section at all.
 
-### 5. Dispatch
+### 4. Dispatch
 
 ```bash
 # Create the task — the brief IS the spec
@@ -185,7 +229,7 @@ Notes measured in practice:
   the model is whatever the agent's own configuration selects. See
   **Model selection** below — the tier is chosen by picking the agent.
 
-### 5b. Read the state — idle is not done
+### 5. Read the state — idle is not done
 
 `terminal wait --for tui-idle` returning `satisfied: true` means **the TUI is
 not busy**. It does not mean the work finished. Read the terminal and decide
@@ -259,14 +303,26 @@ If a gate fails, dispatch the role back with the failure details.
 
 ### 10. Handle failures
 
-If a worker reports `--outcome failed` or BLOCKED:
-- Read the body for specifics
-- If it is a context problem, provide more context and re-dispatch
-- If it requires more capability, re-dispatch with a more capable model
-- If the brief was wrong, fix the brief and re-dispatch
-- If the blocker is beyond delegation, escalate to the CTO
+If a worker reports `--outcome failed` or BLOCKED, fix the cause — never
+re-dispatch unchanged, never ignore:
 
-Never ignore a failure. Never re-dispatch without changing something.
+| Failure | Fix |
+|---------|-----|
+| Context problem — "which file?", "what does this do?" | Provide the missing context in the brief, re-dispatch |
+| Capability problem — "this needs a pro model" | Re-dispatch with a more capable model (switch tier) |
+| Wrong brief — acceptance criteria contradict the intent | Fix the brief, re-dispatch |
+| Blocker beyond delegation — product/scope call | Escalate to the CTO |
+| Died silently — `Connection error`, TUI stuck | Read the terminal; resume with `--text "continue" --enter` or re-dispatch |
+
+### 11. Decision thresholds — when a result is good enough
+
+| Situation | Verdict | Do |
+|-----------|---------|----|
+| All acceptance criteria verify, gates pass, `allowed_files` respected | **Good enough** | Land it; do not polish |
+| Criteria verify but a gate fails | **Not done** | Dispatch the role back with the gate failure |
+| Free-tier worker fails on judgment (not execution) | **Escalate tier** | Re-dispatch on the thinking tier; record which tier ran |
+| Two workers fail the same task | **Escalate** | To the CTO — do not burn a third dispatch |
+| Contradiction between a document and an ADR | **ADR wins** | Fix the document, cite the ADR |
 
 ## Model selection — the tier is the agent
 
@@ -351,3 +407,55 @@ narrated.
 before landing anything. Reports have claimed passing acceptance criteria while
 the central document still contradicted the decision it was meant to implement,
 and have described a file as never having existed when it was simply untracked.
+
+## Common mistakes
+
+| Mistake | Why it happens | Fix |
+|---------|----------------|-----|
+| Dispatching the next role before verifying the current result | The cycle looks sequential; the result looks done | Verify (step 8) before you dispatch again |
+| Trusting the worker's report instead of re-running the gates | The report says "all pass" and it is cheaper to believe it | Recalculate every quantitative claim and run the gates yourself |
+| Polling with a shell loop for a result | A wait command exists but the loop is habit | Use `terminal wait --for tui-idle`, then read the terminal |
+| Taking "idle" for "done" | `tui-idle` sounds like completion | Read the terminal: delivered, waiting for input, or died |
+| Re-dispatching without changing anything | The failure looked like bad luck | Every re-dispatch changes the brief, the context, or the tier |
+| Delegating work that is faster to do yourself | Mill is available, so it is the default | Apply the boundary: small edits and cold-start-heavy work stay local |
+
+## End-to-end example
+
+A concrete cycle, from issue to landing.
+
+**Issue:** #42 — `internal/ledger` is at 77.1% coverage; project minimum is 90%.
+
+**1. Read the issue.** Stage `stage:dev`, implementation work, backend. Role:
+Sr Dev BE. Acceptance: coverage ≥90% in `internal/ledger`, gates clean.
+
+**2. Build the brief** from `.mill/roles/sr-dev-be/ROLE.md` plus context
+("the package sits at 77.1%, COMMON.md requires 90%"), acceptance criteria
+(greps and gate commands, never adjectives), and a "Do not touch" note.
+
+**3. Dispatch** (Orca up first):
+
+```bash
+RUN=$(orca orchestration run-create --objective "coverage" --json | grep -oE 'run_[a-z0-9]+' | head -1)
+TASK=$(orca orchestration task-create --run $RUN --task-title "Raise ledger coverage" \
+  --spec "$(cat brief.md)" --json | grep -oE 'task_[a-z0-9]+' | head -1)
+orca orchestration worker-start --run $RUN --task $TASK \
+  --agent command-code --worktree new-child --name ledger-cov --repo path:$(pwd)
+orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 300000
+```
+
+**4. Verify the result** — do not believe the worker's numbers:
+
+```bash
+orca orchestration inbox --limit 5 --full          # the worker_done report
+bash .mill/checks/gate-coverage                    # run the gate yourself
+```
+
+**5. Land, then close the worker down** — nothing is cleaned up automatically:
+
+```bash
+orca orchestration worker-release --dispatch <ctx_id>
+orca worktree rm --worktree name:ledger-cov        # read any refusal before --force
+```
+
+**Result:** coverage from 77.1% to 94.3% in one dispatch — the run that
+demonstrated Mill's policy layer working with Orca's substrate (see ADR 0006).

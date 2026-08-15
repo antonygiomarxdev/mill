@@ -71,7 +71,11 @@ git config core.hooksPath .mill/checks
 cp .mill/gauntlet.example .mill/gauntlet
 $EDITOR .mill/gauntlet
 
-# 4. Hook up the skill so the session discovers it
+# 4. Map role capabilities to your project's file types
+cp .mill/role-capabilities.example .mill/role-capabilities
+$EDITOR .mill/role-capabilities
+
+# 5. Hook up the skill so the session discovers it
 mkdir -p .claude/skills/using-mill
 ln -s ../../../.mill/skills/using-mill.md .claude/skills/using-mill/SKILL.md
 ```
@@ -89,6 +93,14 @@ test="npm test"
 Skip it and the hooks say so and pass; they never guess. Whatever you write
 runs on every commit, so `role-enforce` and the phase gates protect the repo
 from the first commit onward.
+
+`.mill/role-capabilities` is the same shape — plain bash mapping each role
+capability category (`code`, `docs`, `config`, `policy`, `scripts`, `design`)
+to the file patterns that category may touch in your project. Roles declare
+categories, never languages, so the same role contracts work in any project;
+only this one file names your file types. Skip it and `role-enforce` blocks
+every commit with a message saying exactly what to create — it fails closed,
+never open.
 
 ### Why the skill is hooked up per project
 
@@ -234,8 +246,11 @@ docs/
 ```
 
 Every role's `ROLE.md` declares what it produces, its acceptance criteria, its
-`allowed_files`, and how to report. `.mill/checks/role-enforce` derives
-capabilities from those frontmatters, so adding a role requires no code change.
+`allowed_files` capability categories, and how to report.
+`.mill/checks/role-enforce` resolves those categories to file patterns through
+`.mill/role-capabilities` — the one per-project file that names your languages —
+so adding a role requires no code change, and changing language is one line,
+not a diff across every role.
 
 ## Architecture Decision Records
 

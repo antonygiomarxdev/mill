@@ -4,8 +4,8 @@ model: pro
 agent: task
 reviewed_by: staff
 allowed_files:
-  - .md
-  - .pen
+  - docs
+  - design
 skills:
   - prototype
   - domain-modeling
@@ -29,7 +29,7 @@ You do not decide visual design (that is UI Designer). You do not implement (tha
 
 ## Allowed files
 
-- `.md`, `.pen`
+- `docs`, `design` — mapped to this project's file patterns in `.mill/role-capabilities`
 
 ## Skills
 

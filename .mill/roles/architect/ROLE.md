@@ -4,9 +4,8 @@ model: pro
 agent: task
 reviewed_by: staff
 allowed_files:
-  - .md
-  - .yml
-  - .yaml
+  - docs
+  - config
 skills:
   - codebase-design
   - domain-modeling
@@ -32,7 +31,7 @@ You do not review individual PRs (that is Tech Lead). You do not implement featu
 
 ## Allowed files
 
-- `.md`, `.yml`, `.yaml`
+- `docs`, `config` — mapped to this project's file patterns in `.mill/role-capabilities`
 
 ## Skills
 

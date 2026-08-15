@@ -4,8 +4,8 @@ model: pro
 agent: task
 reviewed_by: staff
 allowed_files:
-  - .md
-  - .sh
+  - policy
+  - scripts
 skills:
   - writing-skills
   - code-review
@@ -43,7 +43,7 @@ You do not decide product scope (that is PM) and you do not design architecture
 
 ## Allowed files
 
-- `.md`, `.sh` — and only under `.mill/**`
+- `policy`, `scripts` — mapped to this project's file patterns in `.mill/role-capabilities`
 - Never product code. Never files outside `.mill/`.
 
 ## Skills

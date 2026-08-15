@@ -9,6 +9,7 @@
 set -euo pipefail
 
 ROLES_DIR=".mill/roles"
+CAPABILITIES_FILE=".mill/role-capabilities"
 
 # --- helpers ----------------------------------------------------------------
 
@@ -27,6 +28,60 @@ parse_list() {
       flag && !/^  - /    { exit }
       flag && /^  - /     { gsub(/^  - /, ""); print }
     ' "$file" | xargs 2>/dev/null
+}
+
+# resolve_categories maps a role's allowed_files categories to the project's
+# file patterns via .mill/role-capabilities (same shape as .mill/gauntlet:
+# plain bash, sourced). An unmapped category or a missing capabilities file
+# fails closed — it blocks, never allows.
+resolve_categories() {
+    local role="$1" role_md="$2"
+
+    # Parse the role's declared categories (e.g. code, docs, config).
+    local categories
+    categories=$(parse_list "allowed_files" "$role_md")
+    if [[ -z "$categories" ]]; then
+        echo "pre-commit: BLOCKED — role '$role' has no file permissions." >&2
+        echo "  $role has an empty allowed_files list." >&2
+        echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
+        exit 1
+    fi
+
+    # Load the project's category → pattern map.
+    local top
+    top=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
+    local cfg="$top/$CAPABILITIES_FILE"
+    if [[ ! -f "$cfg" ]]; then
+        echo "pre-commit: BLOCKED — role '$role' cannot commit: no $CAPABILITIES_FILE." >&2
+        echo "  Role '$role' may write: $categories" >&2
+        echo "  Map those categories to file patterns in .mill/role-capabilities" >&2
+        echo "  (copy the example from .mill/role-capabilities.example)." >&2
+        echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
+        exit 1
+    fi
+    # shellcheck disable=SC1090
+    source "$cfg"
+
+    # Expand categories into patterns; unmapped categories block.
+    local expanded="" missing=""
+    local c
+    for c in $categories; do
+        local patterns
+        patterns="${!c:-}"
+        if [[ -z "$patterns" ]]; then
+            missing="$missing $c"
+            continue
+        fi
+        expanded="$expanded $patterns"
+    done
+    if [[ -n "$missing" ]]; then
+        echo "pre-commit: BLOCKED — role '$role' declares categories not in $CAPABILITIES_FILE:$missing" >&2
+        echo "  Add the missing category or edit the role's allowed_files." >&2
+        echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
+        exit 1
+    fi
+
+    echo "$expanded" | xargs
 }
 
 # check_forbidden returns 0 if the file basename is NOT forbidden.
@@ -67,15 +122,10 @@ enforce_file() {
         exit 1
     fi
 
-    # 2. Empty allowed_files → block everything with clear message
-    if [[ -z "$allowed" ]]; then
-        echo "pre-commit: BLOCKED — role '$role' has no file permissions." >&2
-        echo "  $role has an empty allowed_files list." >&2
-        echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
-        exit 1
-    fi
+    # 2. Resolve the role's categories to the project's file patterns
+    allowed=$(resolve_categories "$role" "$role_md")
 
-    # 3. Check extension against allowed list
+    # 3. Check extension against the resolved patterns
     local ext ext_lc
     ext=".${file##*.}"
     ext_lc=$(echo "$ext" | tr '[:upper:]' '[:lower:]')

@@ -1,0 +1,24 @@
+# role-capabilities — maps a role's declared capabilities to file patterns.
+#
+# Roles declare categories (code, docs, config, policy, scripts, design) in the
+# allowed_files field of their ROLE.md. This file says what those mean HERE.
+# Mill ships no default: a project's languages are its own, and guessing them
+# is how the roles ended up hardcoded to .go.
+#
+# Uncomment and edit for your stack. Examples, not defaults:
+#
+#   code=".ts .tsx .js .jsx .css"        # a TypeScript project
+#   code=".py .pyi"                      # Python
+#   code=".rs"                           # Rust
+#   code=".go"                           # Go
+#   code=".kt .java"                     # JVM
+#
+# Without this file role-enforce blocks everything and says so. That is
+# deliberate: a capability gate that fails open is not a gate.
+
+code=""
+docs=".md"
+config=".yml .yaml .json .toml"
+policy=".md .sh"
+scripts=".sh"
+design=".pen .fig"

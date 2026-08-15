@@ -1,3 +1,4 @@
 # The per-project gauntlet configuration is local to the project, like .mill/role.
 # The template ships an example instead; copy it to gauntlet and edit.
 /gauntlet
+/role-capabilities

@@ -54,7 +54,8 @@ off to each other (#153), recursion complexity (#109), and fan-out (#154).
 **Mill owns** (policy — Markdown and bash):
 - the eleven role definitions and their capabilities
 - the phase sequence — FRD → spec → tasks → implementation → review
-- `role-enforce`: what each role may write
+- `role-enforce`: what each role may write — role categories resolved to file
+  patterns through `.mill/role-capabilities`
 - the phase gates, including acceptance criteria
 - brief construction from role definition, issue, and upstream artifact
 - **model tier selection per dispatch** — the one substrate capability Orca does

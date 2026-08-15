@@ -4,7 +4,7 @@ model: pro
 agent: task
 reviewed_by: cto
 allowed_files:
-  - .md
+  - docs
 skills:
   - wayfinder
   - brainstorming

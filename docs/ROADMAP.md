@@ -18,8 +18,9 @@ of "works" here was measured; every claim of "unknown" means nobody has tried.
 - The coordinator dispatches a role worker through Orca, with a brief built from
   that role's `ROLE.md` and explicit acceptance criteria
 - A worker raises a hand, the coordinator answers, the worker continues
-- Role capabilities are enforced at commit by `role-enforce`, derived from each
-  role's frontmatter — adding a role is writing a Markdown file
+- Role capabilities are enforced at commit by `role-enforce`: roles declare
+  categories in frontmatter, resolved to file patterns per project via
+  `.mill/role-capabilities` — adding a role is writing a Markdown file
 - Phase gates block a phase whose artifact is missing or malformed
 - The cost tiers dispatch: `--agent claude --model <id>` for roles that think,
   `--agent command-code` for roles that write

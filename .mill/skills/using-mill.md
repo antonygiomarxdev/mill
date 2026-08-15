@@ -150,7 +150,7 @@ Read the issue (or FRD, or task description). Identify:
 Before building the brief, read the worker's `.mill/roles/<role>/ROLE.md`. It tells you:
 - What the role produces
 - Its acceptance criteria
-- Its `allowed_files`
+- Its `allowed_files` categories (mapped to file patterns per project in `.mill/role-capabilities`)
 - Its constraints and rules
 
 The ROLE.md is the worker's contract. Your brief adds the specific context for this task.

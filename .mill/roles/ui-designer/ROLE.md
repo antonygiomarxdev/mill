@@ -4,8 +4,8 @@ model: pro
 agent: task
 reviewed_by: staff
 allowed_files:
-  - .md
-  - .pen
+  - docs
+  - design
 skills:
   - prototype
   - domain-modeling
@@ -28,7 +28,7 @@ You do not decide user flows (that is UX Designer). You do not implement (that i
 
 ## Allowed files
 
-- `.md`, `.pen`
+- `docs`, `design` — mapped to this project's file patterns in `.mill/role-capabilities`
 
 ## Skills
 

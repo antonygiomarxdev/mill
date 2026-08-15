@@ -4,7 +4,7 @@ model: pro
 agent: task
 reviewed_by: staff
 allowed_files:
-  - .md
+  - docs
 skills:
   - wayfinder
   - grilling
@@ -30,7 +30,7 @@ You do not decide technical approach (that is Architect). You do not decide visu
 
 ## Allowed files
 
-- `.md` only
+- `docs` — mapped to this project's file patterns in `.mill/role-capabilities`
 
 ## Skills
 

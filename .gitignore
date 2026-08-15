@@ -23,6 +23,7 @@ mill
 # never reaches the role that needs it (#128).
 /.mill/memory/
 /.mill/role
+/.mill/role-capabilities
 /.mill/map.json
 /.mill/session.md
 /.mill/placeholder

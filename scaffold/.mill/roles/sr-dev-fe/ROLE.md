@@ -4,11 +4,9 @@ model: free→paid
 agent: task
 reviewed_by: tech-lead
 allowed_files:
-  - .go
-  - .md
-  - .yml
-  - .yaml
-  - .json
+  - code
+  - docs
+  - config
 forbidden_patterns:
   - ROLE.md
 skills:
@@ -36,7 +34,7 @@ Your model is cheap. Every token you spend debugging a problem that a 2-minute r
 
 ## Allowed files
 
-- `.go`, `.md`, `.yml`, `.yaml`, `.json`
+- `code`, `docs`, `config` — mapped to this project's file patterns in `.mill/role-capabilities`
 - Never touch `ROLE.md`
 
 ## Skills

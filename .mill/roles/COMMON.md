@@ -79,7 +79,7 @@ orca orchestration send \
 - **Coverage ≥90% minimum.** No exceptions for priority.
 - **Mutation testing on main.** Every mutant must be killed.
 - **Priority does not override quality.** PM says P0. Tech Lead says "not without tests."
-- **Gates run automatically.** pre-commit: build + vet. pre-push: test + coverage. land: mutation.
+- **Gates run automatically.** pre-commit: build + lint (from `.mill/gauntlet`). pre-push: test + coverage. land: mutation.
 
 ## Briefs for free models
 

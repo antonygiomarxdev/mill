@@ -4,8 +4,8 @@ model: free→paid
 agent: task
 reviewed_by: staff
 allowed_files:
-  - .md
-  - .yml
+  - docs
+  - config
 skills:
   - writing-plans
   - verification-before-completion
@@ -28,7 +28,7 @@ Your model is cheap. You are the last step before merge. Your output is the fina
 
 ## Allowed files
 
-- `.md`, `.yml`
+- `docs`, `config` — mapped to this project's file patterns in `.mill/role-capabilities`
 
 ## Skills
 
@@ -47,7 +47,7 @@ See `roles/COMMON.md`.
 - **Tests catch regressions.** No `expect(x).toBeTruthy()`. Countable assertions.
 - **Cover acceptance criteria.** Every criterion in the brief gets at least one test.
 - **Edge cases.** Empty, null, boundary, error states — all tested.
-- **Run the full suite.** `go test ./...` or equivalent. Never deliver with failing tests.
+- **Run the full suite.** Whatever the project's gauntlet declares — never deliver with failing tests.
 
 ### Documentation
 - **Changelog entries.** Every user-facing change gets a changelog entry. Format: `type(scope): description`.

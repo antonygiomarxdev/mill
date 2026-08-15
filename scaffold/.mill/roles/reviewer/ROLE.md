@@ -4,7 +4,7 @@ model: pro
 agent: cavecrew-reviewer
 reviewed_by: staff
 allowed_files:
-  - .md
+  - docs
 skills:
   - code-review
   - verification-before-completion
@@ -27,7 +27,7 @@ You do not review architecture (that is Tech Lead). You do not review product de
 
 ## Allowed files
 
-- `.md` only
+- `docs` — mapped to this project's file patterns in `.mill/role-capabilities`
 
 ## Skills
 

@@ -4,8 +4,8 @@ model: pro
 agent: task
 reviewed_by: architect
 allowed_files:
-  - .md
-  - .go
+  - docs
+  - code
 skills:
   - code-review
   - codebase-design
@@ -32,7 +32,7 @@ You do not decide architecture strategy (that is Architect). You do not decide p
 
 ## Allowed files
 
-- `.md`, `.go`
+- `docs`, `code` — mapped to this project's file patterns in `.mill/role-capabilities`
 
 ## Skills
 

@@ -8,6 +8,12 @@ Lessons learned from past failures live in `lessons.md` under each role director
 
 One coordinator dispatches work to worker roles. Workers execute and report back. No worker dispatches other workers.
 
+**That rule binds the coordinator too: never write a brief that tells a worker to dispatch.** If the work needs several roles in sequence, the coordinator runs the sequence — that *is* coordinating, and it cannot be delegated.
+
+The failure is quiet. Orca has one mailbox per Run, so a sub-worker's `worker_done` goes to the Run rather than to whoever dispatched it: the parent waits on a message delivered elsewhere, and the coordinator receives reports from workers it never dispatched and has no context for. Observed here when a brief said "dispatch Architect for a spec, then Tech Lead" — the worker complied, Orca allowed it, and nothing objected.
+
+A task that genuinely needs its own hierarchy creates its own Run (`orchestration run-create`) and says so in its report. That is an exception to declare, not a default.
+
 ```
 coordinator (Staff)
   ├── PM
@@ -73,7 +79,7 @@ orca orchestration send \
 - **Coverage ≥90% minimum.** No exceptions for priority.
 - **Mutation testing on main.** Every mutant must be killed.
 - **Priority does not override quality.** PM says P0. Tech Lead says "not without tests."
-- **Gates run automatically.** pre-commit: build + vet. pre-push: test + coverage. land: mutation.
+- **Gates run automatically.** pre-commit: build + lint (from `.mill/gauntlet`). pre-push: test + coverage. land: mutation.
 
 ## Briefs for free models
 

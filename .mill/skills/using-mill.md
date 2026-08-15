@@ -393,7 +393,7 @@ Found by running it. None lose work; all cost time if you do not know them.
 
 | Defect | Symptom | What to do |
 |---|---|---|
-| The brief is not submitted, with `--agent claude` | The `=== TASK ===` block sits in the input box as an unsubmitted draft; the worker never starts. Upstream [#14505](https://github.com/stablyai/orca/issues/14505), which reports the same for Claude and not for Codex. Confirmed here on Linux with both `--worktree new-child` and `current`, so it is the agent, not the selector. `--agent command-code` submits on its own. | Read the terminal after dispatch. `orca terminal send --terminal <handle> --enter` |
+| The brief is not submitted, with `--agent claude` | The `=== TASK ===` block sits as an unsubmitted draft and the worker never starts. **Fixed upstream** in [#14342](https://github.com/stablyai/orca/pull/14342) ("wait for Claude composer render"), merged 2026-08-13 22:04 UTC and shipped in **v1.4.183**. Seen here only on v1.4.182, published five hours before that merge. | Update Orca. On an older build, read the terminal and `orca terminal send --terminal <handle> --enter` |
 | Nothing injected at all, with `--agent command-code --worktree current` | The TUI launches on an empty prompt; no TASK block appears. Distinct from the above. | Send the brief yourself: `orca terminal send --terminal <handle> --text "<brief>" --enter` |
 | A dead worker looks like a busy one | `task-list` reads `[dispatched]`, `worker-show` reads `[ready] stage=input_accepted`. Nothing distinguishes "thinking" from "died on a provider error". | Read the terminal. `⚠ Error:` with a Trace ID means dead — resume with `--text "continue" --enter` |
 | The message counter does not clear | The session is told "You have N orchestration messages" indefinitely. `check --ack`, replying, and closing the originating task all fail to consume the delivery. | **Ignore the counter; read the inbox.** `orca orchestration inbox --limit 5 --full` is accurate and ordered |
@@ -401,12 +401,19 @@ Found by running it. None lose work; all cost time if you do not know them.
 | `orchestration ask` outside a worker | `The Dispatch capability is missing` | Expected: `ask` is for dispatched workers. Coordinators use `reply` |
 | Mail to a bare terminal handle has no reader | `send --to term_...` returns `ok: true` and the recipient can never read it, once its pane is bound to a Run — which every worker's is. Upstream [stablyai/orca#13656](https://github.com/stablyai/orca/issues/13656). | Address workers by `--to dispatch:<ctx_id>`, or reply to a message they sent. Never by bare terminal handle |
 
-Three of these are already filed upstream: the unsubmitted prompt is
-[#14505](https://github.com/stablyai/orca/issues/14505), the mailbox addressing
-is [#13656](https://github.com/stablyai/orca/issues/13656), and a related
-stdin defect is [#12630](https://github.com/stablyai/orca/issues/12630).
-**Search that tracker before diagnosing an Orca behaviour** — all three were
-rediscovered here the expensive way.
+**Check the version and the tracker before diagnosing an Orca behaviour.**
+Every item above was rediscovered here by experiment, and the first one was
+already fixed and released before it was investigated. The order that would
+have cost minutes instead of hours:
+
+```bash
+grep -ao '"version": *"[0-9.]*"' /tmp/.mount_orca*/resources/app.asar | head -1
+gh search issues --repo stablyai/orca "<symptom>" --state all
+gh release list --repo stablyai/orca --limit 3
+```
+
+Others filed upstream: mailbox addressing [#13656](https://github.com/stablyai/orca/issues/13656),
+a related stdin defect [#12630](https://github.com/stablyai/orca/issues/12630).
 
 A counter that always reads the same number is not a signal. Read the inbox.
 

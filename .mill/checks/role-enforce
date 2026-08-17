@@ -47,10 +47,13 @@ resolve_categories() {
         exit 1
     fi
 
-    # Load the project's category → pattern map.
-    local top
-    top=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
-    local cfg="$top/$CAPABILITIES_FILE"
+    # Load the category → pattern map from the repository the checks live in
+    # (the coordinator's Mill root), never from the worktree being verified:
+    # configuration that governs a worker cannot live in that worker's output,
+    # or the worker could widen its own permissions by editing the file.
+    local mill_root
+    mill_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    local cfg="$mill_root/$CAPABILITIES_FILE"
     if [[ ! -f "$cfg" ]]; then
         echo "pre-commit: BLOCKED — role '$role' cannot commit: no $CAPABILITIES_FILE." >&2
         echo "  Role '$role' may write: $categories" >&2

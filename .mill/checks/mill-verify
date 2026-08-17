@@ -7,8 +7,9 @@
 #
 # What it checks, in order:
 #   1. The gauntlet — build and lint (pre-commit steps) and test (pre-push
-#      step) as configured in the worktree's .mill/gauntlet. The gauntlet runs
-#      against the worktree, so it checks exactly what the worker produced.
+#      step). The config is read from the coordinator's Mill root (the repo
+#      the checks live in); the commands run inside the worktree, so they
+#      check exactly what the worker produced.
 #   2. Role capability enforcement — every changed file must be allowed for
 #      the dispatched role. The change set is --files-modified when given
 #      (the worker_done payload is the authoritative record), otherwise the
@@ -51,8 +52,11 @@ if [[ ! -d "$worktree" ]]; then
     exit 1
 fi
 
-cd "$worktree" || exit 1
-
+# Resolve the checks' own directory before moving into the worktree: the
+# role-capabilities and gauntlet configs are read from the repository the
+# checks live in (the coordinator's Mill root), never from the worktree
+# being verified. Resolving after `cd "$worktree"` would pick up the
+# worktree's copy of these scripts instead.
 here="$(cd "$(dirname "$0")" && pwd)"
 role_enforce="$here/role-enforce"
 if [[ ! -x "$role_enforce" ]]; then
@@ -60,13 +64,18 @@ if [[ ! -x "$role_enforce" ]]; then
     exit 1
 fi
 
+cd "$worktree" || exit 1
+
 violation=0
 
 # --- 1. The gauntlet: build, lint, test in the worktree ----------------------
-# load_gauntlet and run_step live in common.sh beside this script. With no
-# .mill/gauntlet configured, load_gauntlet says so and skips the steps — a
-# project with no gauntlet config fails nothing, like the hooks did. Role
-# enforcement below is independent and always runs.
+# load_gauntlet and run_step live in common.sh beside this script. The config
+# is read from the coordinator's Mill root (where the checks live), but
+# run_step evaluates the commands in the current cwd — the worktree — so the
+# gauntlet checks exactly what the worker produced. With no .mill/gauntlet
+# configured, load_gauntlet says so and skips the steps — a project with no
+# gauntlet config fails nothing, like the hooks did. Role enforcement below
+# is independent and always runs.
 # shellcheck source=common.sh
 source "$here/common.sh"
 

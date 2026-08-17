@@ -22,6 +22,7 @@ mill
 # delegated worktree materialises only tracked files, so an untracked frd.md
 # never reaches the role that needs it (#128).
 /.mill/memory/
+/.mill/agents
 /.mill/role
 /.mill/role-capabilities
 /.mill/map.json

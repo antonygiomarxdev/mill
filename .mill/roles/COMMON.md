@@ -88,6 +88,25 @@ orca orchestration send \
 - **Free models need explicit DO NOT sections.** "stdlib flag only, NOT cobra." "Classify from exit codes, NOT text output." The cheaper the model, the more specific the constraints must be.
 - **Ambiguity is the enemy of cheap models.** A pro model fills gaps correctly. A free model fills them creatively — and wrong.
 
+## Model tiers — the `free→paid` escalation rule
+
+Every role declares a tier in its `ROLE.md` frontmatter, `model:` — `free→paid`
+for producing roles, `pro` for judging ones. The declaration is read at dispatch
+time, not a comment:
+
+- A role declared `free→paid` is dispatched on the **free** tier first,
+  resolved through the project's `.mill/agents`. When the cheap attempt fails
+  on judgment rather than on execution, the coordinator re-dispatches the same
+  task on the **paid** tier — same brief, same task, new terminal. The
+  coordinator records which tier ran: it is the only evidence the cost model is
+  working.
+- A role declared `pro` is dispatched on the **pro** tier directly. No free
+  attempt first.
+
+The dispatch mechanics — resolving the tier, creating the worktree and
+terminal, the `--enter` submit — are in `.mill/skills/using-mill.md`
+("Model selection").
+
 ## What you can invoke
 
 Your `ROLE.md` frontmatter declares which skills are in your roster. Skills not declared are not prohibited, but must not be invoked without an explicit decision. See your role file for the list.

@@ -1,0 +1,34 @@
+# .mill/agents — per-project tier → (agent, model) mapping.
+#
+# Same shape as .mill/gauntlet and .mill/role-capabilities: plain bash,
+# sourced by the coordinator's dispatch procedure (see
+# .mill/skills/using-mill.md, "Model selection"). Each tier declares the
+# agent binary and the model identifier the worker's terminal starts with:
+#
+#   orca terminal create --command "<agent> --model <model>"
+#
+# The tier comes from the role's ROLE.md frontmatter `model:` field:
+#   free→paid  producing roles — dispatched on free first, re-dispatched on
+#              paid when the cheap attempt fails on judgment rather than on
+#              execution
+#   pro        judging roles — dispatched straight onto pro, no free attempt
+#
+# Measured free models, from `opencode models`, so nobody has to rediscover
+# them:
+#   opencode/deepseek-v4-flash-free
+#   opencode-go/deepseek-v4-flash
+#   ...and others suffixed -free
+#
+# Copy this file to .mill/agents and set the models your provider offers.
+# .mill/agents is per-project and gitignored; this example stays tracked.
+# The agent can be anything `orca terminal create --command` accepts — omp,
+# pi, command-code, claude.
+
+free_agent="omp"
+free_model="opencode-go/deepseek-v4-flash"
+
+paid_agent="omp"
+paid_model="opencode/deepseek-v4-pro"
+
+pro_agent="omp"
+pro_model="opencode/claude-opus-4-5"

@@ -237,9 +237,10 @@ Notes measured in practice:
   orca orchestration worker-read --dispatch <ctx_id> --limit 20 --json
   orca terminal send --terminal <handle> --enter   # submit the draft
   ```
-- `--model` accepts Claude, Codex and Cursor identifiers only. For other agents
-  the model is whatever the agent's own configuration selects. See
-  **Model selection** below — the tier is chosen by picking the agent.
+- `worker-start --model` accepts Claude, Codex and Cursor identifiers only — for
+  anything else the model is whatever the agent's own configuration selects. See
+  **Model selection** below — the tier resolves to an (agent, model) command
+  from `.mill/agents`, dispatched through a terminal.
 
 ### 5. Wait, and read what came back
 
@@ -378,21 +379,24 @@ re-dispatch unchanged, never ignore:
 | Two workers fail the same task | **Escalate** | To the CTO — do not burn a third dispatch |
 | Contradiction between a document and an ADR | **ADR wins** | Fix the document, cite the ADR |
 
-## Model selection — the tier is the agent
+## Model selection — the tier resolves to a command
 
 Expensive models decompose and review; cheap models write. That split is the
 reason this project exists, so it has to survive contact with the tooling.
 
-**Select the tier by choosing the agent, not by passing a model flag.**
+**Select the tier by resolving the role's `model:` field through `.mill/agents`.**
+Each tier is an (agent, model) pair; the model rides on the agent's command
+line, never on `worker-start --model`.
 
 **The tier follows the work, not the role.** A role that "thinks" still produces
 by volume when it writes a document or reads a codebase, and volume is what the
-cheap agent is for.
+cheap tier is for.
 
-| Work | Tier | Dispatch with |
-|------|------|---------------|
-| Producing — code, tests, docs, specs, FRDs, research | writes | `--agent command-code` |
-| Judging — reviewing a result, deciding between options, verifying a claim | thinks | `--agent claude --model <id>` |
+| Work | Tier | Resolved from `.mill/agents` |
+|------|------|------------------------------|
+| Producing — code, tests, docs, specs, FRDs, research | free | `free_agent` / `free_model` |
+| Producing that failed on judgment | paid | `paid_agent` / `paid_model` |
+| Judging — reviewing a result, deciding between options, verifying a claim | pro | `pro_agent` / `pro_model` |
 
 An Architect writing 300 lines of research is producing. The same Architect
 deciding whether a spec answers its FRD is judging. Dispatch the first cheap and
@@ -406,32 +410,63 @@ Getting this wrong is expensive and silent. Two document-production tasks were
 dispatched to `claude-opus-4-5` because a per-role table said PM and Architect
 "think".
 
-### Why not `--model` on every dispatch
+### Choosing the tier — the measured route
 
 `worker-start --model` accepts Claude, Codex and Cursor identifiers only. For any
 other agent the model is whatever that agent's own configuration selects — a
 `command-code` worker reports `xiaomi/mimo-v2.5-pro`, read from the global
 `~/.commandcode/config.json`.
 
-Measured, so nobody re-derives it:
+The route that works for every agent passes the model to the agent's own
+command line, through the terminal the worker runs in. Measured in this repo:
 
 | Approach | Result |
 |---|---|
 | `worker-start --model <id>` with `--agent command-code` | ignored |
 | `.commandcode/config.json` inside the project | not read; the global wins |
-| `command-code --config model=<id>` on the command line | **works** |
-| Orca passing extra args through to the agent | no mechanism |
+| `orca terminal create --command "omp --model <id>"` + `worker-start --terminal` | **works** for any agent |
 
-So the per-model route is closed until Orca can pass arguments through. Choosing
-the agent is open, gives the two tiers the cost model needs, and requires nothing
-from anyone else.
+So the per-model route is open. The procedure:
 
-Do **not** rewrite `~/.commandcode/config.json` between dispatches to fake a
-tier. It is global, and parallel workers would race on it.
+1. **Read the tier.** `.mill/roles/<role>/ROLE.md` frontmatter, `model:` field:
+   `free→paid` or `pro`.
+2. **Resolve it through `.mill/agents`.** Plain bash, one (agent, model) pair per
+   tier — `free_agent`/`free_model`, `paid_agent`/`paid_model`,
+   `pro_agent`/`pro_model`. A `free→paid` role dispatches on `free` first and
+   re-dispatches on `paid` when the cheap attempt fails on judgment; a `pro`
+   role goes straight to `pro`. The file is per-project and gitignored;
+   `.mill/agents.example` is the template.
+3. **Create the worktree**, if one is not already selected:
+   `orca worktree create --name <name> --repo path:<repo> --setup skip`
+4. **Create the terminal with that command**:
+   `orca terminal create --worktree name:<name> --title <title> --command "<agent> --model <model>" --json`
+5. **Dispatch onto it** — two measured constraints:
+   - `--terminal` requires a matching `--worktree` selector, or the start fails
+     with `terminal_worktree_mismatch`.
+   - `--agent` and `--terminal` are alternatives, not companions.
 
-Escalate a role to the thinking tier when a cheap dispatch fails on judgment
-rather than on execution. Record which tier ran — it is the only evidence the
-cost model is working at all.
+   ```bash
+   orca orchestration worker-start --run <run> --task <task> \
+     --worktree name:<name> --terminal <handle>
+   ```
+
+6. **Check whether the brief submitted.** `omp` does not submit the injected
+   brief — the terminal shows `[Paste #1, +107 lines]` and the worker sits idle
+   until the draft is sent. Submit it:
+
+   ```bash
+   orca terminal send --terminal <handle> --enter
+   ```
+
+   Which agents draft and which submit is in the known-defects table below.
+
+Do **not** rewrite `~/.commandcode/config.json` (or any agent's global config)
+between dispatches to fake a tier. It is global, and parallel workers would race
+on it — the terminal route makes that hack unnecessary.
+
+Escalate a role to the paid tier when a free dispatch fails on judgment rather
+than on execution. Record which tier ran — it is the only evidence the cost
+model is working at all.
 
 ## Worktree and worker lifecycle
 
@@ -463,7 +498,7 @@ Found by running it. None lose work; all cost time if you do not know them.
 
 | Defect | Symptom | What to do |
 |---|---|---|
-| The brief is not submitted, with `--agent claude` | The `=== TASK ===` block sits in the composer as a draft, `0 tokens` sent, and the worker never starts. **Still reproduces on v1.4.183**, which contains the fix from [#14342](https://github.com/stablyai/orca/pull/14342) — verified after updating, not assumed. `--agent command-code` submits on its own. Upstream issue: [#14505](https://github.com/stablyai/orca/issues/14505). | Read the terminal after dispatch and `orca terminal send --terminal <handle> --enter`. The agent then runs normally |
+| The brief is not submitted — with `--agent claude`, `omp`, or `pi` | The `=== TASK ===` block sits in the composer as a draft (`[Paste #1, +N lines]`), `0 tokens` sent, and the worker never starts. These agents draft because their registry entries carry `draftPromptEnvVar` (e.g. `ORCA_OMP_PREFILL`) — that field governs, not `promptInjectionMode`. `command-code` has no such field and submits on its own. **Still reproduces on v1.4.183**, which contains the fix from [#14342](https://github.com/stablyai/orca/pull/14342) — verified after updating, not assumed. Upstream issue: [#14505](https://github.com/stablyai/orca/issues/14505). | Read the terminal after dispatch and `orca terminal send --terminal <handle> --enter`. The agent then runs normally |
 | Nothing injected at all, with `--agent command-code --worktree current` | The TUI launches on an empty prompt; no TASK block appears. Distinct from the above. | Send the brief yourself: `orca terminal send --terminal <handle> --text "<brief>" --enter` |
 | A dead worker looks like a busy one | `task-list` reads `[dispatched]`, `worker-show` reads `[ready] stage=input_accepted`. Nothing distinguishes "thinking" from "died on a provider error". | Read the terminal. `⚠ Error:` with a Trace ID means dead — resume with `--text "continue" --enter` |
 | ~~The message counter does not clear~~ | **Not a defect — a usage error.** `check --ack` takes the delivery id: `check --ack <delivery_id>`. Bare `--ack` acknowledges nothing and the Delivery replays forever. | `orca orchestration check --ack <delivery_id> --wait --types worker_done,escalation,question` |

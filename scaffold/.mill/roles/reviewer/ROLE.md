@@ -2,7 +2,7 @@
 role: reviewer
 model: pro
 agent: cavecrew-reviewer
-reviewed_by: staff
+reviewed_by: product-engineer
 allowed_files:
   - docs
 skills:

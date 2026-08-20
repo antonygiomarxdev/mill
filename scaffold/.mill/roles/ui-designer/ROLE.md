@@ -2,7 +2,7 @@
 role: ui-designer
 model: pro
 agent: task
-reviewed_by: staff
+reviewed_by: product-engineer
 allowed_files:
   - docs
   - design

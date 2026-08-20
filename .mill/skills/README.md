@@ -8,7 +8,7 @@ an agent loads as context via `read skills/<name>.md`.
 - `using-mill.md` — the coordinator's procedure; the skill this project is
   (ADR 0006). Referenced from `.mill/roles/COMMON.md`, `AGENTS.md`, and the
   harness entry points.
-- `wayfinder.md` — a synced skill used by the Staff and PM roles.
+- `wayfinder.md` — a synced skill used by the Product Engineer and PM roles.
 - `skills.json` — the manifest mapping skill names to source URLs, hashes, and
   versions.
 

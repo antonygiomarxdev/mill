@@ -18,7 +18,7 @@ description: >-
 
 # Using Mill
 
-Dispatch worker roles through Orca's orchestration CLI. One coordinator (Staff)
+Dispatch worker roles through Orca's orchestration CLI. One coordinator (Product Engineer)
 sequences work; workers execute and report.
 
 The topology, reporting, and raising-a-hand rules live in

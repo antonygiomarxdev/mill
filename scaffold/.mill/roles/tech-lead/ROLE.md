@@ -69,7 +69,7 @@ See `roles/COMMON.md`.
 
 ### Commit hygiene
 - **Approve squash strategy.** Review commits for semantic clarity. Request squash/reword/reorder before approving.
-- **Never push or merge.** You approve. Staff declares merge-readiness. CTO lands.
+- **Never push or merge.** You approve. The Product Engineer declares merge-readiness. CTO lands.
 
 ## Raising a hand
 

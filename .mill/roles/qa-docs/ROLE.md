@@ -2,7 +2,7 @@
 role: qa-docs
 model: free→paid
 agent: task
-reviewed_by: staff
+reviewed_by: product-engineer
 allowed_files:
   - docs
   - config

@@ -2,7 +2,7 @@
 role: ui-designer
 model: pro
 agent: task
-reviewed_by: staff
+reviewed_by: product-engineer
 allowed_files:
   - docs
   - design
@@ -57,10 +57,10 @@ See `roles/COMMON.md`.
 - **Handoff to the coordinator is a component specification.** Exact tokens, exact states, exact behavior.
 - **Include redlines.** Spacing, sizing, alignment — explicit numbers, not "eyeball it."
 
-### The staff has eyes. You do not.
+### The Product Engineer has eyes. You do not.
 - **You read code and tokens.** You cannot see the rendered product.
 - **Verify by measurement.** `grep` for token usage, count components, check contrast programmatically.
-- **If a visual defect requires eyes to see, flag it for Staff review.** Staff has vision. You have code.
+- **If a visual defect requires eyes to see, flag it for Product Engineer review.** The Product Engineer has vision. You have code.
 
 ## Raising a hand
 

@@ -5,46 +5,29 @@
 ```mermaid
 graph TD
     CTO[👤 CTO]
-    
-    CTO -->|talks to| STAFF[🤖 Staff<br/>skills: 16<br/>model: pro]
-    CTO -->|talks to| PM[🤖 Product Manager<br/>skills: 4<br/>model: pro]
-    
-    STAFF -->|delegates to| PM
-    STAFF -->|delegates to| ARCH[🤖 Architect<br/>skills: 4<br/>model: pro]
-    STAFF -->|delegates to| REV[🤖 Reviewer<br/>skills: 2<br/>model: pro]
-    
-    PM -->|delegates to| UX[🤖 UX Designer<br/>skills: 3<br/>model: pro]
-    PM -->|delegates to| QA[🤖 QA/Docs<br/>skills: 2<br/>model: free]
-    
-    UX -->|delegates to| UI[🤖 UI Designer<br/>skills: 2<br/>model: pro]
-    UX -->|delegates to| QA
-    
-    UI -->|delegates to| QA
-    
-    ARCH -->|delegates to| TL[🤖 Tech Lead<br/>skills: 5<br/>model: pro]
-    ARCH -->|delegates to| QA
-    
-    TL -->|delegates to| FE[🤖 Sr. Dev FE<br/>skills: 3<br/>model: free]
-    TL -->|delegates to| BE[🤖 Sr. Dev BE<br/>skills: 3<br/>model: free]
-    TL -->|delegates to| DATA[🤖 Sr. Dev Data<br/>skills: 3<br/>model: free]
-    TL -->|delegates to| QA
-    
-    FE -->|delegates to| QA
-    BE -->|delegates to| QA
-    DATA -->|delegates to| QA
-    
-    REV -->|delegates to| QA
-    
-    QA -.->|shared service<br/>any role| QA
-    
+
+    CTO -->|talks to| PE[🤖 Product Engineer<br/>skills: 16<br/>model: pro]
+
+    PE -->|delegates to| PM[🤗 Product Manager<br/>skills: 4<br/>model: pro]
+    PE -->|delegates to| ARCH[🤗 Architect<br/>skills: 4<br/>model: pro]
+    PE -->|delegates to| REV[🤗 Reviewer<br/>skills: 2<br/>model: pro]
+    PE -->|delegates to| TL[🤗 Tech Lead<br/>skills: 5<br/>model: pro]
+    PE -->|delegates to| FE[🤗 Sr. Dev FE<br/>skills: 3<br/>model: free]
+    PE -->|delegates to| BE[🤗 Sr. Dev BE<br/>skills: 3<br/>model: free]
+    PE -->|delegates to| DATA[🤗 Sr. Dev Data<br/>skills: 3<br/>model: free]
+    PE -->|delegates to| QA[🤗 QA/Docs<br/>skills: 2<br/>model: free]
+    PE -->|delegates to| UX[🤗 UX Designer<br/>skills: 3<br/>model: pro]
+    PE -->|delegates to| UI[🤗 UI Designer<br/>skills: 2<br/>model: pro]
+    PE -->|delegates to| PA[🤗 Policy Author<br/>skills: 3<br/>model: pro]
+
     classDef human fill:#FFD700,stroke:#333,color:#000
     classDef active fill:#4CAF50,stroke:#333,color:#fff
     classDef pro fill:#9C27B0,stroke:#333,color:#fff
     classDef free fill:#2196F3,stroke:#333,color:#fff
-    
+
     class CTO human
-    class STAFF,PM active
-    class PM,ARCH,TL,REV,UX,UI pro
+    class PE,PM active
+    class PM,ARCH,TL,REV,UX,UI,PA pro
     class FE,BE,DATA,QA free
 ```
 
@@ -52,109 +35,107 @@ graph TD
 
 | From | To | Why |
 |------|----|-----|
-| CTO | Staff | Technical direction |
+| CTO | Product Engineer | Technical direction |
 | CTO | PM | Product decisions |
-| Staff | PM | Write product specs |
-| Staff | Architect | System architecture, ADRs |
-| Staff | Reviewer | Independent code review |
-| PM | UX Designer | User flows, IA |
-| UX | UI Designer | Components, tokens |
-| Architect | Tech Lead | Per-feature specs, task decomposition, code review |
-| Tech Lead | Sr. Dev FE/BE/Data | Implementation — THE ONLY ROLE that can |
-| Tech Lead | QA/Docs | Tests, changelog |
-| Reviewer | QA/Docs | Tests, docs |
-| Anyone | QA/Docs | Shared service |
+| Product Engineer | PM | Write product specs |
+| Product Engineer | Architect | System architecture, ADRs |
+| Product Engineer | Reviewer | Independent code review |
+| Product Engineer | Tech Lead | Per-feature specs, task decomposition |
+| Product Engineer | Sr. Dev BE/FE/Data | Implementation |
+| Product Engineer | QA/Docs | Tests, changelog |
+| Product Engineer | UX Designer | User flows, IA |
+| Product Engineer | UI Designer | Components, tokens |
+| Product Engineer | Policy Author | Policy maintenance (.mill/) |
 
 ## Who reviews whom
 
 ```mermaid
 graph LR
-    CTO -->|merge approval| STAFF
-    
-    PM -->|product review| UX
-    UX -->|design review| UI
-    
-    STAFF -->|strategic review| ARCH
-    ARCH -->|architecture review| TL
-    
-    TL -->|code review - ALWAYS| FE
-    TL -->|code review - ALWAYS| BE
-    TL -->|code review - ALWAYS| DATA
-    
-    TL -->|hands off to| REV
-    REV -->|spec compliance| QA
-    
+    CTO -->|merge approval| PE
+
+    PE -->|strategic review| ARCH
+    PE -->|product review| PM
+    PE -->|design review| UX
+    PE -->|design specs| UI
+    PE -->|code review| FE
+    PE -->|code review| BE
+    PE -->|code review| DATA
+    PE -->|hands off to| REV
+    PE -->|spec compliance| QA
+    PE -->|policy review| PA
+
     classDef human fill:#FFD700,stroke:#333,color:#000
     classDef active fill:#4CAF50,stroke:#333,color:#fff
     class CTO human
-    class STAFF,PM active
+    class PE,PM active
 ```
 
 ## Critical rules
 
 | # | Rule | Why |
 |---|------|-----|
-| 1 | Only Tech Lead delegates to Sr. Devs | Architect is strategic, Tech Lead is tactical |
+| 1 | Only the Product Engineer delegates to all worker roles | Single dispatch point, no worker handoff |
 | 2 | Every line of code passes through Tech Lead | Code review is Tech Lead's job |
-| 3 | Staff never reviews code | Staff verifies process, not implementation |
-| 4 | Architect sits between Staff and Tech Lead | Cross-cutting decisions before tactical work |
+| 3 | The Product Engineer never reviews code | The PE verifies process, not implementation |
+| 4 | Architect handles cross-cutting decisions | Decisions before tactical work |
 | 5 | Reviewer is independent second pair of eyes | Different from Tech Lead |
-| 6 | Pro models decide, free models execute | Staff delegates. Sr. Devs implement. |
+| 6 | Pro models decide, free models execute | The Product Engineer delegates. Sr. Devs implement. |
 
 ## Full pipeline: "Add dark mode"
 
 ```mermaid
 sequenceDiagram
     participant CTO
-    participant Staff
-    participant PM
-    participant UX
-    participant UI
-    participant Arch as Architect
-    participant TL as Tech Lead
-    participant SD as Sr. Dev
-    participant Rev as Reviewer
-    participant QA
-    
-    CTO->>Staff: add dark mode to settings
-    
-    Staff->>PM: write product spec
-    PM-->>Staff: spec: 8 criteria
-    
-    Staff->>UX: design user flow
-    UX->>UI: design tokens + components
-    UI-->>UX: component specs
-    UX-->>Staff: UX handoff
-    
-    Staff->>Arch: define dark mode architecture
-    Arch->>TL: decompose into implementation tasks
-    TL-->>Arch: 3 atomic tasks
-    Arch-->>Staff: architecture + tasks approved
-    
-    Staff->>TL: implement task 1
-    TL->>SD: implement SettingsCard dark mode
-    SD-->>TL: code committed, tests pass
-    
-    TL->>TL: code review
-    TL-->>Staff: code approved
-    
-    Staff->>Rev: independent review
-    Rev-->>Staff: APPROVED
-    
-    Staff->>QA: write tests + changelog
-    QA-->>Staff: done
-    
-    Staff->>Staff: 7-step verification
-    Staff->>CTO: ready to land
+    participant PE as Product Engineer
+    participant pman as Product Manager
+    participant uxd as UX Designer
+    participant uied as UI Designer
+    participant archi as Architect
+    participant tlead as Tech Lead
+    participant sdev as Sr. Dev
+    participant revr as Reviewer
+    participant qad as QA/Docs
+
+    CTO->>PE: add dark mode to settings
+
+    PE->>pman: write product spec
+    pman-->>PE: spec: 8 criteria
+
+    PE->>uxd: design user flow
+    uxd-->>PE: flows ready
+
+    PE->>uied: design tokens + components
+    uied-->>PE: component specs
+
+    PE->>archi: define dark mode architecture
+    archi-->>PE: architecture approved
+
+    PE->>tlead: decompose into implementation tasks
+    tlead-->>PE: 3 atomic tasks
+
+    PE->>sdev: implement SettingsCard dark mode
+    sdev-->>PE: code committed, tests pass
+
+    PE->>revr: code review
+    revr-->>PE: APPROVED
+
+    PE->>qad: write tests + changelog
+    qad-->>PE: done
+
+    PE->>PE: 7-step verification
+    PE->>CTO: ready to land
 ```
 
 ## Model tiers
 
-Models are configured in `mill.yml`, not hardcoded in docs or roles. Three tiers:
+Each role declares its tier in its `ROLE.md` frontmatter (`model:` — either
+`free→paid` or `pro`). Three tiers:
 
 | Tier | Who uses it | Purpose |
 |------|------------|---------|
-| pro | Staff, PM, Architect, Tech Lead, Reviewer, UX, UI | Decisions, review, design |
+| pro | Product Engineer, PM, Architect, Tech Lead, Reviewer, UX, UI, Policy Author | Decisions, review, design |
 | free | Sr. Devs, QA/Docs | Execution, tests, documentation |
 
-The actual model mapping (e.g., `deepseek-v4-pro` for pro, `laguna-free` for free) lives in `mill.yml` per project. Projects switch providers by changing config, not roles or docs.
+The tier resolves to an (agent, model) pair through `.mill/agents` — see
+`.mill/skills/using-mill.md`, section "Model selection". Projects switch
+providers by changing config, not roles or docs.

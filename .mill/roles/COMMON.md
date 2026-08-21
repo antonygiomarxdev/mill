@@ -15,7 +15,7 @@ The failure is quiet. Orca has one mailbox per Run, so a sub-worker's `worker_do
 A task that genuinely needs its own hierarchy creates its own Run (`orchestration run-create`) and says so in its report. That is an exception to declare, not a default.
 
 ```
-coordinator (Staff)
+coordinator (Product Engineer)
   ├── PM
   ├── Architect
   ├── Tech Lead

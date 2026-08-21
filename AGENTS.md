@@ -14,7 +14,7 @@ dispatch procedure.
 Your specific role is determined by the coordinator at dispatch time.
 Workers read their own role file when the brief says so:
 
-- Staff: @.mill/roles/staff/ROLE.md
+- Product Engineer: @.mill/roles/product-engineer/ROLE.md
 - PM: @.mill/roles/pm/ROLE.md
 
 ## Topology

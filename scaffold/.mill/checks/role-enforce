@@ -47,10 +47,13 @@ resolve_categories() {
         exit 1
     fi
 
-    # Load the project's category → pattern map.
-    local top
-    top=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
-    local cfg="$top/$CAPABILITIES_FILE"
+    # Load the category → pattern map from the repository the checks live in
+    # (the coordinator's Mill root), never from the worktree being verified:
+    # configuration that governs a worker cannot live in that worker's output,
+    # or the worker could widen its own permissions by editing the file.
+    local mill_root
+    mill_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    local cfg="$mill_root/$CAPABILITIES_FILE"
     if [[ ! -f "$cfg" ]]; then
         echo "pre-commit: BLOCKED — role '$role' cannot commit: no $CAPABILITIES_FILE." >&2
         echo "  Role '$role' may write: $categories" >&2
@@ -125,9 +128,30 @@ enforce_file() {
     # 2. Resolve the role's categories to the project's file patterns
     allowed=$(resolve_categories "$role" "$role_md")
 
-    # 3. Check extension against the resolved patterns
-    local ext ext_lc
-    ext=".${file##*.}"
+    # 3. Resolve the file's extension, then check it against the patterns.
+    #    ${file##*.} strips at the last dot in the whole PATH, so a file with no
+    #    extension ("checks/role-enforce") yielded the entire path as its
+    #    "extension" and could never match any pattern: no role could modify an
+    #    extensionless file, including Mill's own gates and checks. Take the
+    #    basename first, and classify an extensionless file by its shebang — a
+    #    shell script is a shell script whether or not it is named ".sh".
+    #    Anything extensionless that is not a shell script still matches no
+    #    pattern, so it stays blocked: this widens nothing but shell scripts.
+    local base ext ext_lc shebang
+    base=$(basename "$file")
+    if [[ "$base" == *.* ]]; then
+        ext=".${base##*.}"
+    else
+        shebang=""
+        if [[ -r "$file" ]]; then
+            IFS= read -r shebang < "$file" 2>/dev/null || true
+        fi
+        if [[ "$shebang" =~ ^#!.*(bash|sh)([[:space:]]|$) ]]; then
+            ext=".sh"
+        else
+            ext=""
+        fi
+    fi
     ext_lc=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
 
     for a in $allowed; do

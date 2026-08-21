@@ -43,7 +43,7 @@ resolve_categories() {
     if [[ -z "$categories" ]]; then
         echo "pre-commit: BLOCKED — role '$role' has no file permissions." >&2
         echo "  $role has an empty allowed_files list." >&2
-        echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
+        echo "  To proceed: the role comes from the dispatch; the coordinator verifies with 'mill-verify --role <role>'." >&2
         exit 1
     fi
 
@@ -59,7 +59,7 @@ resolve_categories() {
         echo "  Role '$role' may write: $categories" >&2
         echo "  Map those categories to file patterns in .mill/role-capabilities" >&2
         echo "  (copy the example from .mill/role-capabilities.example)." >&2
-        echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
+        echo "  To proceed: the role comes from the dispatch; the coordinator verifies with 'mill-verify --role <role>'." >&2
         exit 1
     fi
     # shellcheck disable=SC1090
@@ -80,7 +80,7 @@ resolve_categories() {
     if [[ -n "$missing" ]]; then
         echo "pre-commit: BLOCKED — role '$role' declares categories not in $CAPABILITIES_FILE:$missing" >&2
         echo "  Add the missing category or edit the role's allowed_files." >&2
-        echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
+        echo "  To proceed: the role comes from the dispatch; the coordinator verifies with 'mill-verify --role <role>'." >&2
         exit 1
     fi
 
@@ -165,7 +165,7 @@ enforce_file() {
     allowed_list=$(echo "$allowed" | tr ' ' ', ')
     echo "pre-commit: BLOCKED — role '$role' cannot commit $ext_lc files." >&2
     echo "  $role can produce: $allowed_list" >&2
-    echo "  To proceed: switch roles with 'mill role set' or escalate to Staff." >&2
+    echo "  To proceed: the role comes from the dispatch; the coordinator verifies with 'mill-verify --role <role>'." >&2
     exit 1
 }
 
@@ -210,8 +210,8 @@ fi
 
 ROLE_MD="$ROLES_DIR/$ROLE/ROLE.md"
 if [[ ! -f "$ROLE_MD" ]]; then
-    echo "role-enforce: WARNING — no role definition for '$ROLE' at $ROLE_MD" >&2
-    exit 0
+    echo "pre-commit: BLOCKED — role '$ROLE' names a role with no ROLE.md at $ROLE_MD" >&2
+    exit 1
 fi
 
 # Get staged files

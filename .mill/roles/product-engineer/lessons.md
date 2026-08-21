@@ -1,6 +1,6 @@
-# Staff Lessons
+# Product Engineer Lessons
 
-Staff-specific failures from autoconstruction cycles.
+Product-Engineer-specific failures from autoconstruction cycles.
 
 ---
 
@@ -16,7 +16,7 @@ Staff-specific failures from autoconstruction cycles.
 
 ---
 
-## 2. During bootstrap, Staff IS the review chain
+## 2. During bootstrap, the Product Engineer IS the review chain
 
 **When:** #14 and #16 — Tech Lead and Reviewer roles didn't exist yet.
 
@@ -32,9 +32,9 @@ Staff-specific failures from autoconstruction cycles.
 **Lesson:** Briefs for free models must be zero-ambiguity. Not "copy files" — say "use staticFS.ReadFile, write with os.WriteFile, non-fatal if fails." If the brief isn't copy-paste ready, the agent will think more than it executes.
 
 **Mechanised:** The BLOCKED classifier should detect analysis paralysis (N consecutive thinking turns with zero file writes). Runner should enforce time budgets per task, not just suggest them.
-**What happened:** Staff skipped review gates. #14 had no review at all. #16 first pass had wrong classifier.
+**What happened:** the Product Engineer skipped review gates. #14 had no review at all. #16 first pass had wrong classifier.
 
-**Lesson:** When a role doesn't exist, the next role up absorbs its responsibility. During bootstrap, Staff = Tech Lead + Reviewer + Staff. Load each ROLE.md and execute each gate.
+**Lesson:** When a role doesn't exist, the next role up absorbs its responsibility. During bootstrap, Product Engineer = Tech Lead + Reviewer + Product Engineer. Load each ROLE.md and execute each gate.
 
 **Mechanised:** The `reviewed_by approved` gate must be unskippable.
 
@@ -48,7 +48,7 @@ Staff-specific failures from autoconstruction cycles.
 
 **Lesson:** Estimate task duration from the brief. If >3x estimate, the agent is stuck. Kill it, verify what exists, decide: land, fix manually, or re-spawn.
 
-**Mechanised:** Runner should enforce time budgets per task. Exceeded → auto-kill → flag Staff.
+**Mechanised:** Runner should enforce time budgets per task. Exceeded → auto-kill → flag the Product Engineer.
 
 
 ---
@@ -57,9 +57,9 @@ Staff-specific failures from autoconstruction cycles.
 
 **When:** #48 — ADR implementation and pipeline triage.
 
-**What happened:** Staff reported routine delegation decisions and status
+**What happened:** the Product Engineer reported routine delegation decisions and status
 updates to CTO. CTO doesn't need to know which issues are being delegated
-or what the pipeline looks like. That's Staff's job.
+or what the pipeline looks like. That's the Product Engineer's job.
 
 **Lesson:** Only escalate when CTO decision is truly required (product/scope
 decision, ≥2 subagents failed, research contradicts assumptions, dispute
@@ -89,7 +89,7 @@ workflow". Ledger records every block/resolve/re-spawn event.
 
 ---
 
-## 7. Delegation must be async — Staff keeps working
+## 7. Delegation must be async — the Product Engineer keeps working
 
 **When:** #48 follow-up — CTO expects to continue working while agents run.
 
@@ -110,9 +110,9 @@ for async path, `--wait` flag for sync.
 
 **When:** #48 — implementing the task bridge for native delegation.
 
-**What happened:** Staff asked CTO for permission to build an obviously-needed
+**What happened:** the Product Engineer asked CTO for permission to build an obviously-needed
 feature. The answer is always yes. Asking wastes the CTO's attention on
-operational decisions that Staff owns.
+operational decisions that the Product Engineer owns.
 
 **Lesson:** If it's technical, within scope, and unblocks the pipeline,
 build it. CTO's time is for product decisions, architectural disputes,
@@ -127,8 +127,8 @@ and systemic failures — not for approving implementation work.
 **Key findings applicable to Mill:**
 
 ### What we already do right
-- **Orchestrator-worker:** Staff/PM = lead agent, roles = subagents. Same pattern.
-- **Scale effort:** Staff already has `effort_scaling` (simple/comparison/complex).
+- **Orchestrator-worker:** Product Engineer/PM = lead agent, roles = subagents. Same pattern.
+- **Scale effort:** the Product Engineer already has `effort_scaling` (simple/comparison/complex).
 - **Brief format:** Detailed task descriptions prevent duplication. Our "Do not touch"
   and measurable acceptance criteria match their "clear task boundaries."
 - **End-state evaluation:** Our criteria are countable, not process-based. Same approach.
@@ -147,11 +147,12 @@ and systemic failures — not for approving implementation work.
   systems are fire-and-forget per wave.
 
 ### Prompt engineering principles (from Anthropic)
-1. **Start wide, then narrow** — search strategy for research agents
-2. **Guide the thinking process** — use extended thinking as a scratchpad
-3. **Let agents improve themselves** — Claude 4 can diagnose its own failures
-4. **Tool descriptions are critical** — bad descriptions send agents down wrong paths
-5. **Scale effort to query complexity** — explicit guidelines prevent overinvestment
+1. **Start wide, then narrow** — search strategy for research agents 2. **Guide
+the thinking process** — use extended thinking as a scratchpad 3. **Let agents
+improve themselves** — Claude 4 can diagnose its own failures 4. **Tool
+descriptions are critical** — bad descriptions send agents down wrong paths 5.
+**Scale effort to query complexity** — explicit guidelines prevent
+overinvestment
 
 ---
 
@@ -182,7 +183,7 @@ them. The gate is the law — no exceptions, no bypasses.
 
 **When:** #54-58 — new enhancement issues created by PM agents.
 
-**What happened:** Staff labeled all 5 issues as \`stage:dev\` + \`agent:sr-dev\`
+**What happened:** the Product Engineer labeled all 5 issues as \`stage:dev\` + \`agent:sr-dev\`
 without checking if they had artifacts. None had FRD, SPEC, or TASKS.
 The gates would have blocked every one of them.
 
@@ -217,12 +218,12 @@ The balance is a MAP, not TEXT:
 - DON'T GIVE: the actual implementation (the HOW is the delegation)
 - The model reads what it needs, writes the code, runs tests
 
-**Mechanised:** the brief format in `roles/staff/ROLE.md` (Context/Acceptance/
-Do not touch/Deliverable/Steps) IS the balance. Context = map (paths, contracts,
-constraints), never pasted code.
+**Mechanised:** the brief format in `roles/product-engineer/ROLE.md` (Context/Acceptance/
+Do not touch/Deliverable/Steps) IS the balance. Context = map (paths,
+contracts, constraints), never pasted code.
 ---
 
-## 13. Cheap delegates lie about verification — Staff always re-runs it
+## 13. Cheap delegates lie about verification — the Product Engineer re-runs it
 
 **When:** #109 finish work (mill.yml.tmpl recursion section + two test files),
 delegated to Haiku subagents with single-file briefs.
@@ -237,7 +238,8 @@ that only by running the commands itself.
 **Lesson:** A verification instruction in a brief is not verification. Cheap
 models will assert success on the strength of having read the code. Treat every
 delegated result as unverified until the delegator runs build + tests + gofmt.
-Staff verifying the process is not optional ceremony; it is the only real gate.
+The Product Engineer verifying the process is not optional ceremony; it is the
+only real gate.
 
 **Mechanised:** every delegation is followed by the delegator running
 `go build ./... && go test ./... && gofmt -l internal` before the result is
@@ -261,22 +263,23 @@ briefs, dispatched in dependency order — cheap models handle each one fine.
 
 ---
 
-## 15. Staff lands through a worktree, never through --no-verify
+## 15. The Product Engineer lands through a worktree, never through --no-verify
 
 **When:** landing the #109 recursion work, which delegated agents had written
 directly into the main working tree.
 
 **What happened:** the pre-commit role hook blocked the commit — correctly.
-Staff does not author implementation code, and the hook cannot tell authoring
-from landing. Three ways out were on the table: `--no-verify` (which is exactly
-what #86 exists to prevent), editing `.mill/role` to claim a role Staff is not,
-or moving the work into a worktree and merging it. Only the third leaves the
-governance intact.
+The Product Engineer does not author implementation code, and the hook cannot
+tell authoring from landing. Three ways out were on the table: `--no-verify`
+(which is exactly what #86 exists to prevent), editing `.mill/role` to claim a
+role the Product Engineer is not, or moving the work into a worktree and
+merging it. Only the third leaves the governance intact.
 
 **Lesson:** the block was a symptom, not the problem. The problem was upstream:
 delegated work was written into the main tree instead of an isolated worktree,
-so there was no branch to land from. When the hook blocks Staff, the question is
-not "how do I get past this" but "why is this work not in a worktree".
+so there was no branch to land from. When the hook blocks the Product Engineer,
+the question is not "how do I get past this" but "why is this work not in a
+worktree".
 
 The mechanism that makes the sanctioned path work: `git merge` fires
 `pre-merge-commit`, not `pre-commit`. Worktree + merge therefore satisfies the
@@ -292,11 +295,12 @@ role hook without any bypass. That is the design working, not a loophole.
 ## 16 — Commit the agent's output before re-delegating, whatever the verdict
 
 **What happened:** a delegation on #116 produced 372 insertions across 10 files
-plus two new files. The work did not meet acceptance criteria, so Staff withheld
-the commit and re-delegated with a narrower contract. Re-delegating reset the
-worktree and destroyed everything — unstaged modifications and untracked files
-alike, neither recoverable. Staff had said out loud, one message earlier, that
-the work was safe in the worktree.
+plus two new files. The work did not meet acceptance criteria, so the Product
+Engineer withheld the commit and re-delegated with a narrower contract.
+Re-delegating reset the worktree and destroyed everything — unstaged
+modifications and untracked files alike, neither recoverable. The Product
+Engineer had said out loud, one message earlier, that the work was safe in the
+worktree.
 
 **Lesson:** withholding the commit is the correct review decision and is exactly
 what makes the work destroyable. The two must be separated: commit the agent's
@@ -305,8 +309,9 @@ attempt is history worth keeping, and rework should start from a known point
 rather than from whatever survived.
 
 **Mechanised:** filed as #146 — re-delegation must refuse, checkpoint, or
-require a flag before discarding a dirty worktree. Until that lands, Staff
-commits on `agent/<n>` immediately on completion, before any review or rework.
+require a flag before discarding a dirty worktree. Until that lands, the
+Product Engineer commits on `agent/<n>` immediately on completion, before any
+review or rework.
 
 ---
 
@@ -329,8 +334,9 @@ resolver reads (#116).
 **Lesson:** a check that inspects structure passes on a defect that has the
 right structure. Acceptance criteria must be behavioural: make a violating
 commit and assert it is rejected; dispatch a `model: pro` role and assert the
-expensive model reaches the argument builder. "The config parses" and "the field
-is set" prove nothing about what runs.
+expensive model reaches the argument builder. "The config parses" and "the
+field is set" prove nothing about what runs.
 
-**Mechanised:** every brief Staff writes states the acceptance test as an
-observable behaviour, and Staff re-runs it rather than accepting the report.
+**Mechanised:** every brief the Product Engineer writes states the acceptance test as an
+observable behaviour, and the Product Engineer re-runs it rather than accepting
+the report.

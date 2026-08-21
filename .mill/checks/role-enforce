@@ -128,9 +128,30 @@ enforce_file() {
     # 2. Resolve the role's categories to the project's file patterns
     allowed=$(resolve_categories "$role" "$role_md")
 
-    # 3. Check extension against the resolved patterns
-    local ext ext_lc
-    ext=".${file##*.}"
+    # 3. Resolve the file's extension, then check it against the patterns.
+    #    ${file##*.} strips at the last dot in the whole PATH, so a file with no
+    #    extension ("checks/role-enforce") yielded the entire path as its
+    #    "extension" and could never match any pattern: no role could modify an
+    #    extensionless file, including Mill's own gates and checks. Take the
+    #    basename first, and classify an extensionless file by its shebang — a
+    #    shell script is a shell script whether or not it is named ".sh".
+    #    Anything extensionless that is not a shell script still matches no
+    #    pattern, so it stays blocked: this widens nothing but shell scripts.
+    local base ext ext_lc shebang
+    base=$(basename "$file")
+    if [[ "$base" == *.* ]]; then
+        ext=".${base##*.}"
+    else
+        shebang=""
+        if [[ -r "$file" ]]; then
+            IFS= read -r shebang < "$file" 2>/dev/null || true
+        fi
+        if [[ "$shebang" =~ ^#!.*(bash|sh)([[:space:]]|$) ]]; then
+            ext=".sh"
+        else
+            ext=""
+        fi
+    fi
     ext_lc=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
 
     for a in $allowed; do

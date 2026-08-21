@@ -88,25 +88,85 @@ run_step test
 # --files-modified is authoritative: it is the exact change set the worker
 # reported. Without it, fall back to the git diff since the worktree's base
 # commit (its oldest reflog entry — where the worker started).
+#
+# Entries may carry a git status prefix — a single letter (A, M, D, R) followed
+# by whitespace, then the path. Without a prefix — backwards-compatible bare
+# paths — the entry is judged as a write exactly as before. Deletions (D) are
+# not writes: the role never produced that file, so they are skipped. Renames
+# (R) judge the new path and skip the old as a deletion. Anything unrecognised
+# is judged as a write — fail closed.
+judge_write() {
+    if ! "$role_enforce" --test "$role" "$1" >/dev/null 2>&1; then
+        echo "error: $1 is not allowed for role '$role'" >&2
+        violation=1
+    fi
+    return 0
+}
+
+skip_deleted() {
+    echo "mill-verify: skipping deleted path $1 (not a write)" >&2
+    return 0
+}
+
 if [[ -n "$files_modified" ]]; then
     # Trim spaces around commas: payloads may arrive as "a, b, c".
-    changed="$(printf '%s' "$files_modified" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    entries="$(printf '%s' "$files_modified" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    while IFS= read -r entry; do
+        [[ -z "$entry" ]] && continue
+        if [[ "$entry" =~ ^([AMDR])[[:space:]]+(.+) ]]; then
+            status="${BASH_REMATCH[1]}"
+            rest="${BASH_REMATCH[2]}"
+            case "$status" in
+                A|M)
+                    judge_write "$rest"
+                    ;;
+                D)
+                    skip_deleted "$rest"
+                    ;;
+                R)
+                    old="${rest%%[[:space:]]*}"
+                    new="$(printf '%s' "${rest#*[[:space:]]}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+                    if [[ -n "$old" ]]; then
+                        skip_deleted "$old"
+                    fi
+                    if [[ -n "$new" ]]; then
+                        judge_write "$new"
+                    fi
+                    ;;
+            esac
+        else
+            judge_write "$entry"
+        fi
+    done <<< "$entries"
 else
     base="$(git reflog --format=%H | tail -1)"
     if [[ -z "$base" || "$(git cat-file -t "$base" 2>/dev/null)" != "commit" ]]; then
         echo "error: cannot determine worktree base commit (pass --files-modified)" >&2
         exit 1
     fi
-    changed="$(git diff --name-only "$base" HEAD)"
+    while IFS=$'\t' read -r code path1 path2; do
+        [[ -z "$code" ]] && continue
+        # Strip the trailing similarity score from the status code (R100 → R, C75 → C).
+        letter="${code%%[0-9]*}"
+        case "$letter" in
+            D)
+                skip_deleted "$path1"
+                ;;
+            R)
+                skip_deleted "$path1"
+                judge_write "$path2"
+                ;;
+            *)
+                # Additions, modifications, typechanges, copies, and anything
+                # else: judge as a write. Fail closed.
+                judge_write "$path1"
+                if [[ -n "$path2" ]]; then
+                    judge_write "$path2"
+                fi
+                ;;
+        esac
+    done < <(git diff --name-status "$base" HEAD)
 fi
-
-while IFS= read -r f; do
-    [[ -z "$f" ]] && continue
-    if ! "$role_enforce" --test "$role" "$f" >/dev/null 2>&1; then
-        echo "error: $f is not allowed for role '$role'" >&2
-        violation=1
-    fi
-done <<< "$changed"
 
 # --- 3. Nothing left uncommitted ---------------------------------------------
 uncommitted="$(git status --porcelain)"

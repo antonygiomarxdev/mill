@@ -11,16 +11,21 @@ NC='\033[0m'
 pass() { echo -e "${GREEN}PASS${NC} $*"; }
 fail() { echo -e "${RED}FAIL${NC} $*"; exit 1; }
 
-# load_gauntlet reads the per-project gauntlet configuration.
+# load_gauntlet reads the gauntlet configuration.
 #
-# The gauntlet config lives at .mill/gauntlet in the project root. Why there:
-# .mill/ is what `mill init` copies into a new project (see README "Install"),
-# so the template ships with the checks that read it; and it is the directory
-# core.hooksPath points at when a project opts into hooks. It is plain bash
-# that the checks source with `source` — no parser, no new dependency. A
-# project that configures nothing is a project with no gauntlet:
-# load_gauntlet reports that and returns 0, so a fresh install never breaks
-# the first commit and mill-verify still enforces the role.
+# The config lives at .mill/gauntlet in the Mill root — the repository the
+# check scripts themselves live in, derived from this file's own location.
+# mill-verify runs against a worker's worktree, but the config is read from
+# the coordinator's repo: a worker that edits its own copy widens its own
+# gate. The commands still execute in the worktree (run_step evaluates them
+# in the caller's cwd), so they check exactly what the worker produced. When
+# a project opts into hooks (core.hooksPath -> .mill/checks), the hooks run
+# from the project's own copy of the checks and read that project's config,
+# as before. It is plain bash that the checks source with `source` — no
+# parser, no new dependency. A project that configures nothing is a project
+# with no gauntlet: load_gauntlet reports that and returns 0, so a fresh
+# install never breaks the first commit and mill-verify still enforces the
+# role.
 #
 # The config declares one shell command per gauntlet step, e.g.:
 #
@@ -33,7 +38,7 @@ fail() { echo -e "${RED}FAIL${NC} $*"; exit 1; }
 # `test="go test $PKG"` works. Variables from the project's own environment are
 # available too; variables read here are named GAUNTLET_* to avoid clobbering.
 load_gauntlet() {
-    GAUNTLET_CONFIG="$(git rev-parse --show-toplevel 2>/dev/null)/.mill/gauntlet"
+    GAUNTLET_CONFIG="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.mill/gauntlet"
     if [[ ! -f "$GAUNTLET_CONFIG" ]]; then
         echo "mill: no .mill/gauntlet — no gauntlet commands configured for this project"
         echo "mill: (copy the example from .mill/gauntlet.example and set build/lint/test)"

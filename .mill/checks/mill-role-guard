@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# mill-role-guard — keep the coordinator's identity alive across /compact.
+#
+# The startup instruction in .claude/CLAUDE.md re-injects the coordinator's
+# role once on SessionStart. A /compact wipes that, and the coordinator
+# silently stops delegating and starts writing code. This script is the
+# per-prompt half: a UserPromptSubmit hook runs `--context` on every prompt to
+# restate the role; a PreToolUse hook runs `--pretool` before every write to
+# stop the coordinator writing through the role's forbidden tools.
+#
+#   mill-role-guard --context   print the role-identity line to stdout (exit 0)
+#   mill-role-guard --pretool   read a PreToolUse payload (JSON) on stdin;
+#                               allow the write (exit 0) or block it (exit 2)
+#
+# --context always exits 0 and must never block a prompt.
+# --pretool judges Write|Edit|NotebookEdit only; other tools pass. It fails
+# open: if the payload cannot be parsed, the write is allowed. Only a readable
+# payload that names a blocked path is refused (exit 2). The role name is a
+# constant — not an argument, not read from .mill/role — so it cannot drift or
+# be tampered with.
+set -euo pipefail
+
+# --- Mode 1: --context --------------------------------------------------------
+# The one coordinator identity. Constant: not an argument, not read from any
+# file. Mill has exactly one coordinator role now, so it cannot drift.
+CONTEXT_LINE='[Mill · Product Engineer] coordinator — you delegate and verify; you do not write implementation code. Dispatch with orca orchestration worker-start; verify with .mill/checks/mill-verify.'
+
+print_context() {
+    printf '%s\n' "$CONTEXT_LINE"
+}
+
+# --- Mode 2: --pretool --------------------------------------------------------
+
+# json_value <payload> <jq_path> <grep_key>
+# Print the string value of <jq_path> (a jq filter like .tool_name or
+# .tool_input.file_path). jq is used when present; otherwise a grep/sed
+# fallback strips the value of <grep_key> (e.g. tool_name, file_path). On any
+# failure to parse, prints nothing — callers treat empty as "fail open".
+json_value() {
+    local payload="$1" jq_path="$2" grep_key="$3" result=""
+
+    if command -v jq >/dev/null 2>&1; then
+        result="$(printf '%s' "$payload" | jq -r "${jq_path} // empty" 2>/dev/null || true)"
+    else
+        result="$(printf '%s' "$payload" \
+            | grep -o "\"${grep_key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" 2>/dev/null \
+            | head -1 \
+            | sed 's/^"[^"]*"[[:space:]]*:[[:space:]]*"//; s/"$//' 2>/dev/null || true)"
+    fi
+
+    printf '%s' "$result"
+}
+
+# role_for_path <path> — the role that should be dispatched to write this file.
+# Order matters: earlier branches win. Only reached for paths the guard blocks.
+role_for_path() {
+    local path="$1"
+    case "$path" in
+        .mill/*|*/.mill/*)
+            printf 'policy-author' ;;
+        *.json|*.yml|*.yaml|*.toml)
+            printf 'architect' ;;
+        *.md)
+            printf 'qa-docs' ;;
+        *)
+            printf 'tech-lead' ;;
+    esac
+}
+
+run_pretool() {
+    local payload tool_name file_path
+
+    # Read the whole payload from stdin. An empty payload is unjudgable — allow.
+    payload="$(cat)"
+    if [[ -z "$payload" ]]; then
+        exit 0
+    fi
+
+    tool_name="$(json_value "$payload" '.tool_name' 'tool_name')"
+
+    # If the tool name cannot be read, the payload cannot be judged — allow.
+    if [[ -z "$tool_name" ]]; then
+        exit 0
+    fi
+
+    # Only file-writing tools are judged.
+    case "$tool_name" in
+        Write|Edit|NotebookEdit) ;;
+        *) exit 0 ;;
+    esac
+
+    file_path="$(json_value "$payload" '.tool_input.file_path' 'file_path')"
+
+    # No path that can be read? Never block on an unreadable payload.
+    if [[ -z "$file_path" ]]; then
+        exit 0
+    fi
+
+    # --- Allow: briefs land under /tmp/ ---
+    case "$file_path" in
+        /tmp/*) exit 0 ;;
+    esac
+
+    # --- Allow: any .md under a docs/ directory ---
+    case "$file_path" in
+        docs/*.md|*/docs/*.md) exit 0 ;;
+    esac
+
+    # --- Block: name the role that should have been dispatched ---
+    role="$(role_for_path "$file_path")"
+    printf 'mill-role-guard: BLOCKED — the coordinator does not write %s.\n' "$file_path" >&2
+    printf '  Dispatch %s instead: orca orchestration task-create + worker-start.\n' "$role" >&2
+    exit 2
+}
+
+# --- argument parsing ---------------------------------------------------------
+mode=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --context) mode="context"; shift ;;
+        --pretool) mode="pretool"; shift ;;
+        -h|--help)
+            echo "usage: mill-role-guard --context | --pretool"
+            echo "  --context  print the coordinator role-identity line (UserPromptSubmit)"
+            echo "  --pretool  read a PreToolUse payload on stdin; allow or block a write"
+            exit 0
+            ;;
+        *) echo "error: unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+
+case "$mode" in
+    context) print_context ;;
+    pretool) run_pretool ;;
+    *) echo "error: no mode given (use --context or --pretool)" >&2; exit 2 ;;
+esac

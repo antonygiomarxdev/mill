@@ -24,23 +24,131 @@ set -euo pipefail
 worktree=""
 role=""
 files_modified=""
+dispatch=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --worktree) worktree="${2:-}"; shift 2 ;;
         --role) role="${2:-}"; shift 2 ;;
         --files-modified) files_modified="${2:-}"; shift 2 ;;
+        --dispatch) dispatch="${2:-}"; shift 2 ;;
         -h|--help)
-            echo "usage: mill-verify --worktree <path> --role <role> [--files-modified <a,b,c>]"
+            echo "usage: mill-verify --worktree <path> --role <role> [--files-modified <a,b,c>] [--dispatch <ctx_id>]"
             echo "  --worktree <path>       the worker's worktree"
             echo "  --role <role>           the dispatched role (its ROLE.md in .mill/roles/)"
             echo "  --files-modified <list> the worker_done change set; judged instead of the"
             echo "                          git diff since the worktree base commit"
+            echo "  --dispatch <ctx_id>     before the gauntlet, print that dispatch's mailbox"
+            echo "                          messages; an unanswered question is a hard failure,"
+            echo "                          a missing worker_done is only a warning"
             exit 0
             ;;
         *) echo "error: unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+# --- 0. Dispatch mailbox check (--dispatch) ----------------------------------
+# Runs before the gauntlet and before worktree validation, so a coordinator can
+# interrogate a dispatch's mailbox without a worktree. `inbox` is used rather
+# than `check` — measured on one run, `check` surfaced 1 message of 20.
+check_dispatch_mailbox() {
+    local ctx="$1"
+    local inbox_json
+    if ! inbox_json="$(orca orchestration inbox --json --limit 1000 2>/dev/null)"; then
+        echo "mill-verify: warning: cannot read the orchestration mailbox (orca orchestration inbox failed)" >&2
+        return 0
+    fi
+
+    # Resolve the dispatch to its terminal handle. A `send --type question`
+    # message carries no ctx id (payload=null, from_handle is the terminal), so
+    # the terminal handle is the only link back to the dispatch. worker-list
+    # maps ctx -> task; dispatch-show maps task -> the assignee terminal.
+    local terminal="" task_id
+    task_id="$(orca orchestration worker-list --json 2>/dev/null | jq -r --arg c "$ctx" '
+        [ .result.workers[] | select(.dispatchId == $c) | .taskId ] | .[0] // empty
+    ' 2>/dev/null)"
+    if [[ -n "$task_id" ]]; then
+        terminal="$(orca orchestration dispatch-show --task "$task_id" --json 2>/dev/null | jq -r '.result.dispatch.assignee_handle // empty' 2>/dev/null)"
+    fi
+
+    # A message belongs to this dispatch when the ctx id appears in its payload
+    # (worker_done passes --dispatch-id) or its from/to handle (ask questions),
+    # or when it was sent from the dispatch's own terminal (send questions).
+    echo "mill-verify: mailbox for dispatch $ctx:"
+    echo "$inbox_json" | jq -r --arg c "$ctx" --arg t "$terminal" '
+        .result.messages[]
+        | select(
+            ((.payload // "") | tostring | contains($c))
+            or ((.from_handle // "") | tostring | contains($c))
+            or ((.to_handle // "") | tostring | contains($c))
+            or (($t != "") and ((.from_handle // "") == $t))
+          )
+        | "  [\(.type // "?")] \(.id) \(.subject // "") (\(.created_at // "?"))"
+    ' 2>/dev/null || true
+
+    # A missing worker_done is NOT a failure: #177 showed Orca settling a task
+    # as failed while the worker was still running, rejecting the worker_done.
+    local worker_done
+    worker_done="$(echo "$inbox_json" | jq -r --arg c "$ctx" '
+        [ .result.messages[]
+          | select(.type == "worker_done" and ((.payload // "") | tostring | contains($c))) ]
+        | length
+    ' 2>/dev/null || echo 0)"
+    if [[ "$worker_done" == "0" ]]; then
+        echo "mill-verify: warning: no worker_done for dispatch $ctx (not a failure)" >&2
+    fi
+
+    # An unresolvable dispatch is not evidence of an unanswered question: its
+    # send questions cannot be attributed to it, so warn and do not fail.
+    if [[ -z "$terminal" ]]; then
+        echo "mill-verify: warning: cannot resolve dispatch $ctx to a terminal handle; its questions are unattributable (not a failure)" >&2
+        return 0
+    fi
+
+    # An unanswered question is a hard failure. A question counts as
+    # "answered" when its `read` flag is 1. That is the cheapest real signal
+    # the mailbox offers, and it is only sound because of the workflow rule in
+    # the delegate skill: the coordinator reads with `inbox` (read-only, never
+    # sets `read`) and answers with `reply` (which sets `read`). `read == 0`
+    # therefore means the coordinator never engaged — the exact defect from
+    # 2026-08-31, when a worker asked whether to proceed, got eight hours of
+    # silence, and the thing it spotted was a P0 (#132). If someone reads with
+    # `check` instead of `inbox`, `read` can be set without an answer; that is
+    # the known limit of this signal, recorded rather than papered over.
+    local unanswered
+    unanswered="$(echo "$inbox_json" | jq -r --arg c "$ctx" --arg t "$terminal" '
+        .result.messages[]
+        | select(.type == "question"
+            and .read == 0
+            and ( ((.payload // "") | tostring | contains($c))
+                  or ((.from_handle // "") | tostring | contains($c))
+                  or ((.to_handle // "") | tostring | contains($c))
+                  or ((.from_handle // "") == $t) ))
+        | "\(.id) \(.subject // "")"
+    ' 2>/dev/null || true)"
+    if [[ -n "$unanswered" ]]; then
+        echo "mill-verify: FAIL — unanswered question for dispatch $ctx:" >&2
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            echo "  $line" >&2
+        done <<< "$unanswered"
+        return 1
+    fi
+
+    return 0
+}
+
+if [[ -n "$dispatch" ]]; then
+    check_dispatch_mailbox "$dispatch"
+    mailbox_rc=$?
+    if [[ "$mailbox_rc" -ne 0 ]]; then
+        exit 1
+    fi
+    # --dispatch alone: the mailbox was the whole request.
+    if [[ -z "$worktree" && -z "$role" ]]; then
+        exit 0
+    fi
+fi
 
 if [[ -z "$worktree" || -z "$role" ]]; then
     echo "usage: mill-verify --worktree <path> --role <role> [--files-modified <a,b,c>]" >&2

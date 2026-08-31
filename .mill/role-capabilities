@@ -1,0 +1,11 @@
+# role-capabilities — per-project map from a role's declared capability
+# categories (in ROLE.md allowed_files) to file patterns. A list entry may be
+# an extension or an exact filename. This is the active file; the template
+# new projects copy is .mill/role-capabilities.example.
+
+code=""
+docs=".md"
+config=".yml .yaml .json .toml .gitignore"
+policy=".md .sh .example role-capabilities"
+scripts=".sh"
+design=".pen .fig"

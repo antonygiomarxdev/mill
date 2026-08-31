@@ -77,9 +77,9 @@ Every brief that worked has the same five parts. Write them in order:
 3. **Do not touch.** Paths the worker must not modify. **When a criterion and
    a DO NOT conflict, DO NOT wins and the worker raises a hand.** State this
    in the brief — prohibitions cost real time when omitted.
-5. **Acceptance criteria.** Numbered. Each is a runnable command whose raw
+4. **Acceptance criteria.** Numbered. Each is a runnable command whose raw
    output the worker pastes. Max 9. Countable — never adjectives.
-4. **Raise a hand.** The line a worker sends when the brief is unclear:
+5. **Raise a hand.** The line a worker sends when the brief is unclear:
    `orca orchestration send --type question --subject "<short>" --body "<q>"`.
 
 Reference files rather than inlining their content. A worker given its

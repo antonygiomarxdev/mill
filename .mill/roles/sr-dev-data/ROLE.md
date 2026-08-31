@@ -1,6 +1,5 @@
 ---
 role: sr-dev-data
-model: free→paid
 agent: task
 reviewed_by: tech-lead
 allowed_files:

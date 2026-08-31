@@ -1,6 +1,5 @@
 ---
 role: product-engineer
-model: pro
 agent: task
 reviewed_by: cto
 allowed_files:

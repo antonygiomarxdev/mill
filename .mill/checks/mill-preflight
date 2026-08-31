@@ -3,7 +3,51 @@
 # Called by the coordinator before any dispatch. Exits non-zero with an
 # actionable message when Orca's runtime is unreachable or the working
 # directory is not a Mill project.
+#
+# Optional brief check:
+#   mill-preflight --brief <role> <path> [<path> ...]
+#
+# With --brief, after the two environment checks below, every named path is
+# judged against <role>'s allowed_files (via role-enforce --test). A path the
+# role may not write fails the preflight, and the roles that can write it are
+# named so the coordinator can route the work instead of guessing. The two
+# environment checks still run: a brief check against an unreachable Orca is
+# not useful. With no --brief, behaviour is exactly the two checks below.
 set -euo pipefail
+
+# --- argument parsing --------------------------------------------------------
+brief_mode=0
+brief_role=""
+brief_paths=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --brief)
+            brief_mode=1
+            brief_role="${2:-}"
+            shift 2
+            ;;
+        -h|--help)
+            echo "usage: mill-preflight [--brief <role> <path> [<path>...]]"
+            echo "  (no arguments)          check Orca reachability and Mill project layout"
+            echo "  --brief <role> <path>... additionally refuse every path <role> cannot"
+            echo "                          write, naming the role(s) that can write each one"
+            exit 0
+            ;;
+        -*)
+            echo "error: unknown argument: $1" >&2
+            exit 2
+            ;;
+        *)
+            # Positional arguments only have meaning after --brief (they are the
+            # paths). Outside --brief there was historically no argument
+            # handling, so ignore them.
+            if [[ "$brief_mode" -eq 1 ]]; then
+                brief_paths+=("$1")
+            fi
+            shift
+            ;;
+    esac
+done
 
 # 1. Orca must be reachable
 if ! orca status 2>/dev/null | grep -q "runtimeReachable: true"; then
@@ -15,6 +59,59 @@ fi
 if [[ ! -d .mill/roles ]]; then
     echo "error: Not a Mill project (no .mill/roles/)." >&2
     exit 1
+fi
+
+# 3. --brief: the named role must be able to write every named path.
+if [[ "$brief_mode" -eq 1 ]]; then
+    if [[ -z "$brief_role" ]]; then
+        echo "error: --brief requires a role" >&2
+        exit 2
+    fi
+    if [[ ${#brief_paths[@]} -eq 0 ]]; then
+        echo "error: --brief requires at least one path" >&2
+        exit 2
+    fi
+    if [[ ! -f ".mill/roles/$brief_role/ROLE.md" ]]; then
+        echo "error: unknown role '$brief_role' (no .mill/roles/$brief_role/ROLE.md)" >&2
+        exit 2
+    fi
+
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    role_enforce="$here/role-enforce"
+    if [[ ! -x "$role_enforce" ]]; then
+        echo "error: role-enforce not found next to mill-preflight" >&2
+        exit 1
+    fi
+
+    # The roles that can write a path are found by asking role-enforce the same
+    # question for every other role. This reuses role-enforce's exact extension
+    # and basename classification, so the owner answer cannot drift from the
+    # gate that enforces it. A role directory with no ROLE.md is skipped.
+    determine_owners() {
+        local path="$1" role_dir role owners=""
+        for role_dir in .mill/roles/*/; do
+            [[ -d "$role_dir" && -f "$role_dir/ROLE.md" ]] || continue
+            role="$(basename "$role_dir")"
+            if "$role_enforce" --test "$role" "$path" >/dev/null 2>&1; then
+                owners="${owners}${owners:+, }$role"
+            fi
+        done
+        printf '%s' "$owners"
+    }
+
+    failed=0
+    for path in "${brief_paths[@]}"; do
+        if ! "$role_enforce" --test "$brief_role" "$path" >/dev/null 2>&1; then
+            owners="$(determine_owners "$path")"
+            if [[ -z "$owners" ]]; then
+                echo "mill-preflight: '$path' is not allowed for role '$brief_role' (no role can write it; cannot determine an owner)" >&2
+            else
+                echo "mill-preflight: '$path' is not allowed for role '$brief_role'; it can be written by: $owners" >&2
+            fi
+            failed=1
+        fi
+    done
+    exit "$failed"
 fi
 
 exit 0

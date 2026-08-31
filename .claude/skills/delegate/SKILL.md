@@ -55,7 +55,10 @@ concurrently against the same agent. Record which tier ran.
 orca orchestration task-create --spec "<brief text or path>" --task-title "<short>"
 orca orchestration worker-start --task <task_id> --agent <agent> \
     --worktree new-top-level --name mill-<slug>
-orca orchestration check
+# `check` reads only deliveries addressed to the bound run; `inbox` shows
+# every message across recipients, so an escalation or a worker_done that
+# arrived in a different run is not silently dropped.
+orca orchestration inbox
 orca orchestration reply
 ```
 

@@ -185,6 +185,14 @@ enforce_file() {
         if [[ "$a" == "$ext_lc" ]]; then
             return 0
         fi
+        # A list entry may also be an exact basename. Match only the full
+        # basename — never a path, never a prefix, never a glob — so that an
+        # entry like `role-capabilities` cannot match `my-role-capabilities`
+        # or `role-capabilities.example`. A leading dot stays part of the
+        # entry, so `.gitignore` matches `.gitignore` and nothing else.
+        if [[ "$a" == "$base" ]]; then
+            return 0
+        fi
     done
 
     # Not allowed

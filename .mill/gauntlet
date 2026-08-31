@@ -1,0 +1,19 @@
+#!/bin/bash
+# Mill gauntlet for THIS repository.
+#
+# This repo is Markdown and bash. There is no build step and no test suite, so
+# build= and test= are intentionally unset — mill-verify reports the unset
+# step and skips it. coverage= is also unset (no coverage tooling here).
+#
+# lint= syntax-checks every shell script under .mill/checks/ with `bash -n`.
+# Scripts are found by their `#!/...` shebang, not by file extension, because
+# the .mill/checks/ files deliberately do not carry a `.sh` suffix. The command
+# runs in the worktree being verified, so paths are relative to the repository
+# root. It exits non-zero if ANY script fails (the loop accumulates failures
+# rather than relying on the last command's exit code) and prints the failing
+# filename.
+#
+# What this does NOT check: the contents of .claude/skills/, the
+# scaffold/.mill/checks/ drift against .mill/checks/ (commit 6166ada left them
+# out of sync on purpose), or anything outside .mill/checks/.
+lint="fail=0; for f in .mill/checks/*; do [ -f \"\$f\" ] || continue; head -1 \"\$f\" | grep -q '^#!' || continue; bash -n \"\$f\" || { echo \"lint fail: \$f\" >&2; fail=1; }; done; [ \$fail -eq 0 ]"

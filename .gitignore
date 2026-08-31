@@ -26,6 +26,7 @@ mill
 /.mill/role
 /.mill/map.json
 /.mill/session.md
+/.mill/rejections.log
 /.mill/placeholder
 
 # Session exports from the agent harness (multi-MB HTML transcripts)

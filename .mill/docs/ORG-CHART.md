@@ -6,15 +6,15 @@
 graph TD
     CTO[👤 CTO]
 
-    CTO -->|talks to| PE[🤖 Product Engineer<br/>skills: 16<br/>model: pro]
+    CTO -->|talks to| PE[🤖 Product Engineer<br/>skills: 18<br/>model: pro]
 
     PE -->|delegates to| PM[🤗 Product Manager<br/>skills: 4<br/>model: pro]
     PE -->|delegates to| ARCH[🤗 Architect<br/>skills: 4<br/>model: pro]
     PE -->|delegates to| REV[🤗 Reviewer<br/>skills: 2<br/>model: pro]
     PE -->|delegates to| TL[🤗 Tech Lead<br/>skills: 5<br/>model: pro]
-    PE -->|delegates to| FE[🤗 Sr. Dev FE<br/>skills: 3<br/>model: free]
-    PE -->|delegates to| BE[🤗 Sr. Dev BE<br/>skills: 3<br/>model: free]
-    PE -->|delegates to| DATA[🤗 Sr. Dev Data<br/>skills: 3<br/>model: free]
+    PE -->|delegates to| FE[🤗 Sr. Dev FE<br/>skills: 4<br/>model: free]
+    PE -->|delegates to| BE[🤗 Sr. Dev BE<br/>skills: 4<br/>model: free]
+    PE -->|delegates to| DATA[🤗 Sr. Dev Data<br/>skills: 4<br/>model: free]
     PE -->|delegates to| QA[🤗 QA/Docs<br/>skills: 2<br/>model: free]
     PE -->|delegates to| UX[🤗 UX Designer<br/>skills: 3<br/>model: pro]
     PE -->|delegates to| UI[🤗 UI Designer<br/>skills: 2<br/>model: pro]
@@ -122,7 +122,7 @@ sequenceDiagram
     PE->>qad: write tests + changelog
     qad-->>PE: done
 
-    PE->>PE: 7-step verification
+    PE->>PE: mill-verify + acceptance criteria
     PE->>CTO: ready to land
 ```
 

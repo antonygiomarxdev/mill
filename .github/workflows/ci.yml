@@ -15,7 +15,7 @@ jobs:
       - name: Syntax-check gate scripts
         run: |
           status=0
-          for f in .mill/checks/*; do
+          for f in .mill/checks/* scaffold/.mill/checks/* scaffold/checks/*; do
             [ -f "$f" ] || continue
             bash -n "$f" || status=1
           done
@@ -24,7 +24,7 @@ jobs:
       - name: Validate ROLE.md frontmatter
         run: |
           status=0
-          for f in $(find .mill/roles -name 'ROLE.md'); do
+          for f in $(find .mill/roles scaffold/.mill/roles -name 'ROLE.md'); do
             # Must start with ---
             head -1 "$f" | grep -q '^---' || { echo "FAIL: $f — missing frontmatter opening"; status=1; continue; }
             # Must contain a role: field

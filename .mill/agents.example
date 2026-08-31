@@ -2,7 +2,7 @@
 #
 # Same shape as .mill/gauntlet and .mill/role-capabilities: plain bash,
 # sourced by the coordinator's dispatch procedure (see
-# .mill/skills/using-mill.md, "Model selection"). Each tier declares the
+# .claude/skills/delegate/SKILL.md, section 2). Each tier declares the
 # agent binary and the model identifier the worker's terminal starts with:
 #
 #   orca terminal create --command "<agent> --model <model>"

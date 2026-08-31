@@ -177,7 +177,6 @@ Before accepting a worker's result:
 2. Verify acceptance criteria against the code — recalculate every quantitative claim
 3. Run the gates: lint, type-check, build, test
 4. If the role was non-leaf (PM, Architect, Tech Lead), dispatch the next role in the sequence
-5. Check `checks/gate-handoff <issue>` before marking a non-leaf role's work approved
 
 ### Multi-role sequences
 

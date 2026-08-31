@@ -56,108 +56,7 @@ coordinator answers or escalates to you.
 
 ## Install
 
-```bash
-cd your-project
-
-# 1. Install Mill: copy the policy directory and the gates, link the skill.
-#    Mill's gates run at the dispatch boundary, not from git hooks — see below.
-/path/to/mill/scaffold/.mill/checks/mill-install /path/to/mill/scaffold
-
-# 2. Tell the gauntlet how to build and test your project
-cp .mill/gauntlet.example .mill/gauntlet
-$EDITOR .mill/gauntlet
-
-# 3. Map role capabilities to your project's file types
-cp .mill/role-capabilities.example .mill/role-capabilities
-$EDITOR .mill/role-capabilities
-```
-
-The install script does what the manual steps used to do — copy `.mill/` and
-`checks/`, and symlink the skill into `.claude/skills/using-mill/` — but it
-**checks first and never destroys what is already there**. Every change is
-recorded in `.mill/install.json` and reversed by `mill-uninstall`. See
-[ADR 0009](docs/adr/0009-gauntlet-at-the-dispatch-boundary.md) for the design.
-
-**Mill does not take your git hooks.** Mill's gates are not a pre-commit
-framework: the coordinator runs `.mill/checks/mill-verify --worktree <path>
---role <role> [--files-modified <list>]` against a worker's worktree after
-every dispatch, and that is where the gauntlet and `role-enforce` live. Your
-hooks — husky, lefthook, hand-written — stay yours, untouched and unmentioned
-(ADR 0009).
-
-A project that has no hooks configured and explicitly asks for them can still
-point git at Mill's gauntlet with the opt-in flag. The previous hooks path is
-recorded so you can get it back:
-
-```bash
-/path/to/mill/scaffold/.mill/checks/mill-install /path/to/mill/scaffold --with-hooks
-```
-
-If `core.hooksPath` is already set, `--with-hooks` refuses — Mill never chains
-and never replaces: git holds one value.
-
-**The skill link coexists with existing skills.** `.claude/skills/` is a
-directory, so Mill's `using-mill` link lands beside whatever else is there —
-nothing is overwritten. The link is **per-developer state**: it is what makes
-*your* sessions discover the skill, it does not need to be committed, and a
-project that gitignores `.claude/` is fine. The versioned artifact is
-`.mill/skills/using-mill.md` (see "Why the skill is hooked up per project").
-
-**Undo.** Every change the installer makes is recorded in `.mill/install.json`.
-To remove the skill link and any hooks pointer Mill set, and restore the
-previous hooks path:
-
-```bash
-.mill/checks/mill-uninstall
-```
-
-This removes the skill link (and, if `--with-hooks` was used, restores your
-previous `core.hooksPath` or unsets it) and deletes the manifest. The `.mill/`
-policy files remain — remove them with `rm -rf .mill checks` if you want them
-gone. A project installed before manifests existed gets the manual undo printed
-instead.
-
-**Re-running is safe.** An already-installed project is a no-op that says so.
-
-**There is no build step.** Installing Mill is copying files.
-
-`.mill/gauntlet` is plain bash — three lines naming your project's commands:
-
-```bash
-build="npm run build"
-lint="npm run lint"
-test="npm test"
-```
-
-Skip it and `mill-verify` says so and passes; it never guesses. Whatever you
-write runs against every worker's output at the dispatch boundary, so
-`role-enforce` and the phase gates protect the repo from the first dispatch
-onward.
-
-`.mill/role-capabilities` is the same shape — plain bash mapping each role
-capability category (`code`, `docs`, `config`, `policy`, `scripts`, `design`)
-to the file patterns that category may touch in your project. Roles declare
-categories, never languages, so the same role contracts work in any project;
-only this one file names your file types. Skip it and `role-enforce` blocks
-every change with a message saying exactly what to create — it fails closed,
-never open.
-
-### Why the skill is hooked up per project
-
-The skill lives in `.mill/skills/using-mill.md` — versioned with the repository,
-reviewed like any other policy. The harness discovers skills under
-`.claude/skills/`, so the installer links one to the other. The link is
-**per-developer state**: it makes the session in *this* working copy discover
-the skill, it does not need to be committed, and a project that gitignores
-`.claude/` is fine — the versioned source is the `.mill/` file.
-
-**Do not install it globally** (`~/.claude/skills/`) unless you mean it. Its
-description is written to trigger on any request to build, fix, spec or review —
-which is correct inside a Mill project and wrong everywhere else. In a repository
-with no `.mill/` and no Orca, it would have a session trying to dispatch workers
-against nothing.
-
-Per project, the skill is present exactly where Mill is.
+Installation is being redesigned for multiple harnesses (Claude Code, Codex, Pi and others). The previous installer — a scaffold `mill-install` copied into a new project — shipped the version of Mill that commit `6166ada` retired and has been removed.
 
 ## Usage
 
@@ -277,8 +176,6 @@ orca worktree rm --worktree name:ledger-cov
 │   └── skills.json     # the manifest
 └── docs/
 
-checks/                 # gate scripts shipped to scaffolded projects
-scaffold/               # the template copied into a new project
 docs/
 ├── PRODUCT.md          # the product definition
 ├── FINDINGS-2026-08.md # failure patterns found running Mill against itself

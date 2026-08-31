@@ -1,13 +1,6 @@
 {
   "version": "1.0.0",
   "skills": {
-    "using-mill": {
-      "source": "skills/using-mill.md",
-      "hash": "sha256:placeholder",
-      "version": "1.0.0",
-      "local": "skills/using-mill.md",
-      "description": "Bootstrap or activate Mill — say 'using mill' to start delegating"
-    },
     "wayfinder": {
       "source": "https://raw.githubusercontent.com/antonygiomarxdev/mattpocock-skills/main/skills/engineering/wayfinder/SKILL.md",
       "hash": "sha256:placeholder",

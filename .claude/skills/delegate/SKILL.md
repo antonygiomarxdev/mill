@@ -36,18 +36,27 @@ Multi-role sequence for a feature:
 Dispatch one role at a time. Do not dispatch the next until the current
 reports back and you have verified its output.
 
-## 2. The model tier follows the work, not the role
+## 2. Name the agent and model per dispatch
 
-Mechanical work (renames, moves, concatenation, deletion) goes to the free
-tier. Judgement work (specs, review, ADRs, anything where being wrong is
-expensive) goes to the pro tier. A role's `model:` frontmatter is a default,
-not a rule. The (agent, model) pair for each tier lives in `.mill/agents`
-(gitignored; `.mill/agents.example` is the template).
+Every dispatch names the agent and the model explicitly. `worker-start` takes
+`--agent`; where that agent accepts `--model`, pass it. Where it does not
+(command-code), set the model first and say so. There is no default to hide
+behind.
 
-**Known limit — measured today:** `--agent command-code` rejects `--model`.
-The model comes from `~/.commandcode/config.json`, which is global and which
-command-code rewrites itself. Two dispatches on different tiers cannot run
-concurrently against the same agent. Record which tier ran.
+Choose from the work, not from the role. Mechanical work — renames, moves,
+concatenation, deletion — and work whose design is fully specified in the
+brief can go to a cheap model. Work where being wrong is expensive — gates,
+permissions, specs, anything that decides what may land — goes to a capable
+one. The same rule was violated in both directions on 2026-08-31: `67a738d`
+(a two-line CI path edit) ran on the expensive agent, and `4ebcce2` (a change
+to how the permission gate resolves its file) ran on the cheap one.
+
+The landing commit records what ran:
+
+    Mill-Dispatch: role=<role> agent=<agent> model=<model> task=<task_id>
+
+`.mill/agents` is a catalog of what exists on this machine. No script consults
+it and it decides nothing.
 
 ## 3. The dispatch commands
 

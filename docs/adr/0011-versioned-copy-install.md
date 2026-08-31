@@ -122,7 +122,7 @@ Concretely:
    tag-fetched source archive materialised by the installer. The reasons the
    non-copying alternatives fail are in *Alternatives considered*.
 
-### One source document per content-kind, many harnesses
+### Many harnesses: rendered documents and shipped extensions
 
 The repository already generalises "one file, many harnesses" with `AGENTS.md`
 as the real file and `CLAUDE.md` as a symlink to it. That extends only so far,
@@ -144,7 +144,20 @@ and the boundary is exact:
   everywhere" but **one source document per content-kind, rendered by the
   installer into each harness's expected filename.**
 
-The installer renders, from the single source, one entry file per harness:
+That pattern is now two shapes, not one. Most harnesses are served by a
+**rendered document**: the installer writes a context file into the harness's
+expected filename, derived from Mill's single source. Pi is served by a
+**shipped extension**: code the installer places where the harness loads it,
+which registers a skill directory and injects context on lifecycle events at
+run time. The installer must know which kind each harness is — render a
+document for the document-served ones, ship an extension for the
+extension-served ones. The two kinds cost differently. A rendered document is
+Markdown Mill already maintains; a change to the source reaches every harness
+the installer re-renders. A shipped extension is code Mill must maintain
+against a third-party API (Pi's `ExtensionAPI`, from
+`@earendil-works/pi-coding-agent`), which changes on the harness's schedule,
+not Mill's — a Markdown file breaks on no one's schedule.
+The installer produces, per harness, exactly one artifact:
 
 | Harness | Convention | Evidence | Status |
 |---|---|---|---|
@@ -152,16 +165,18 @@ The installer renders, from the single source, one entry file per harness:
 | Codex / generic (AGENTS.md standard) | `AGENTS.md` at root | this repo: root `AGENTS.md` (28 lines) | verified |
 | Copilot | `.github/copilot-instructions.md` | the deleted scaffold carried `scaffold/.github/copilot-instructions.md` (read before deletion) | verified |
 | opencode / omp | `.omp/AGENTS.md`, `.omp/RULES.md` | this repo: both present and read | verified |
-| Pi | unknown | none | unverified |
+| Pi | `.pi/extensions/<name>.ts` TypeScript extension; repo-root `package.json` declares it (`"keywords": ["pi-package"]`, `"pi": { "extensions", "skills" }`); API type from `@earendil-works/pi-coding-agent`; no build step | superpowers 6.3.0 on this machine: `.pi/extensions/superpowers.ts`, `package.json`, `docs/porting-to-a-new-harness.md`, all read directly | verified |
 
-**Pi is unverified.** No file in this repository and no documentation I can read
-states Pi's convention for agent context files. A wrong filename in this table
-becomes a wrong path in the installer, so the installer writes nothing for Pi
-until one of these confirms it: Pi's published documentation naming the file(s)
-it auto-reads; a real Pi-managed repository whose entry file can be inspected;
-or confirmation that Pi honours `AGENTS.md`. The same rule binds any further
-harness (e.g. Cursor): it is **unverified** until its convention is confirmed
-from a file or its own documentation.
+**Pi is verified**, from superpowers 6.3.0 read directly on this machine. Pi
+loads a TypeScript extension (`.pi/extensions/<name>.ts`) declared in the
+repo-root `package.json` (`"keywords": ["pi-package"]` and a `"pi"` block with
+`"extensions"` and `"skills"`), registers a skill directory through the
+`resources_discover` event (`{ skillPaths: [...] }` — skills are native), and
+injects context by mutating the message array in the `context` event rather
+than writing a file. The rule that produced this correction stays: a harness is
+**unverified** until its convention is confirmed from a file or its own
+documentation, and the installer writes nothing for it before then. That rule
+still binds every further harness (e.g. Cursor).
 
 ### What "easy onboarding" means, measurably
 
@@ -266,6 +281,17 @@ submodule and symlink: staleness is made visible and cheap to fix, but it is
 not made self-healing. The version pin is the guard against staleness going
 unnoticed.
 
+**The same requirement has cheaper implementations on some harnesses.** Mill
+keeps the coordinator's identity in context with a `UserPromptSubmit` hook
+(`.claude/settings.json`, commit `4be15c3`) that re-injects it on *every*
+prompt, because Claude Code emits no signal when a compaction happens — the
+only way to survive `/compact` is to reinject unconditionally. Pi has a
+`session_compact` event that fires exactly when a compaction happens, so the
+same guarantee — the coordinator's identity survives compaction — costs one
+event handler. Mill's per-prompt injection is a Claude Code workaround, not the
+general design; a harness that signals compaction natively gets the guarantee
+for less.
+
 **Per-project files remain per-project.** `.mill/gauntlet` and
 `.mill/role-capabilities` are the project's, upgraded never, by design (ADR
 0007, 0009). A change to Mill that needs a *new* per-project fact (e.g. a new
@@ -292,7 +318,6 @@ there) is retained and sharpened into the ownership boundary.
   parallel dispatch; this ADR does not recover it and does not propose a
   replacement under another name. The versioned copy is generated from a tag,
   not checked in.
-- The harness evidence above is what I could read today: the four "verified"
-  rows cite files in this repository (or the scaffold, read before deletion).
-  Pi is unverified and the installer must not write a path for it until its
-  convention is confirmed.
+- The harness evidence above is what I could read today: the five "verified"
+  rows cite files in this repository (or the scaffold, read before deletion),
+  and Pi's cites superpowers 6.3.0 read directly from this machine.

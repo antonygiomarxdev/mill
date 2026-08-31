@@ -231,10 +231,6 @@ orca orchestration reply --id <msg_id> --body "<your answer>"
 **6. Verify it yourself.** A report is not evidence. Run the acceptance commands
 in the worker's worktree, then the phase gates:
 
-```bash
-bash .mill/checks/gate-coverage
-```
-
 **7. Land it, then close the worker down.** Nothing is cleaned up
 automatically, and that is deliberate — a finished worker's terminal and
 worktree may hold something you have not looked at yet.

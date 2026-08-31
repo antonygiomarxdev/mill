@@ -272,7 +272,9 @@ orca worktree rm --worktree name:ledger-cov
 ├── roles/              # 12 role definitions + COMMON.md, with YAML frontmatter
 ├── checks/             # gate scripts (bash) — incl. mill-verify at the dispatch boundary
 ├── skills/
-│   └── using-mill.md   # the coordinator's procedure
+│   ├── wayfinder.md    # the synced skill (Product Engineer / PM)
+│   ├── README.md
+│   └── skills.json     # the manifest
 └── docs/
 
 checks/                 # gate scripts shipped to scaffolded projects

@@ -3,6 +3,7 @@
 A skill plus a policy directory (`docs/adr/0006-mill-is-a-skill-not-a-binary.md`).
 The coordinator is the **Product Engineer** (`roles/product-engineer/ROLE.md`).
 Delegation goes through the `delegate` skill (`.claude/skills/delegate/SKILL.md`).
+Delegation runs on Orca's orchestration layer; load its guide with `orca skills get`.
 
 ## Topology
 

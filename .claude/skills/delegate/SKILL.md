@@ -69,25 +69,39 @@ it and it decides nothing.
 
 ## 3. The dispatch commands
 
+Load Orca's coordination guide before any command below. It is version-matched
+to the installed binary, and Mill does not restate it — dispatch, messaging,
+waiting, releasing and reading a worker are Orca's surface and change between
+releases.
+
+```
+orca skills get orca-cli
+orca skills get orchestration
+```
+
+The guide owns, by name:
+
+- `check` — wait for and acknowledge a worker's report
+- `worker-release` — reclaim a settled worker
+- `send` — give a live worker follow-up work
+- `worker-read` — read a worker's transcript
+
+Read the guide for their syntax; the names above exist only so a reader who
+skipped it knows what it covers.
+
+What is Mill's own, and lives here:
+
 ```
 .mill/checks/mill-preflight --brief <role> <path> [<path>...]   # refuse a brief that asks for what the role cannot write
+.mill/checks/mill-preflight --brief-file <brief> --role <role>  # refuse a brief that is not checkable
 orca orchestration task-create --spec "<brief text or path>" --task-title "<short>"
 orca orchestration worker-start --task <task_id> --agent <agent> \
     --worktree new-top-level --name mill-<slug>
-# `check` reads only deliveries addressed to the bound run; `inbox` shows
-# every message across recipients, so an escalation or a worker_done that
-# arrived in a different run is not silently dropped.
-orca orchestration inbox
-orca orchestration reply
 ```
 
-Make sure Orca is running before you dispatch:
-`orca status | grep -q "runtimeReachable: true" || orca open`.
-A dispatch against a stopped runtime fails partway, sometimes after the task
-is already created — pre-create the task with the brief as the spec.
-Read the dispatch record in Orca, not your memory:
-`orca orchestration task-list`, `orca orchestration inbox`, and
-`orca orchestration worker-read --dispatch <ctx_id>` for what an agent did.
+The sequence is brief → task → worker, then verify. `mill-preflight` refuses a
+bad brief; `task-create` records it; `worker-start` runs it; `mill-verify`
+(`--role`, `--files-modified`, `--dispatch`) judges the result — see section 5.
 
 ## 4. Brief structure
 

@@ -313,4 +313,6 @@ if [[ -n "$brief_file" ]]; then
     exit "$failed"
 fi
 
+# Load Orca's coordination guide before relying on its surface.
+echo "Orca's coordination guide: load with 'orca skills get orca-cli' and 'orca skills get orchestration'"
 exit 0

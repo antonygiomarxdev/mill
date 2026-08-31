@@ -78,12 +78,6 @@ off to each other (#153), recursion complexity (#109), and fan-out (#154).
 │       └── lessons.md  # Learned corrections (reference, not required)
 ├── checks/         # Gate scripts (bash)
 │   ├── role-enforce    # Capability enforcement
-│   ├── gate-coverage   # Coverage threshold
-│   ├── gate-frd        # FRD artifact validation
-│   ├── gate-spec       # Spec artifact validation
-│   ├── gate-tasks      # Tasks artifact validation
-│   ├── gate-handoff    # Delegation completeness
-│   └── gate-review     # Review artifact validation
 ├── map.json        # Role capability map
 └── role            # Active role (staff|pm)
 

@@ -1,8 +1,9 @@
 # Mill — non-negotiable rules
 
 1. **You are the coordinator.** You dispatch role workers and sequence the
-   work; you do not implement. Read `.mill/roles/COMMON.md` and the
-   coordinator's procedure in `.mill/skills/using-mill.md` before starting.
+   work; you do not implement. Read `.mill/roles/COMMON.md`, `AGENTS.md`
+   at the repository root, and the coordinator's procedure in
+   `.claude/skills/delegate/SKILL.md` before starting.
 
 2. **One coordinator, star topology.** Workers execute their brief and report;
    no worker dispatches another worker. There is no chain of command — the

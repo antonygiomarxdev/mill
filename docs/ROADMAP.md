@@ -29,7 +29,9 @@ of "works" here was measured; every claim of "unknown" means nobody has tried.
 
 **Does not work, or was never tried**
 
-- The gauntlet shipped to new projects runs Go tooling unconditionally
+- The gauntlet shipped to new projects runs Go tooling unconditionally —
+  obsolete (6f18cba): the scaffold that shipped it was deleted; the gauntlet
+  is now per-project `.mill/gauntlet` configuration
 - Nobody outside this machine has installed Mill
 - There is no eval; verification is a human reading a diff
 - Whether the delegation chain beats a single agent has never been measured
@@ -37,6 +39,10 @@ of "works" here was measured; every claim of "unknown" means nobody has tried.
 ---
 
 ## 1. Make it work outside Go — #152
+
+**Obsolete — 6f18cba deleted the scaffold this describes; #152 is closed.** The
+gauntlet is now per-project configuration (`.mill/gauntlet`); the body below
+describes the deleted scaffold's hardcoded Go tooling.
 
 **Why first:** until this is done, "any project" means "any Go project".
 `scaffold/.mill/checks/` runs `go build`, `go vet` and `go test` with no
@@ -62,8 +68,9 @@ by nobody. It is the first thing a new user does and the only claim in the
 project that is unmeasured.
 
 **What:** a person who is not the author, on a machine that is not this one,
-follows only the README: install Orca, register an agent, copy `scaffold/`, link
-the skill, dispatch one worker.
+follows only the README: install Orca, register an agent, install Mill (the
+versioned-copy path ADR 0011 decides — not yet built, #162), link the skill,
+dispatch one worker.
 
 **Done when:** they complete it without asking a question the README does not
 answer — and every place they got stuck is fixed.

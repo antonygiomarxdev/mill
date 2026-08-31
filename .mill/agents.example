@@ -11,6 +11,19 @@ gitignored; this example stays tracked.
 - **`omp`** — takes no `--model` flag. It reports its model, reasoning effort,
   and running cost in its own status bar; read with `orca terminal read`. Pick
   the model inside omp.
+
+  Model selection is configured, not passed per launch. Three keys matter:
+
+  - `modelRoles` — a record mapping role names to model ids (`plan`, `default`,
+    `smol`). It is a record, so it must be set whole:
+    `omp config set modelRoles '{"plan":"opencode-go/deepseek-v4-pro:high","default":"opencode-go/deepseek-v4-pro","smol":"opencode-go/deepseek-v4-flash"}'`.
+    The dotted form is rejected: `omp config set modelRoles.smol ...` fails.
+    These ids are this machine's settings, recorded as an example of the
+    mechanism, not as defaults Mill ships.
+  - `prewalk.enabled` and `task.prewalk` — both `true` on this machine.
+    `prewalk` switches from the active model to the `smol` role at the first
+    edit/write once the plan's todo list exists, so the agent chooses the model
+    from the work it observes instead of the coordinator predicting it.
 - **`command-code`** — `worker-start --agent command-code` rejects `--model`.
   Its model comes from the global `~/.commandcode/config.json`, which
   command-code rewrites itself, so two dispatches on different models cannot

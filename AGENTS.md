@@ -23,7 +23,6 @@ Engineer role file.
 
 ```
 .mill/           policy: roles, checks, skills, docs, phases
-scaffold/        the frozen installer template
 docs/            ADRs, research, FINDINGS
 local/           operator-local state (gitignored)
 ```

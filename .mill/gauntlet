@@ -13,7 +13,8 @@
 # rather than relying on the last command's exit code) and prints the failing
 # filename.
 #
-# What this does NOT check: the contents of .claude/skills/, the
-# scaffold/.mill/checks/ drift against .mill/checks/ (commit 6166ada left them
-# out of sync on purpose), or anything outside .mill/checks/.
+# What this does NOT check: the contents of .claude/skills/, the root
+# checks/ tree (deleted alongside the scaffold), or anything outside
+# .mill/checks/. The scaffold drift this lint used to tolerate no longer
+# exists.
 lint="fail=0; for f in .mill/checks/*; do [ -f \"\$f\" ] || continue; head -1 \"\$f\" | grep -q '^#!' || continue; bash -n \"\$f\" || { echo \"lint fail: \$f\" >&2; fail=1; }; done; [ \$fail -eq 0 ]"

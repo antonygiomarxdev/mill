@@ -55,6 +55,10 @@ The landing commit records what ran:
 
     Mill-Dispatch: role=<role> agent=<agent> model=<model> task=<task_id>
 
+Put the `Mill-Dispatch:` trailer in the same block as the other trailers
+(`Co-Authored-By:`, `Claude-Session:`), with no blank line before them — git
+parses only the last paragraph as trailers, so a blank line demotes it to prose.
+
 `.mill/agents` is a catalog of what exists on this machine. No script consults
 it and it decides nothing.
 
@@ -99,6 +103,10 @@ Every brief that worked has the same five parts. Write them in order:
 
 Reference files rather than inlining their content. A worker given its
 `ROLE.md` and a brief has everything it needs.
+
+Before dispatching, run `mill-preflight --brief-file <brief> --role <role>`: it
+refuses a brief with no acceptance-criteria section, a criterion that
+contradicts the DO NOT list, or a criterion naming a path the role cannot write.
 
 ## 5. Verify and land
 

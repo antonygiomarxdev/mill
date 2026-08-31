@@ -51,6 +51,11 @@ one. The same rule was violated in both directions on 2026-08-31: `67a738d`
 (a two-line CI path edit) ran on the expensive agent, and `4ebcce2` (a change
 to how the permission gate resolves its file) ran on the cheap one.
 
+Where an agent can switch its own model, prefer that over predicting it here:
+`prewalk` is the case that exists today — it moves the agent to the `smol` role
+at the first edit/write once the plan's todo list exists, so the model follows
+the work as observed rather than as predicted by the coordinator.
+
 The landing commit records what ran:
 
     Mill-Dispatch: role=<role> agent=<agent> model=<model> task=<task_id>
@@ -63,6 +68,12 @@ Two rules, both required, or git parses nothing:
 
 Attach the block to the prose and git parses zero trailers (`f22dea7`); leave
 a blank line inside and `Mill-Dispatch` is demoted, the other two parse (`24f3019`).
+
+The `model=` field is filled from the session transcript after the worker
+settles (`~/.omp/agent/sessions/<worktree-slug>/*.jsonl`), not guessed at
+dispatch time. After landing, run
+`git log -1 --format="%(trailers:only=true)"` and confirm `Mill-Dispatch`
+appears — it would have caught `24f3019` and `f22dea7`.
 
 `.mill/agents` is a catalog of what exists on this machine. No script consults
 it and it decides nothing.

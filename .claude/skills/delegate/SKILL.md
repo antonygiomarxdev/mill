@@ -54,10 +54,15 @@ to how the permission gate resolves its file) ran on the cheap one.
 The landing commit records what ran:
 
     Mill-Dispatch: role=<role> agent=<agent> model=<model> task=<task_id>
+    Co-Authored-By: ...
+    Claude-Session: ...
 
-Put the `Mill-Dispatch:` trailer in the same block as the other trailers
-(`Co-Authored-By:`, `Claude-Session:`), with no blank line before them — git
-parses only the last paragraph as trailers, so a blank line demotes it to prose.
+Two rules, both required, or git parses nothing:
+1. Blank line before the block — it is the last paragraph.
+2. No blank line inside the block.
+
+Attach the block to the prose and git parses zero trailers (`f22dea7`); leave
+a blank line inside and `Mill-Dispatch` is demoted, the other two parse (`24f3019`).
 
 `.mill/agents` is a catalog of what exists on this machine. No script consults
 it and it decides nothing.

@@ -1,3 +1,11 @@
+# Lessons
+
+Lessons from autoconstruction cycles and from building agent delegation
+at rumai-labs/rumai. Concatenated from the original four source files
+in order; not rewritten, summarised, deduplicated, or reordered.
+
+## .mill/roles/product-engineer/lessons.md
+
 # Product Engineer Lessons
 
 Product-Engineer-specific failures from autoconstruction cycles.
@@ -340,3 +348,48 @@ field is set" prove nothing about what runs.
 **Mechanised:** every brief the Product Engineer writes states the acceptance test as an
 observable behaviour, and the Product Engineer re-runs it rather than accepting
 the report.
+
+## .mill/roles/reviewer/lessons.md
+
+# Reviewer Lessons
+
+---
+
+## 1. Spec compliance is not gate compliance
+
+**When:** #16 first review pass.
+
+**What happened:** Mechanical gates passed (build, test, no cobra, time.Time). But the Sr. Dev implemented a verdict classifier (APPROVED/CHANGES/REJECTED) instead of the session classifier the spec asked for (OK/FATAL/AUTH/...). Gate check said "something was built." Spec check says "the right thing was built." Only spec check caught the error.
+
+**Lesson:** Verify what was asked, not what was delivered. Mechanical gates are necessary but not sufficient. Every acceptance criterion must be checked against the code. A criterion like "Classification: OK, FATAL, MAX_TURNS, AUTH, NO_CREDIT, RATE_LIMITED, TRANSIENT, BLOCKED" means grep for those exact strings. If the code exports different types, CHANGES.
+
+**Mechanised:** Partially. Post-hook: acceptance criteria pattern-match against exported types. Spec says `X` types, code exports `Y` types → auto-reject.
+
+## .mill/roles/tech-lead/lessons.md
+
+# Tech Lead Lessons
+
+---
+
+## 1. Atomic tasks need complete interface contracts
+
+**When:** #26 — classify signature change broke delegate.go.
+
+**What happened:** classify changed from `Classify(string) Verdict` to `Classify(int, string) Classification`. The task brief only said "fix classify.go." It didn't list callers that needed updating. Build broke on integration.
+
+**Lesson:** When decomposing a task that changes a public interface, the task scope must include updating all callers. Or: the interface change goes in one task, caller updates go in a separate dependent task. Either way, the contract is explicit in the brief.
+
+**Mechanised:** Yes — `go build` catches compile errors. But the process lesson is: Tech Lead must identify all callers when writing task briefs, not assume the Sr. Dev will find them.
+
+## .mill/docs/lessons.md
+
+# Lessons from RUMAI
+
+What we learned building agent delegation at rumai-labs/rumai.
+
+## Mechanised in Mill
+
+- **State must derive from artifacts, not supervisors.**
+- **Work in flight must not depend on editable files.**
+- **Auto-compact or context overflows.**
+- **Absence blocks harder than rejection.**

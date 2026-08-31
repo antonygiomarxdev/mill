@@ -24,7 +24,6 @@ mill
 /.mill/memory/
 /.mill/agents
 /.mill/role
-/.mill/role-capabilities
 /.mill/map.json
 /.mill/session.md
 /.mill/placeholder

@@ -104,7 +104,6 @@ What is Mill's own, and lives here:
 
 ```
 .mill/checks/mill-preflight --brief <role> <path> [<path>...]   # refuse a brief that asks for what the role cannot write
-.mill/checks/mill-preflight --brief-file <brief> --role <role>  # refuse a brief that is not checkable
 orca orchestration task-create --spec "<brief text or path>" --task-title "<short>"
 orca orchestration worker-start --task <task_id> --agent <agent> \
     --worktree new-top-level --name mill-<slug>
@@ -134,9 +133,7 @@ Every brief that worked has the same five parts. Write them in order:
 Reference files rather than inlining their content. A worker given its
 `ROLE.md` and a brief has everything it needs.
 
-Before dispatching, run `mill-preflight --brief-file <brief> --role <role>`: it
-refuses a brief with no acceptance-criteria section, a criterion that
-contradicts the DO NOT list, or a criterion naming a path the role cannot write.
+Before dispatching, run `mill-preflight --brief <role>` with the paths the brief asks the worker to write.
 
 ## 5. Verify and land
 

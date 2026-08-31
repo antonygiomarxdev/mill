@@ -4,20 +4,30 @@
 # actionable message when Orca's runtime is unreachable or the working
 # directory is not a Mill project.
 #
-# Optional brief check:
+# Optional brief checks:
 #   mill-preflight --brief <role> <path> [<path> ...]
+#   mill-preflight --brief-file <brief.md> --role <role> [--explain]
 #
 # With --brief, after the two environment checks below, every named path is
 # judged against <role>'s allowed_files (via role-enforce --test). A path the
 # role may not write fails the preflight, and the roles that can write it are
-# named so the coordinator can route the work instead of guessing. The two
+# named so the coordinator can route the work instead of guessing.
+#
+# With --brief-file, the brief's Markdown is read directly and checked: it must
+# have an acceptance-criteria section with a numbered item; no path may appear
+# in both the DO NOT list and the criteria (a self-contradicting brief); and
+# every path in the criteria must be one the role can write. --explain prints
+# the paths extracted from each section so a rejected brief is legible. The two
 # environment checks still run: a brief check against an unreachable Orca is
-# not useful. With no --brief, behaviour is exactly the two checks below.
+# not useful. With no --brief/--brief-file, behaviour is exactly the two
+# environment checks below.
 set -euo pipefail
 
 # --- argument parsing --------------------------------------------------------
 brief_mode=0
 brief_role=""
+brief_file=""
+explain=0
 brief_paths=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -26,11 +36,28 @@ while [[ $# -gt 0 ]]; do
             brief_role="${2:-}"
             shift 2
             ;;
+        --brief-file)
+            brief_file="${2:-}"
+            shift 2
+            ;;
+        --role)
+            brief_role="${2:-}"
+            shift 2
+            ;;
+        --explain)
+            explain=1
+            shift
+            ;;
         -h|--help)
             echo "usage: mill-preflight [--brief <role> <path> [<path>...]]"
-            echo "  (no arguments)          check Orca reachability and Mill project layout"
-            echo "  --brief <role> <path>... additionally refuse every path <role> cannot"
-            echo "                          write, naming the role(s) that can write each one"
+            echo "                     [--brief-file <brief.md> --role <role> [--explain]]"
+            echo "  (no arguments)              check Orca reachability and Mill project layout"
+            echo "  --brief <role> <path>...     refuse every path <role> cannot write, naming"
+            echo "                               the role(s) that can write each one"
+            echo "  --brief-file <brief.md>      read the brief: require a numbered acceptance"
+            echo "    --role <role>              criteria, no DO NOT/criteria conflict, and only"
+            echo "                               paths the role can write"
+            echo "  --explain                    print the paths extracted from the brief"
             exit 0
             ;;
         -*)
@@ -111,6 +138,178 @@ if [[ "$brief_mode" -eq 1 ]]; then
             failed=1
         fi
     done
+    exit "$failed"
+fi
+
+# --- brief-file helpers ------------------------------------------------------
+# section_body <file> <pattern> — print the body of the first section whose
+# heading (a line starting with '#') matches <pattern>, case-insensitively,
+# from the line after the heading to the next heading, exclusive.
+section_body() {
+    local file="$1" pattern="$2"
+    awk -v p="$pattern" '
+        !in_section {
+            if ($0 ~ /^#{1,6}[[:space:]]/ && tolower($0) ~ p) { in_section = 1 }
+            next
+        }
+        {
+            if ($0 ~ /^#{1,6}[[:space:]]/) { exit }
+            print
+        }
+    ' "$file"
+}
+
+# extract_spans <file> <pattern> — print "line<TAB>backtick-content" for every
+# backtick span inside the section matching <pattern>. Tokens are classified in
+# bash, not here.
+extract_spans() {
+    local file="$1" pattern="$2"
+    awk -v p="$pattern" '
+        !in_section {
+            if ($0 ~ /^#{1,6}[[:space:]]/ && tolower($0) ~ p) { in_section = 1 }
+            next
+        }
+        {
+            if ($0 ~ /^#{1,6}[[:space:]]/) { exit }
+            line = $0
+            while (match(line, /`[^`]+`/)) {
+                print NR "\t" substr(line, RSTART+1, RLENGTH-2)
+                line = substr(line, RSTART+RLENGTH)
+            }
+        }
+    ' "$file"
+}
+
+# is_path <token> — a token is a path only when it looks like one: it contains
+# '/', starts with '.', or ends in a known extension. Bare words like `git`,
+# `exit=0` or `72` are not paths and are ignored silently.
+is_path() {
+    local t="$1"
+    [[ "$t" == */* ]] && return 0
+    [[ "$t" == .* ]] && return 0
+    [[ "$t" =~ \.(md|sh|yml|yaml|json|toml|py|ts|tsx|js|jsx|css|html|pen|fig|example|gitignore|sql|rs|go|java|rb|php|env)$ ]] && return 0
+    return 1
+}
+
+# normalize_path <path> — strip trailing sentence punctuation and trailing
+# slashes so `.mill/roles/` and `.mill/roles` compare equal. Trailing globs
+# (`/**`, `/*`, `*`) are left in place for the conflict matcher.
+normalize_path() {
+    local p="$1"
+    p="$(printf '%s' "$p" | sed -E 's/[,.;:!?)]+$//')"
+    while [[ "$p" == */ ]]; do
+        p="${p%/}"
+    done
+    printf '%s' "$p"
+}
+
+# path_conflicts <criterion> <do_not> — both normalized. True when the DO NOT
+# path covers the criterion path: exact or directory-prefix, or a glob match.
+path_conflicts() {
+    local c="$1" d="$2"
+    if [[ "$d" == *'*'* || "$d" == *'?'* ]]; then
+        [[ "$c" == $d ]]
+    else
+        [[ "$c" == "$d" || "$c" == "$d/"* ]]
+    fi
+}
+
+# 4. --brief-file: the brief itself must be checkable.
+if [[ -n "$brief_file" ]]; then
+    if [[ -z "$brief_role" ]]; then
+        echo "error: --brief-file requires --role" >&2
+        exit 2
+    fi
+    if [[ ! -f "$brief_file" ]]; then
+        echo "error: brief file not found: $brief_file" >&2
+        exit 2
+    fi
+    if [[ ! -f ".mill/roles/$brief_role/ROLE.md" ]]; then
+        echo "error: unknown role '$brief_role' (no .mill/roles/$brief_role/ROLE.md)" >&2
+        exit 2
+    fi
+
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    role_enforce="$here/role-enforce"
+    if [[ ! -x "$role_enforce" ]]; then
+        echo "error: role-enforce not found next to mill-preflight" >&2
+        exit 1
+    fi
+
+    # Collect backtick tokens that look like paths from each section, with
+    # their line numbers, and normalize them for comparison. A backtick span is
+    # split on whitespace so a criterion's runnable command still yields its
+    # path (`bash -n .mill/checks/mill-preflight` yields that one path).
+    do_not_raw="$(extract_spans "$brief_file" "do not")"
+    criteria_raw="$(extract_spans "$brief_file" "acceptance criteria")"
+
+    do_not_paths=(); do_not_lines=()
+    while IFS=$'\t' read -r ln span; do
+        [[ -z "$span" ]] && continue
+        read -ra toks <<< "$span"
+        for tok in "${toks[@]}"; do
+            if is_path "$tok"; then
+                do_not_paths+=("$(normalize_path "$tok")"); do_not_lines+=("$ln")
+            fi
+        done
+    done <<< "$do_not_raw"
+
+    criteria_paths=(); criteria_lines=()
+    while IFS=$'\t' read -r ln span; do
+        [[ -z "$span" ]] && continue
+        read -ra toks <<< "$span"
+        for tok in "${toks[@]}"; do
+            if is_path "$tok"; then
+                criteria_paths+=("$(normalize_path "$tok")"); criteria_lines+=("$ln")
+            fi
+        done
+    done <<< "$criteria_raw"
+
+    # --explain: print what was extracted so a rejected brief is legible.
+    if [[ "$explain" -eq 1 ]]; then
+        echo "mill-preflight: extracted from the DO NOT section:"
+        for i in "${!do_not_paths[@]}"; do
+            echo "  line ${do_not_lines[$i]}: ${do_not_paths[$i]}"
+        done
+        echo "mill-preflight: extracted from the acceptance-criteria section:"
+        for i in "${!criteria_paths[@]}"; do
+            echo "  line ${criteria_lines[$i]}: ${criteria_paths[$i]}"
+        done
+    fi
+
+    # 1. The brief must have an acceptance-criteria section with a numbered
+    #    item, or it is unverifiable.
+    criteria_body="$(section_body "$brief_file" "acceptance criteria")"
+    if ! printf '%s\n' "$criteria_body" | grep -qE '^[[:space:]]*[0-9]+[.)]'; then
+        echo "mill-preflight: brief has no acceptance criteria (an 'Acceptance criteria' section with a numbered item is required)" >&2
+        exit 1
+    fi
+
+    failed=0
+
+    # 2. No path may appear in both the DO NOT list and the criteria.
+    for i in "${!criteria_paths[@]}"; do
+        c="${criteria_paths[$i]}"
+        for j in "${!do_not_paths[@]}"; do
+            d="${do_not_paths[$j]}"
+            if path_conflicts "$c" "$d"; then
+                echo "mill-preflight: '$c' is named in both the DO NOT list and the acceptance criteria (criterion line ${criteria_lines[$i]}, DO NOT line ${do_not_lines[$j]})" >&2
+                failed=1
+            fi
+        done
+    done
+
+    # 3. Every concrete criteria path must be one the role can write. A glob in
+    #    the criteria is ambiguous and skipped.
+    for i in "${!criteria_paths[@]}"; do
+        c="${criteria_paths[$i]}"
+        [[ "$c" == *'*'* || "$c" == *'?'* ]] && continue
+        if ! "$role_enforce" --test "$brief_role" "$c" >/dev/null 2>&1; then
+            echo "mill-preflight: '$c' is not allowed for role '$brief_role' (criterion line ${criteria_lines[$i]})" >&2
+            failed=1
+        fi
+    done
+
     exit "$failed"
 fi
 

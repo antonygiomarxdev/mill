@@ -208,6 +208,7 @@ judge_write() {
     if ! "$role_enforce" --test "$role" --base-dir "$worktree" "$1" >/dev/null 2>&1; then
         echo "error: $1 is not allowed for role '$role'" >&2
         violation=1
+        printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" verify "$role" "$1" >> "$here/../rejections.log" 2>/dev/null || true
     fi
     return 0
 }

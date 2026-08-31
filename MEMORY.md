@@ -4,13 +4,26 @@ Current operational facts. If a fact stops being true, edit the line. History li
 
 ## What Mill is now
 
-- `AGENTS.md` — entry point, 28 lines.
+- `AGENTS.md` — entry point, 29 lines.
 - `CLAUDE.md` — symlink to `AGENTS.md` (mode 120000).
 - `.claude/skills/delegate/SKILL.md` — the dispatch recipe (98 lines).
 - `LESSONS.md` — history; not a checklist.
 - `.mill/roles/*/ROLE.md` — one per worker role; brief reads its target role.
 - `.mill/checks/` — seven scripts: `common.sh`, `mill-preflight`, `mill-role-guard`, `mill-verify`, `pre-commit`, `pre-push`, `role-enforce`.
 - No Mill binary (ADR 0006).
+
+## Orca's coordination guide
+
+- The authoritative guide to Orca's orchestration surface ships with the
+  installed binary and is loaded with `orca skills get orca-cli` and
+  `orca skills get orchestration`. Mill references it and does not restate it.
+- Fallback when `skills get` cannot run (this machine): both documented paths
+  fail — `orca skills get` launches the app UI and the single-instance lock
+  refuses it, and `orca-ide` reports `bad option: --no-sandbox`. The guide was
+  recovered from the AppImage at
+  `/tmp/.mount_orca*/resources/app.asar.unpacked/out/cli/bundled-skill-guides.js`,
+  which exports `BUNDLED_SKILL_GUIDES` with a `markdown` field per guide. This
+  is a workaround for a broken path, not the supported way.
 
 ## Coordinator is constant
 

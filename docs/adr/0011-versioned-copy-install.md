@@ -60,9 +60,9 @@ drifts?** Everything else — harnesses, onboarding — is downstream of it.
 ## Decision
 
 **Mill installs as a versioned copy into the target repository: the installer
-materialises the files from Mill's own repository at a git tag, records the
-tag, and `mill-install --upgrade` re-syncs the copy non-destructively. There is
-exactly one source of truth — Mill's repository at a tag — and the installed
+materialises the files from Mill's own repository at a git ref, records the
+ref, and `mill-install --upgrade` re-syncs the copy non-destructively. There is
+exactly one source of truth — Mill's repository at a ref — and the installed
 copy is a faithful, re-syncable materialisation of it, never a hand-edited
 second copy.**
 
@@ -78,34 +78,38 @@ no re-sync path; the fix is to give the copy a version and a re-sync path.
 Concretely:
 
 1. **One source of truth.** Mill's repository is the source. It ships no
-   `scaffold/` and no frozen template. The installer fetches a git tag (ADR
-   0004 already established SemVer tags; `install.sh` already resolves the
-   latest tag) and writes the files into the target. A copy is *generated* from
-   the tag; it is never checked in anywhere and never edited by hand. This is
-   the difference from the scaffold, which was a second checked-in copy that
-   diverged from `.mill/` because nobody paid the sync tax.
+   `scaffold/` and no frozen template. The installer materialises the files
+   from a git ref and writes them into the target. A commit sha always exists,
+   is more precise than a tag, and does not block the installer on a release
+   process that has not started — ADR 0004 decided the SemVer versioning
+   strategy, but no tag has been cut (#95). When #95 cuts the first tag, a tag
+   is simply a ref with a friendlier name and the installer does not change. A
+   copy is *generated* from the ref; it is never checked in anywhere and never
+   edited by hand. This is the difference from the scaffold, which was a
+   second checked-in copy that diverged from `.mill/` because nobody paid the
+   sync tax.
 
 2. **The version pin makes drift detectable.** The installer writes the
-   installed tag (`.mill/version`, or a field in the install manifest).
-   `mill-preflight` compares it against the latest tag and reports "installed
-   vX.Y.Z, latest vX.Y.Z+N" — staleness is a machine-readable fact, not a
-   suspicion. `role-enforce` is the canonical case: a fix to it reaches a
-   project because the project's install records it is behind, and the upgrade
-   path (next point) closes the gap.
+   installed ref (`.mill/version`, or a field in the install manifest).
+   `mill-preflight` compares it against the current default branch head and
+   reports that the install is behind — staleness is a machine-readable fact,
+   not a suspicion. `role-enforce` is the canonical case: a fix to it reaches
+   a project because the project's install records it is behind, and the
+   upgrade path (next point) closes the gap.
 
 3. **`mill-install --upgrade` is the fix-delivery path — one command,
-   non-destructive.** It re-fetches the latest tag and replaces **Mill-owned**
+   non-destructive.** It re-fetches the current ref and replaces **Mill-owned**
    files: the entry files, the roles, the checks, the skill, the settings
    hooks. It leaves **project-owned** files alone: `.mill/gauntlet` and
    `.mill/role-capabilities` (per ADR 0007 and 0009), plus everything else in
    the repository. The ownership boundary is a manifest — the installer knows
-   which files it wrote, from which tag — so the upgrade touches exactly Mill's
+   which files it wrote, from which ref — so the upgrade touches exactly Mill's
    files and nothing the project authored.
 
 4. **Local edits to Mill-owned files are surfaced, not silently clobbered or
    silently preserved.** If a project edited a Mill-owned file (the thing that
    used to create the three divergent copies), the upgrade detects the diff
-   between the on-disk file and what the old tag shipped. It refuses to
+   between the on-disk file and what the old ref shipped. It refuses to
    overwrite blindly: it renames the local version to `<file>.local` (or
    refuses and prints the diff, and the operator chooses), then lands the new
    version. Either way nothing is lost — the project is a git repository, so any
@@ -118,8 +122,8 @@ Concretely:
    of letting it accumulate silently.
 
 5. **No submodule, no symlink, no plugin channel, no registry.** The versioning
-   spine (tags, SemVer) is kept from ADR 0004; the distribution is a
-   tag-fetched source archive materialised by the installer. The reasons the
+   spine (SemVer) is kept from ADR 0004; the distribution is a
+   ref-fetched source archive materialised by the installer. The reasons the
    non-copying alternatives fail are in *Alternatives considered*.
 
 ### Many harnesses: rendered documents and shipped extensions
@@ -182,7 +186,7 @@ still binds every further harness (e.g. Cursor).
 
 Done is checkable, and the three issues map onto it:
 
-1. **Install — one command.** `mill-install` fetches the tag, writes the entry
+1. **Install — one command.** `mill-install` fetches the ref, writes the entry
    files and `.mill/`, and generates `.mill/gauntlet` and
    `.mill/role-capabilities` from templates. The only thing the operator must
    know beforehand is the project's build/lint/test commands, to fill
@@ -256,7 +260,7 @@ bash, not a runtime artifact; a registry installs into `node_modules` or
 site-packages, not into the repo root where harnesses read it; and the project
 has no registry infrastructure (the Go binary that had release tooling was
 retired by ADR 0006). The useful half — a versioned, fetchable artifact — is
-adopted via git tags and `install.sh`, which ADR 0004 already established.
+adopted via a git ref and the SemVer versioning strategy ADR 0004 decided.
 Rejected as the channel, adopted as the versioning spine.
 
 **Fetch-on-demand script** (no install, fetch every session). Rejected: it
@@ -267,7 +271,7 @@ the copy in between is a normal versioned file.
 
 ## Consequences
 
-**Gained.** One source of truth (the tag), a machine-readable staleness signal
+**Gained.** One source of truth (the ref), a machine-readable staleness signal
 (the version pin), and a one-command, non-destructive fix path
 (`mill-install --upgrade`). The three divergent gate-script copies become
 impossible to recreate: there is no second checked-in copy to diverge. A
@@ -312,11 +316,19 @@ a `scaffold/`) that no longer exists, and its non-destructive mechanics
 copy mechanism itself. The non-destructive *intent* (never destroy what is
 there) is retained and sharpened into the ownership boundary.
 
+**Correction recorded.** This ADR was amended while preparing the
+implementation dispatch: the original text asserted an installer script that
+did not exist in the repository, and described SemVer tags as already cut when
+no tag has ever been cut (#95 is still open). ADR 0004 decided the versioning
+strategy; the tags and releases it names do not exist yet. The installer
+therefore keys on a git ref, and a tag is a ref with a friendlier name —
+nothing changes when #95 delivers one.
+
 ## Notes
 
 - The `scaffold/` directory described in the context is being deleted in a
   parallel dispatch; this ADR does not recover it and does not propose a
-  replacement under another name. The versioned copy is generated from a tag,
+  replacement under another name. The versioned copy is generated from a ref,
   not checked in.
 - The harness evidence above is what I could read today: the five "verified"
   rows cite files in this repository (or the scaffold, read before deletion),

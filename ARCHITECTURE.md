@@ -142,9 +142,9 @@ Each role declares a tier in its `ROLE.md` frontmatter (`model:`):
 | `pro` | pro tier, directly | Product Engineer, PM, Architect, Tech Lead, Reviewer, UX, UI, Policy Author |
 | `free→paid` | free tier first; escalated to paid when the free attempt fails on judgement | Sr Dev BE/FE/Data, QA/Docs |
 
-The tier resolves to an (agent, model) pair through `.mill/agents` (gitignored;
-`.mill/agents.example` is the template). See `.claude/skills/delegate/SKILL.md`
-section 2.
+`.mill/agents` is a catalog of what runs on this machine (gitignored;
+`.mill/agents.example` is the template). No script reads it; every dispatch
+names its agent and model. See `.claude/skills/delegate/SKILL.md` section 2.
 
 ## Key decisions
 

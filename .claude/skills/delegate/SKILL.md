@@ -52,6 +52,7 @@ concurrently against the same agent. Record which tier ran.
 ## 3. The dispatch commands
 
 ```
+.mill/checks/mill-preflight --brief <role> <path> [<path>...]   # refuse a brief that asks for what the role cannot write
 orca orchestration task-create --spec "<brief text or path>" --task-title "<short>"
 orca orchestration worker-start --task <task_id> --agent <agent> \
     --worktree new-top-level --name mill-<slug>
@@ -83,7 +84,9 @@ Every brief that worked has the same five parts. Write them in order:
 4. **Acceptance criteria.** Numbered. Each is a runnable command whose raw
    output the worker pastes. Max 9. Countable — never adjectives.
 5. **Raise a hand.** The line a worker sends when the brief is unclear:
-   `orca orchestration send --type question --subject "<short>" --body "<q>"`.
+   `orca orchestration send --type question --subject "<short>" --body "<q>" --task-id <task-id> --dispatch-id <dispatch-id>`.
+   A question without `--task-id` and `--dispatch-id` cannot be tied to its
+   dispatch and will not be seen by `mill-verify --dispatch`.
 
 Reference files rather than inlining their content. A worker given its
 `ROLE.md` and a brief has everything it needs.
@@ -92,6 +95,7 @@ Reference files rather than inlining their content. A worker given its
 
 ```
 .mill/checks/mill-verify --worktree <path> --role <role> --files-modified "<list>"
+.mill/checks/mill-verify --dispatch <ctx_id>                   # refuse while a question is unanswered
 ```
 
 Run it from the **coordinator's** repository, never from the worktree — the
@@ -100,3 +104,15 @@ git status letter (`A`/`M`/`D`/`R`); a `D` is skipped because a deletion is
 not a write. Landing requires exit 0 plus the coordinator re-running the
 acceptance criteria itself — never trusting the worker's report. Full
 procedure: `.mill/roles/product-engineer/ROLE.md`.
+
+## 6. Current vs history
+
+Two rules decide what is authoritative:
+
+1. `AGENTS.md` and `MEMORY.md` describe Mill as it is. Everything else that
+   describes Mill — `.mill/phases/`, `docs/research/`, `docs/plans/`,
+   superseded ADRs, `LESSONS.md` — is history and may describe a Mill that no
+   longer exists.
+2. A statement is obsolete when its **subject was deleted**, not when the
+   vocabulary changed. Verify with `git`, `ls`, or `gh issue view` before
+   calling anything stale.

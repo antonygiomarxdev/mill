@@ -32,7 +32,7 @@ The coordinator holds the sequencing state. Workers do not need to know who come
 
 ## The role is mechanised, not remembered
 
-The coordinator's identity is not something the coordinator is trusted to remember. `.claude/CLAUDE.md` re-injects it once on SessionStart, but a `/compact` wipes that and the coordinator silently stops delegating. The identity is re-injected on every prompt instead, by `.mill/checks/mill-role-guard --context` wired as a `UserPromptSubmit` hook.
+The coordinator's identity is not something the coordinator is trusted to remember. `AGENTS.md` (with `CLAUDE.md` as a symlink) at the repository root re-injects it once on SessionStart, but a `/compact` wipes that and the coordinator silently stops delegating. The identity is re-injected on every prompt instead, by `.mill/checks/mill-role-guard --context` wired as a `UserPromptSubmit` hook.
 
 The prohibition on writing implementation code is enforced by the same script in `--pretool` mode, wired as a `PreToolUse` hook on `Write|Edit|NotebookEdit`. When a write is blocked, stderr names the role that should have been dispatched, so a refusal always routes onward instead of just saying no.
 
@@ -112,8 +112,8 @@ time, not a comment:
   attempt first.
 
 The dispatch mechanics — resolving the tier, creating the worktree and
-terminal, the `--enter` submit — are in `.mill/skills/using-mill.md`
-("Model selection").
+terminal, the `--enter` submit — are in `.claude/skills/delegate/SKILL.md`,
+sections 2 and 3.
 
 ## What you can invoke
 

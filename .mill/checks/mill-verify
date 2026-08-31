@@ -105,26 +105,27 @@ check_dispatch_mailbox() {
         return 0
     fi
 
-    # An unanswered question is a hard failure. A question counts as
-    # "answered" when its `read` flag is 1. That is the cheapest real signal
-    # the mailbox offers, and it is only sound because of the workflow rule in
-    # the delegate skill: the coordinator reads with `inbox` (read-only, never
-    # sets `read`) and answers with `reply` (which sets `read`). `read == 0`
-    # therefore means the coordinator never engaged — the exact defect from
-    # 2026-08-31, when a worker asked whether to proceed, got eight hours of
-    # silence, and the thing it spotted was a P0 (#132). If someone reads with
-    # `check` instead of `inbox`, `read` can be set without an answer; that is
-    # the known limit of this signal, recorded rather than papered over.
+    # An unanswered question is a hard failure. A question is "answered" when
+    # a distinct message carries thread_id equal to the question's id: the
+    # coordinator's reply comes back as a status message whose thread_id is the
+    # question id. The `read` flag is not the signal — measured 2026-08-31,
+    # `reply` does not set read, so a question stayed read==0 after being
+    # answered. An `ask` question self-threads (thread_id == its own id), so
+    # the question itself is excluded: only a reply that joins the thread
+    # counts as an answer.
     local unanswered
     unanswered="$(echo "$inbox_json" | jq -r --arg c "$ctx" --arg t "$terminal" '
-        .result.messages[]
-        | select(.type == "question"
-            and .read == 0
-            and ( ((.payload // "") | tostring | contains($c))
-                  or ((.from_handle // "") | tostring | contains($c))
-                  or ((.to_handle // "") | tostring | contains($c))
-                  or ((.from_handle // "") == $t) ))
-        | "\(.id) \(.subject // "")"
+        .result.messages as $msgs
+        | [ $msgs[]
+            | select(.type == "question"
+                and ( ((.payload // "") | tostring | contains($c))
+                      or ((.from_handle // "") | tostring | contains($c))
+                      or ((.to_handle // "") | tostring | contains($c))
+                      or ((.from_handle // "") == $t) ))
+          ]
+        | .[] as $q
+        | select( ([ $msgs[] | select(.thread_id == $q.id and .id != $q.id) ] | length) == 0 )
+        | "\($q.id) \($q.subject // "")"
     ' 2>/dev/null || true)"
     if [[ -n "$unanswered" ]]; then
         echo "mill-verify: FAIL — unanswered question for dispatch $ctx:" >&2

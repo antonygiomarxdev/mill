@@ -43,10 +43,20 @@ Current operational facts. If a fact stops being true, edit the line. History li
 
 ## Dispatch traps, measured 2026-08-30
 
-- `--agent command-code` rejects `--model`. The model comes from `~/.commandcode/config.json`, which is global and which command-code rewrites itself, so two tiers cannot run concurrently.
+- `--agent command-code` rejects `--model`. The model comes from `~/.commandcode/config.json`, which is global and which command-code rewrites itself, so two models cannot run concurrently.
 - Orca marks a command-code dispatch `failed` with `lastError: agent_prompt_stalled` while the worker is running normally. The prompt did arrive. Read the terminal before believing the verdict: `orca terminal read --terminal <handle> --limit 60`. A live worker shows `esc to interrupt`.
 - `.mill/agents` is a catalog of what runs on this machine (gitignored; `.mill/agents.example` is the template). No script reads it; every dispatch names its agent and model.
 
 ## Scaffold and installers are gone
 
 - `scaffold/`, the root `checks/`, and `.mill/checks/mill-install` / `mill-uninstall` were deleted. There is no install path into another repository from this tree; installation is being redesigned for multiple harnesses. `mill-preflight` stays — it refuses to dispatch when Orca is unreachable or the working directory is not a Mill project.
+
+## omp prewalk and dispatch model recovery
+
+- This machine's omp is configured with `prewalk` and a `smol` model:
+  `modelRoles` names three roles and `prewalk.enabled` / `task.prewalk` are
+  `true` (see `.mill/agents.example`).
+- A dispatch's models are recoverable after the worker settles from the session
+  transcript at `~/.omp/agent/sessions/<worktree-slug>/*.jsonl`:
+  `grep -oE '"model(Id)?":"[^"]+"' <session>.jsonl | sed 's/.*://;s/"//g' | sort -u`.
+  This transcript is the source for the `Mill-Dispatch` trailer's `model=` field.

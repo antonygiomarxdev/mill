@@ -1,6 +1,5 @@
 ---
 role: qa-docs
-model: free→paid
 agent: task
 reviewed_by: product-engineer
 allowed_files:

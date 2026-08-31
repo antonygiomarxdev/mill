@@ -1,6 +1,5 @@
 ---
 role: reviewer
-model: pro
 agent: cavecrew-reviewer
 reviewed_by: product-engineer
 allowed_files:

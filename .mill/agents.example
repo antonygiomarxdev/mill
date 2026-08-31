@@ -1,34 +1,24 @@
-# .mill/agents — per-project tier → (agent, model) mapping.
-#
-# Same shape as .mill/gauntlet and .mill/role-capabilities: plain bash,
-# sourced by the coordinator's dispatch procedure (see
-# .claude/skills/delegate/SKILL.md, section 2). Each tier declares the
-# agent binary and the model identifier the worker's terminal starts with:
-#
-#   orca terminal create --command "<agent> --model <model>"
-#
-# The tier comes from the role's ROLE.md frontmatter `model:` field:
-#   free→paid  producing roles — dispatched on free first, re-dispatched on
-#              paid when the cheap attempt fails on judgment rather than on
-#              execution
-#   pro        judging roles — dispatched straight onto pro, no free attempt
-#
-# Measured free models, from `opencode models`, so nobody has to rediscover
-# them:
-#   opencode/deepseek-v4-flash-free
-#   opencode-go/deepseek-v4-flash
-#   ...and others suffixed -free
-#
-# Copy this file to .mill/agents and set the models your provider offers.
-# .mill/agents is per-project and gitignored; this example stays tracked.
-# The agent can be anything `orca terminal create --command` accepts — omp,
-# pi, command-code, claude.
+# .mill/agents — what runs on this machine.
 
-free_agent="omp"
-free_model="opencode-go/deepseek-v4-flash"
+A menu, not a rule. Nothing reads this file and it decides nothing. The
+coordinator names the agent and the model for every dispatch and records the
+choice in the landing commit (`.claude/skills/delegate/SKILL.md`). Copy this
+file to `.mill/agents` only as a local scratch reference — `.mill/agents` is
+gitignored; this example stays tracked.
 
-paid_agent="omp"
-paid_model="opencode/deepseek-v4-pro"
+## Agents
 
-pro_agent="omp"
-pro_model="opencode/claude-opus-4-5"
+- **`omp`** — takes no `--model` flag. It reports its model, reasoning effort,
+  and running cost in its own status bar; read with `orca terminal read`. Pick
+  the model inside omp.
+- **`command-code`** — `worker-start --agent command-code` rejects `--model`.
+  Its model comes from the global `~/.commandcode/config.json`, which
+  command-code rewrites itself, so two dispatches on different models cannot
+  run concurrently against it (#178). Set the model there first, and say so.
+- **`claude`** — accepts `--model` at launch.
+
+## Models
+
+There is no shared registry here. Each agent exposes its own models (omp lists
+its own in its status bar); the coordinator chooses per dispatch from what the
+chosen agent offers.

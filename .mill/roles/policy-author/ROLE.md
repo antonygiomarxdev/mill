@@ -1,6 +1,5 @@
 ---
 role: policy-author
-model: pro
 agent: task
 reviewed_by: product-engineer
 allowed_files:

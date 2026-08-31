@@ -91,29 +91,16 @@ orca orchestration send \
   runs `mill-verify` against the worker's worktree: build + lint + test (from
   `.mill/gauntlet`), role-enforce over the change set. Land requires coverage.
 
-## Briefs for free models
+## Briefs for cheap models
 
-- **Free models need explicit DO NOT sections.** "stdlib flag only, NOT cobra." "Classify from exit codes, NOT text output." The cheaper the model, the more specific the constraints must be.
-- **Ambiguity is the enemy of cheap models.** A pro model fills gaps correctly. A free model fills them creatively — and wrong.
+- **Cheap models need explicit DO NOT sections.** "stdlib flag only, NOT cobra." "Classify from exit codes, NOT text output." The cheaper the model, the more specific the constraints must be.
+- **Ambiguity is the enemy of cheap models.** A capable model fills gaps correctly. A cheap model fills them creatively — and wrong.
 
-## Model tiers — the `free→paid` escalation rule
+## Choosing the model
 
-Every role declares a tier in its `ROLE.md` frontmatter, `model:` — `free→paid`
-for producing roles, `pro` for judging ones. The declaration is read at dispatch
-time, not a comment:
-
-- A role declared `free→paid` is dispatched on the **free** tier first,
-  resolved through the project's `.mill/agents`. When the cheap attempt fails
-  on judgment rather than on execution, the coordinator re-dispatches the same
-  task on the **paid** tier — same brief, same task, new terminal. The
-  coordinator records which tier ran: it is the only evidence the cost model is
-  working.
-- A role declared `pro` is dispatched on the **pro** tier directly. No free
-  attempt first.
-
-The dispatch mechanics — resolving the tier, creating the worktree and
-terminal, the `--enter` submit — are in `.claude/skills/delegate/SKILL.md`,
-sections 2 and 3.
+Every dispatch names its agent and model; there is no default. The rule —
+choose from the work, not the role, and record what ran in the landing commit —
+is in `.claude/skills/delegate/SKILL.md` section 2.
 
 ## What you can invoke
 

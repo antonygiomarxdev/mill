@@ -1,6 +1,5 @@
 ---
 role: tech-lead
-model: pro
 agent: task
 reviewed_by: architect
 allowed_files:

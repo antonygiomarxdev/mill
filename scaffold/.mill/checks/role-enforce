@@ -3,6 +3,12 @@
 # Usage:
 #   checks/role-enforce              — git pre-commit hook
 #   checks/role-enforce --test <role> <file>  — test mode
+#   checks/role-enforce --test <role> --base-dir <path> <file>  — test mode,
+#       read the file's content from <path> instead of the current directory.
+#       Used by mill-verify so the file being judged is read from the worktree
+#       while the role-capabilities config is still resolved from the script's
+#       own location (the coordinator's Mill root). The trust rule for config
+#       is unchanged; this only widens where the file content is read from.
 #
 # Exits 0 if allowed, 1 if blocked, 2 on usage error.
 
@@ -10,6 +16,14 @@ set -euo pipefail
 
 ROLES_DIR=".mill/roles"
 CAPABILITIES_FILE=".mill/role-capabilities"
+
+# BASE_DIR is the directory the file-content read is resolved against in
+# --test mode. Defaults to the current directory (pre-commit hook behaviour).
+# mill-verify passes --base-dir <worktree> so a worker's new file is read
+# from the worktree, not from the coordinator's repository where it does not
+# exist. Configuration (.mill/role-capabilities) is always resolved from
+# mill_root below and is unaffected by this variable.
+BASE_DIR=""
 
 # --- helpers ----------------------------------------------------------------
 
@@ -137,14 +151,27 @@ enforce_file() {
     #    shell script is a shell script whether or not it is named ".sh".
     #    Anything extensionless that is not a shell script still matches no
     #    pattern, so it stays blocked: this widens nothing but shell scripts.
-    local base ext ext_lc shebang
+    #
+    #    The shebang read uses BASE_DIR (set by --base-dir in --test mode, or
+    #    empty in pre-commit mode). In pre-commit mode cwd is the worker's
+    #    repo, so the file is there; in --test mode invoked from the
+    #    coordinator, BASE_DIR is the worktree so the file is read from there.
+    #    Configuration (.mill/role-capabilities) is always read from mill_root
+    #    in resolve_categories and is never affected by BASE_DIR — the trust
+    #    rule for the capability map is preserved.
+    local base ext ext_lc shebang content_path
     base=$(basename "$file")
+    if [[ -n "$BASE_DIR" ]]; then
+        content_path="$BASE_DIR/$file"
+    else
+        content_path="$file"
+    fi
     if [[ "$base" == *.* ]]; then
         ext=".${base##*.}"
     else
         shebang=""
-        if [[ -r "$file" ]]; then
-            IFS= read -r shebang < "$file" 2>/dev/null || true
+        if [[ -r "$content_path" ]]; then
+            IFS= read -r shebang < "$content_path" 2>/dev/null || true
         fi
         if [[ "$shebang" =~ ^#!.*(bash|sh)([[:space:]]|$) ]]; then
             ext=".sh"
@@ -170,11 +197,39 @@ enforce_file() {
 }
 
 # --- test mode --------------------------------------------------------------
+# Parse --test <role> [--base-dir <path>] <file>. --base-dir is optional and
+# only affects where the file content is read from; the capability map is still
+# resolved from mill_root (this script's own location) so the trust rule holds.
 if [[ "${1:-}" == "--test" ]]; then
-    ROLE="${2:-}"
-    FILE="${3:-}"
+    shift
+    ROLE=""
+    FILE=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --base-dir)
+                BASE_DIR="${2:-}"
+                shift 2
+                ;;
+            --base-dir=*)
+                BASE_DIR="${1#--base-dir=}"
+                shift
+                ;;
+            -*)
+                echo "role-enforce: unknown option: $1" >&2
+                exit 2
+                ;;
+            *)
+                if [[ -z "$ROLE" ]]; then
+                    ROLE="$1"
+                else
+                    FILE="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
     if [[ -z "$ROLE" || -z "$FILE" ]]; then
-        echo "Usage: $0 --test <role> <file>" >&2
+        echo "Usage: $0 --test <role> [--base-dir <path>] <file>" >&2
         exit 2
     fi
 

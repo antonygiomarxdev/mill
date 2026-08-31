@@ -96,7 +96,7 @@ run_step test
 # (R) judge the new path and skip the old as a deletion. Anything unrecognised
 # is judged as a write — fail closed.
 judge_write() {
-    if ! "$role_enforce" --test "$role" "$1" >/dev/null 2>&1; then
+    if ! "$role_enforce" --test "$role" --base-dir "$worktree" "$1" >/dev/null 2>&1; then
         echo "error: $1 is not allowed for role '$role'" >&2
         violation=1
     fi

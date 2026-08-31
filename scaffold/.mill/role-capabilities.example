@@ -19,6 +19,6 @@
 code=""
 docs=".md"
 config=".yml .yaml .json .toml"
-policy=".md .sh"
+policy=".md .sh .example"
 scripts=".sh"
 design=".pen .fig"

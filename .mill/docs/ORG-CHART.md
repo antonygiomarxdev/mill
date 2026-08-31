@@ -137,5 +137,5 @@ Each role declares its tier in its `ROLE.md` frontmatter (`model:` — either
 | free | Sr. Devs, QA/Docs | Execution, tests, documentation |
 
 The tier resolves to an (agent, model) pair through `.mill/agents` — see
-`.mill/skills/using-mill.md`, section "Model selection". Projects switch
+`.claude/skills/delegate/SKILL.md` section 2. Projects switch
 providers by changing config, not roles or docs.

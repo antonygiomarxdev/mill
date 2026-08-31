@@ -136,6 +136,7 @@ if [[ "$brief_mode" -eq 1 ]]; then
                 echo "mill-preflight: '$path' is not allowed for role '$brief_role'; it can be written by: $owners" >&2
             fi
             failed=1
+            printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" preflight "$brief_role" "$path" >> "$here/../rejections.log" 2>/dev/null || true
         fi
     done
     exit "$failed"
@@ -307,6 +308,7 @@ if [[ -n "$brief_file" ]]; then
         if ! "$role_enforce" --test "$brief_role" "$c" >/dev/null 2>&1; then
             echo "mill-preflight: '$c' is not allowed for role '$brief_role' (criterion line ${criteria_lines[$i]})" >&2
             failed=1
+            printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" preflight "$brief_role" "$c" >> "$here/../rejections.log" 2>/dev/null || true
         fi
     done
 

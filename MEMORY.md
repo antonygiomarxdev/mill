@@ -60,3 +60,9 @@ Current operational facts. If a fact stops being true, edit the line. History li
   transcript at `~/.omp/agent/sessions/<worktree-slug>/*.jsonl`:
   `grep -oE '"model(Id)?":"[^"]+"' <session>.jsonl | sed 's/.*://;s/"//g' | sort -u`.
   This transcript is the source for the `Mill-Dispatch` trailer's `model=` field.
+
+## Rejections log (read by 2026-10-01)
+
+- `.mill/rejections.log` records every role rejection as one line — timestamp (ISO-8601 UTC), source (`preflight`|`verify`), role, path.
+- It answers: does `mill-verify --role` ever reject a path that `mill-preflight --brief-file` did not catch first?
+- Read by 2026-10-01: if every `verify` line has a matching `preflight` line for the same path, retire output-side role enforcement; if not, keep it.

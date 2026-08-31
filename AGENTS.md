@@ -1,63 +1,29 @@
 # Mill — Agent Delegation Harness
 
-If the user says "using mill" or wants to delegate, load:
-
-@.mill/skills/using-mill.md
-
-Then follow its instructions: read `.mill/roles/COMMON.md` first, then run the
-dispatch procedure.
-
-## Role files
-
-@.mill/roles/COMMON.md
-
-Your specific role is determined by the coordinator at dispatch time.
-Workers read their own role file when the brief says so:
-
-- Product Engineer: @.mill/roles/product-engineer/ROLE.md
-- PM: @.mill/roles/pm/ROLE.md
+A skill plus a policy directory (`docs/adr/0006-mill-is-a-skill-not-a-binary.md`).
+The coordinator is the **Product Engineer** (`roles/product-engineer/ROLE.md`).
+Delegation goes through the `delegate` skill (`.claude/skills/delegate/SKILL.md`).
 
 ## Topology
 
-One coordinator (Staff) dispatches workers and sequences the work. Workers
-execute and report; no worker dispatches another worker.
+One coordinator dispatches workers. Workers execute and report; no worker
+dispatches another worker. Role files define what each role produces and what
+it may write:
 
-```
-coordinator (Staff)
-  ├── PM
-  ├── Architect
-  ├── Tech Lead
-  ├── Sr Dev (BE / FE / Data)
-  ├── Reviewer
-  ├── QA / Docs
-  ├── UX Designer
-  ├── UI Designer
-  └── Policy Author
-```
+- `roles/COMMON.md` — shared rules for all roles
+- `roles/<role>/ROLE.md` — one per role under `roles/`
 
-The organisational sequence is preserved as pipeline stages, not delegation
-handoffs: `FRD → spec → tasks → implementation → review`.
+## Verification
 
-## Quality gates
-
-- Phase gates: `.mill/checks/gate-{frd,spec,tasks,coverage,review,handoff}`
-- Verification at the dispatch boundary: `.mill/checks/mill-verify` runs the
-  gauntlet (build/lint/test) and enforces role permissions over a worker's
-  change set — not git hooks (ADR 0009)
-- What "build", "test" and "coverage" mean is per project — Mill ships no
-  language-specific tooling of its own (ADR 0006)
+After every dispatch the coordinator runs `.mill/checks/mill-verify` from this
+repository against the worker's worktree. Full procedure in the Product
+Engineer role file.
 
 ## Project layout
 
 ```
-.mill/            — the Mill framework (roles, checks, skills, docs)
-  roles/          — role definitions (ROLE.md + lessons.md)
-  checks/         — gate scripts + role-enforce + mill-verify
-  skills/         — agent skills (using-mill.md is the entry point)
-  docs/           — ADRs, PRODUCT.md
-  phases/         — phase artifacts (frd, spec, tasks, review)
-checks/           — gate scripts shipped to scaffolded projects
-scaffold/         — the template copied into a new project
-.omp/             — harness config: RULES.md (sticky), AGENTS.md (context)
-docs/             — ADRs, research, FINDINGS, ROADMAP
+.mill/           policy: roles, checks, skills, docs, phases
+scaffold/        the frozen installer template
+docs/            ADRs, research, FINDINGS
+local/           operator-local state (gitignored)
 ```

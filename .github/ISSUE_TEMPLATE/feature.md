@@ -1,32 +1,22 @@
 ---
 name: Feature Request
-about: Propose a new feature (from a Discussion)
+about: Propose a new capability or change to existing behaviour
 title: "feat: "
-labels: ["enhancement", "stage:spec", "needs:pm-review"]
+labels: ["enhancement"]
 ---
-
-> **Source discussion:** <!-- link to the discussion this came from -->
 
 ## Problem
 
-<!-- what problem does this solve? who is it for? -->
+<!-- What problem does this solve, and who is it for? -->
 
-## Proposed solution
+## Proposed change
 
-<!-- what should we build? -->
+<!-- What should change? Specific enough that someone can judge when it is done. -->
 
 ## Success metrics
 
-<!-- how do we know this is done? -->
+<!-- How do we know this is done? -->
 
 ## Out of scope
 
-<!-- what are we explicitly NOT building? -->
-
-## Phases
-
-- [ ] FRD (`.mill/phases/N/frd.md`)
-- [ ] SPEC (`.mill/phases/N/spec.md`)
-- [ ] TASKS (`.mill/phases/N/tasks.md`)
-- [ ] IMPLEMENT
-- [ ] REVIEW (`.mill/phases/N/review.md`)
+<!-- What are we explicitly NOT building? -->

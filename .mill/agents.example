@@ -39,6 +39,9 @@ an explicit enter after `worker-start` pastes the brief. The two values:
   run concurrently against it (#178). Set the model there first, and say so.
 - **`claude`** — `submit: explicit` — accepts `--model` at launch.
 - **`pi`** — `submit: explicit` — the Pi coding agent.
+- **`cursor`** — `submit: self` — accepts `--model` at launch (`worker-start --agent cursor --model <id>`).
+  `--force` / `--yolo` is a global flag, not `-p`-only, so the TUI can run in
+  "Run Everything" mode.
 
 ## Models
 

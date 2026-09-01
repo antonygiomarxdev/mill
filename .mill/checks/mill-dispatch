@@ -234,6 +234,35 @@ if [[ "$start_state" != "ready" && "$start_last_error" == "agent_prompt_stalled"
     fi
     echo "mill-dispatch: enter accepted and confirmed (observation.status=$obs_status exactWorker=$obs_exact agentWait=null)"
 elif [[ "$start_state" != "ready" ]]; then
+    # --- 3c. Recognise a blocked worker instead of a generic failure ---------
+    # Orca's worker-start waits for the agent TUI to reach tui-idle before it
+    # declares the worker ready. A TUI parked on a blocking startup prompt
+    # (workspace trust, hook review, update prompt, ...) never becomes idle;
+    # Orca fails the start with lastError "Agent startup blocked: <reason>".
+    # That is a stalled worker, not a slow one: name the reason and stop.
+    # This script never answers such a prompt — the decision is the operator's,
+    # not the script's.
+    blocked_reason="$(printf '%s' "$start_last_error" \
+        | sed -n 's/.*Agent startup blocked: \([^ ]*\).*/\1/p' | head -n1 || true)"
+    if [[ -n "$blocked_reason" ]]; then
+        if [[ "$blocked_reason" == "codex-trust-workspace" ]]; then
+            # "codex-trust-workspace" is NOT a typo: Orca reuses the codex
+            # label for any agent whose first launch parks on a workspace-trust
+            # prompt, Cursor included. The prompt takes a bare key; --enter
+            # would submit an empty line, so the command must not use it.
+            echo "mill-dispatch: worker-start BLOCKED: workspace trust required (blockedReason=$blocked_reason)." >&2
+            echo "mill-dispatch: the worker never reached its first turn — a stalled worker, not a slow one." >&2
+            echo "mill-dispatch: trusting the workspace is the operator's security decision; this script will not answer." >&2
+            echo "mill-dispatch: the operator sends the bare trust key (no --enter) to the worker terminal:" >&2
+            echo "  orca terminal send --text 'a'" >&2
+            echo "mill-dispatch: worker terminal handle: orca orchestration worker-show --dispatch $dispatch_id --json (worker.agent_terminal_handle)" >&2
+            printf '%s\n' "$start_json" >&2
+            exit 1
+        fi
+        echo "mill-dispatch: worker-start BLOCKED (blockedReason=$blocked_reason); not entering the wait." >&2
+        printf '%s\n' "$start_json" >&2
+        exit 1
+    fi
     # Any other non-ready start is a genuine failure (worktree create, terminal
     # create, agent readiness, setup, an unknown outcome). Surface the receipt
     # and stop; never auto-retry and never send an enter to a worker that

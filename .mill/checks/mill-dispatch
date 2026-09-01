@@ -12,16 +12,20 @@
 #
 # In order:
 #   1. mill-preflight --brief <role> <paths...>   refuse a brief the role cannot write
-#   2. orca orchestration task-create             record the brief as a task
-#   3. orca orchestration worker-start            top-level worktree <slug>, repo default base
-#   4. orca orchestration check --wait            block for worker_done/escalation/question
-#   5. report: dispatch id, worktree path, commits added — then stop
-#   6. orca orchestration worker-release          ONLY after a settled worker_done
+#   2. read the agent catalog                     per-agent `submit: self|explicit`
+#   3. orca orchestration task-create             record the brief as a task
+#   4. orca orchestration worker-start            top-level worktree <slug>, repo default base
+#   5. submit the brief if the agent needs it     empty enter, then confirm acceptance
+#   6. orca orchestration check --wait            block for worker_done/escalation/question
+#   7. report: dispatch id, worktree path, commits added — then stop
+#   8. orca orchestration worker-release          ONLY after a settled worker_done
 #
 # It never merges, pushes, or verifies; verification and landing remain the
 # coordinator's own steps. It never answers a question, never retries a failed
 # start, and never releases a worker on a timeout, a question, an escalation, a
-# heartbeat, or a stale worker_done.
+# heartbeat, or a stale worker_done. It never sends a stray enter to an agent
+# that submits its own brief: the per-agent submit requirement is read from the
+# catalog (`.mill/agents` or `.mill/agents.example`), never hardcoded here.
 #
 # A Run must already be bound to the invoking terminal (orca orchestration
 # run-create / run-use, once, before the loop). This script does not create one.
@@ -87,6 +91,29 @@ if [[ ! "$timeout_ms" =~ ^[0-9]+$ ]]; then
     echo "mill-dispatch: --timeout-ms must be a non-negative integer" >&2
     exit 2
 fi
+# --- 0. Read the per-agent submit requirement from the catalog ----------------
+# Whether a worker needs an explicit enter after worker-start pastes the brief
+# is a property of the agent, and the fact lives in the catalog: `.mill/agents`
+# (the local copy) or `.mill/agents.example` (tracked). Each agent entry
+# carries a `submit:` marker — `self` submits its own injected brief,
+# `explicit` leaves the brief pasted but unsubmitted and needs this script to
+# send an empty enter. The list is deliberately NOT repeated here: a second
+# copy would drift from the catalog, which is the defect this script once had.
+catalog="$here/../agents"
+if [[ ! -f "$catalog" ]]; then
+    catalog="$here/../agents.example"
+fi
+if [[ ! -f "$catalog" ]]; then
+    echo "mill-dispatch: agent catalog not found (looked for .mill/agents and .mill/agents.example)" >&2
+    exit 2
+fi
+agent_entry="$(grep -m1 -F '`'"$agent"'`' "$catalog" || true)"
+submit_marker="$(printf '%s' "$agent_entry" | grep -oE 'submit: (explicit|self)' | head -n1 | sed 's/^submit: //' || true)"
+if [[ "$submit_marker" != "explicit" && "$submit_marker" != "self" ]]; then
+    echo "mill-dispatch: no submit marker for agent '$agent' in $catalog" >&2
+    echo "mill-dispatch: add \`submit: explicit\` (needs an enter) or \`submit: self\` (submits its own brief) to its entry" >&2
+    exit 2
+fi
 
 # --- 1. Preflight: refuse before creating anything ---------------------------
 # A path the role cannot write fails here, before any task or worktree exists,
@@ -116,28 +143,105 @@ echo "mill-dispatch: task $task_id"
 # --- 3. Start the worker on a new top-level worktree -------------------------
 # --base-branch is deliberately omitted: Orca bases a new top-level worktree on
 # the repo's default base, which is exactly "the current default branch head".
-# A failed or unknown start exits non-zero; it is surfaced, never auto-retried.
+# A failed or unknown start exits non-zero; its receipt is parsed for the
+# dispatch id and the failure signal instead of being dropped.
 echo "mill-dispatch: starting worker (agent=$agent, worktree=$slug)"
-if ! start_json="$(orca orchestration worker-start \
+start_json="$(orca orchestration worker-start \
         --task "$task_id" \
         --worktree new-top-level \
         --name "$slug" \
         --agent "$agent" \
         --setup run \
-        --json 2>/dev/null)"; then
-    echo "mill-dispatch: worker-start failed (no automatic retry); receipt:" >&2
-    printf '%s\n' "$start_json" >&2
-    exit 1
-fi
+        --json 2>/dev/null)" || start_rc=$?
+start_rc="${start_rc:-0}"
+
 dispatch_id="$(printf '%s' "$start_json" | jq -r '.result.dispatchId // empty' 2>/dev/null || true)"
+start_state="$(printf '%s' "$start_json" | jq -r '.result.state // empty' 2>/dev/null || true)"
+start_last_error="$(printf '%s' "$start_json" | jq -r '.result.lastError // empty' 2>/dev/null || true)"
+
 if [[ -z "$dispatch_id" ]]; then
-    echo "mill-dispatch: worker-start returned no dispatch id:" >&2
+    # No dispatch id at all: the RPC itself failed, nothing was started, and
+    # there is nothing to submit or release. Surface and stop; never retry.
+    echo "mill-dispatch: worker-start failed (no automatic retry); receipt:" >&2
     printf '%s\n' "$start_json" >&2
     exit 1
 fi
 worktree_effect="$(printf '%s' "$start_json" | jq -r '.result.effects[]? | select(.kind == "worktree") | .id' 2>/dev/null | sed -n '1p')"
 worktree_path="${worktree_effect#*::}"
 echo "mill-dispatch: dispatch $dispatch_id, worktree ${worktree_path:-<unresolved>}"
+
+# --- 3b. Submit the brief for agents that need an explicit enter -------------
+# Orca pastes the task spec into the agent's input and submits it. For some
+# agents the submit does not take; Orca reports the start as failed with
+# lastError "agent_prompt_stalled" — the brief is sitting in the input buffer,
+# unsent. For those agents (catalog `submit: explicit`) an empty enter submits
+# the buffered brief. Agents marked `submit: self` submit on their own; sending
+# them an enter is a stray empty turn and is never done here.
+if [[ "$start_state" != "ready" && "$start_last_error" == "agent_prompt_stalled" ]]; then
+    if [[ "$submit_marker" != "explicit" ]]; then
+        echo "mill-dispatch: worker-start: $start_state ($start_last_error) for agent '$agent' cataloged submit: $submit_marker — refusing to send a stray enter." >&2
+        printf '%s\n' "$start_json" >&2
+        exit 1
+    fi
+    echo "mill-dispatch: worker-start: $start_state ($start_last_error) — brief pasted but unsent"
+    echo "mill-dispatch: submitting the brief for agent '$agent' (catalog submit: explicit)"
+
+    # The agent terminal handle comes from worker-show, the documented owner
+    # field; it is not guessed from the start receipt.
+    show_json="$(orca orchestration worker-show --dispatch "$dispatch_id" --json 2>/dev/null || true)"
+    agent_terminal="$(printf '%s' "$show_json" | jq -r '.result.worker.agent_terminal_handle // empty' 2>/dev/null || true)"
+    if [[ -z "$agent_terminal" ]]; then
+        echo "mill-dispatch: worker-show returned no agent terminal handle; cannot submit." >&2
+        printf '%s\n' "$show_json" >&2
+        exit 1
+    fi
+
+    send_json="$(orca terminal send --terminal "$agent_terminal" --enter --json 2>/dev/null)" || send_rc=$?
+    send_rc="${send_rc:-0}"
+    send_accepted="$(printf '%s' "$send_json" | jq -r '.result.send.accepted // empty' 2>/dev/null || true)"
+    if [[ "$send_rc" -ne 0 || "$send_accepted" != "true" ]]; then
+        echo "mill-dispatch: empty enter was NOT accepted (rc=$send_rc accepted=$send_accepted); not entering the wait." >&2
+        printf '%s\n' "$send_json" >&2
+        exit 1
+    fi
+
+    # Confirm acceptance before waiting: a wait that blocks on an unsubmitted
+    # prompt is indistinguishable from a wait on a slow worker. worker-show
+    # reports whether the terminal still resolves to the exact worker
+    # (observation.exactWorker), whether it is live (observation.status), and
+    # whether the worker is parked on a prompt only a human can answer
+    # (observation.agentWait: absent = never evaluated, null = evaluated and
+    # not waiting, object = waiting on a human).
+    show_json="$(orca orchestration worker-show --dispatch "$dispatch_id" --json 2>/dev/null || true)"
+    obs_status="$(printf '%s' "$show_json" | jq -r '.result.observation.status // empty' 2>/dev/null || true)"
+    obs_exact="$(printf '%s' "$show_json" | jq -r '.result.observation.exactWorker // empty' 2>/dev/null || true)"
+    if [[ "$obs_status" != "live" || "$obs_exact" != "true" ]]; then
+        echo "mill-dispatch: cannot confirm acceptance: observation status=$obs_status exactWorker=$obs_exact." >&2
+        printf '%s\n' "$show_json" >&2
+        exit 1
+    fi
+    if ! printf '%s' "$show_json" | jq -e '.result.observation | has("agentWait")' >/dev/null 2>&1; then
+        echo "mill-dispatch: cannot confirm acceptance: Orca did not evaluate the interactive wait; the enter is unverified." >&2
+        printf '%s\n' "$show_json" >&2
+        exit 1
+    fi
+    if [[ "$(printf '%s' "$show_json" | jq -r '.result.observation.agentWait' 2>/dev/null)" != "null" ]]; then
+        wait_reason="$(printf '%s' "$show_json" | jq -r '.result.observation.agentWait.reason // "interactive prompt"' 2>/dev/null)"
+        wait_source="$(printf '%s' "$show_json" | jq -r '.result.observation.agentWait.source // "unknown"' 2>/dev/null)"
+        echo "mill-dispatch: worker is still waiting after submit ($wait_reason via $wait_source); NOT entering the wait." >&2
+        printf '%s\n' "$show_json" >&2
+        exit 1
+    fi
+    echo "mill-dispatch: enter accepted and confirmed (observation.status=$obs_status exactWorker=$obs_exact agentWait=null)"
+elif [[ "$start_state" != "ready" ]]; then
+    # Any other non-ready start is a genuine failure (worktree create, terminal
+    # create, agent readiness, setup, an unknown outcome). Surface the receipt
+    # and stop; never auto-retry and never send an enter to a worker that
+    # never got a pasted brief.
+    echo "mill-dispatch: worker-start failed (no automatic retry); receipt:" >&2
+    printf '%s\n' "$start_json" >&2
+    exit 1
+fi
 
 # --- 4. Wait for the dispatch to settle --------------------------------------
 # Orca's blocking wait, not a poll loop and not a TUI read. Keepalive lines go

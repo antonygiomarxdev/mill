@@ -1,0 +1,15 @@
+{
+  "name": "mill",
+  "description": "Marketplace for Mill, the skill plus policy directory for delegated multi-agent coding",
+  "owner": {
+    "name": "antonygiomarxdev"
+  },
+  "plugins": [
+    {
+      "name": "mill",
+      "description": "Skill plus policy directory: role definitions and gate scripts that turn one AI session into a coordinator dispatching specialised workers through Orca",
+      "version": "0.1.0",
+      "source": "./"
+    }
+  ]
+}

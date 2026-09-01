@@ -4,17 +4,10 @@
   "description": "Skill plus policy directory: role definitions and gate scripts that turn one AI session into a coordinator dispatching specialised workers through Orca",
   "private": true,
   "keywords": [
-    "pi-package",
     "agents",
     "orchestration",
     "delegation",
     "skills",
     "gates"
-  ],
-  "pi": {
-    "extensions": [],
-    "skills": [
-      ".claude/skills"
-    ]
-  }
+  ]
 }

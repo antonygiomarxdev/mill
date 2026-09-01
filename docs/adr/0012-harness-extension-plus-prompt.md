@@ -3,7 +3,9 @@
 **Status:** Accepted
 **Date:** 2026-09-01
 **Decided by:** Architect
-**Related:** #162, #148, #173. Supersedes the mechanism of ADR 0011; retains its analysis.
+**Related:** #162, #148, #173. Supersedes the mechanism of ADR 0011; retains its
+analysis. Superseded by ADR 0013, which retires the per-prompt-identity
+criterion.
 
 ## Context
 
@@ -54,18 +56,25 @@ Claude Code, Gemini, Pi and OpenCode are verified from files read in the
 superpowers 6.3.0 package on this machine; `omp`'s `@oh-my-pi/pi-coding-agent`
 name is unverified.
 
-| Harness | Loads skill (Q1) | Injects identity per prompt (Q2) | Runs bash gates (Q3) | Manifest |
-|---|---|---|---|---|
-| Claude Code | verified — `.claude-plugin/plugin.json` (`skills`) | verified — `.claude/settings.json` (`UserPromptSubmit` → `mill-role-guard --context`) | verified — shell tool | keep |
-| Codex | verified — `.codex-plugin/plugin.json` (`skills`); `.agents/` is Codex's marketplace dir, not a separate harness | verified — `~/.codex/hooks.json` (`UserPromptSubmit`); path form `"hooks": "./hooks.json"` per `~/.codex/.tmp/plugins/.agents/skills/plugin-creator/references/plugin-json-spec.md` | verified — shell tool | write |
-| Cursor | verified — `.cursor-plugin/plugin.json` (`skills`) | verified — `~/.cursor/hooks.json` (`beforeSubmitPrompt`); `hooks/hooks-cursor.json` (`version: 1` Cursor shape) | verified — shell tool | write |
-| Kimi | verified — `.kimi-plugin/plugin.json` (`skills`) | unverified — `UserPromptSubmit` exists only in `~/.kimi-code/config.toml` (user TOML); the plugin manifest has no `hooks` field. Would confirm: a Kimi plugin manifest that ships a hook | verified — shell tool | none |
-| Devin | fails — `.devin-plugin/plugin.json` has no `skills` field | fails — no hooks | verified — shell tool | none |
-| Gemini | verified — `gemini-extension.json` (`contextFileName`); `skills/` auto-discovered | fails — `~/.gemini/config/hooks.json` lists only `PreInvocation`/`PostInvocation`/`Stop`/`PostToolUse`; no per-prompt event | verified — shell tool | none |
-| Pi | verified — `package.json` (`pi.skills`) | unverified — `.pi/extensions/superpowers.ts` `context` event is per-turn, but Mill ships no extension and no file shows a Pi extension running `mill-role-guard`. Would confirm: a Pi extension that runs the guard | verified — shell tool | none (pi block removed) |
-| OpenCode | verified — `.opencode/plugins/superpowers.js` (`config` hook) | unverified — `experimental.chat.messages.transform` is per-step, but no file shows it running `mill-role-guard`. Would confirm: an OpenCode plugin that runs the guard | verified — shell tool | none |
-| Hermes | verified — `.hermes-plugin/__init__.py` (`register_skill`) | unverified — `pre_llm_call` fires per LLM call, but no file shows it running `mill-role-guard`. Would confirm: a Hermes plugin that runs the guard | verified — shell tool | none |
-| omp | unverified — no manifest read; catalog name `@oh-my-pi/pi-coding-agent` remains unverified (no file names it) | unverified — no manifest read | verified — shell tool | none |
+**The per-prompt-identity question is retired by ADR 0013.** Mill is invoked,
+not ambient: it registers no hooks, so whether a harness can inject the
+coordinator's identity per prompt is no longer a criterion. The table asks the
+two surviving questions — can the harness load the skill, and can it run the
+bash gates. Pi, OpenCode and Hermes were `none` only on the strength of the
+retired question; re-derived on the two survivors, each is `write`.
+
+| Harness | Loads skill | Runs bash gates | Manifest |
+|---|---|---|---|
+| Claude Code | verified — `.claude-plugin/plugin.json` (`skills`) | verified — shell tool | keep |
+| Codex | verified — `.codex-plugin/plugin.json` (`skills`); `.agents/` is Codex's marketplace dir, not a separate harness | verified — shell tool | write |
+| Cursor | verified — `.cursor-plugin/plugin.json` (`skills`) | verified — shell tool | write |
+| Kimi | verified — `.kimi-plugin/plugin.json` (`skills`) | verified — shell tool | none |
+| Devin | fails — `.devin-plugin/plugin.json` has no `skills` field | verified — shell tool | none |
+| Gemini | verified — `gemini-extension.json` (`contextFileName`); `skills/` auto-discovered | verified — shell tool | none |
+| Pi | verified — `package.json` (`pi.skills`) | verified — shell tool | write |
+| OpenCode | verified — `.opencode/plugins/superpowers.js` (`config` hook) | verified — shell tool | write |
+| Hermes | verified — `.hermes-plugin/__init__.py` (`register_skill`) | verified — shell tool | write |
+| omp | unverified — no manifest read; catalog name `@oh-my-pi/pi-coding-agent` remains unverified (no file names it) | verified — shell tool | none |
 
 The package root also carries `.codex-plugin/`, `.cursor-plugin/`,
 `.devin-plugin/`, `.kimi-plugin/`, `.hermes-plugin/` and `.agents/` directories.

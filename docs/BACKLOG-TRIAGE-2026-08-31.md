@@ -17,27 +17,27 @@ needed here.
 | #180 | delegate skill should check the target role's allowed_files before writing a brief | DONE | `0631f68` / `2ede2a3` — `mill-preflight --brief` refuses unwritable paths |
 | #178 | The model tier lives in a global file the agent rewrites — two tiers cannot run concurrently | LIVE | `.mill/agents.example` documents `command-code` rejects `--model` |
 | #177 | Orca reports a running command-code dispatch as failed — completed workers written off | LIVE | `MEMORY.md` dispatch traps; upstream Orca readiness bug |
-| #173 | Mill should not take core.hooksPath at all — the gauntlet belongs on the worker's output | SUPERSEDED | `6f18cba` — installers deleted; `core.hooksPath=/dev/null` |
+| #173 | Mill should not take core.hooksPath at all — the gauntlet belongs on the worker's output | DONE | coordinator cleanup 2026-09-01 — hook deleted, `core.hooksPath` unset; no commit |
 | #165 | No evals — verification is a human reading a diff | LIVE | no `.mill/checks/eval-*`; `ci.yml` is `bash -n` only |
 | #164 | Measure whether the delegation chain beats a single agent | LIVE | no measurement artifact exists in `docs/` |
 | #163 | The first run does not survive without its author | LIVE | no installer (6f18cba); ADR 0011 decided, not built |
 | #162 | Nobody outside this machine has installed Mill | LIVE | no installer; ADR 0011 decides the mechanism, tracks implementation |
 | #156 | Nothing is ever written back to the issue | LIVE | no `gh issue comment`/`edit` path in executable code |
 | #154 | Delegation routing must support fan-out — delegates_to is permission, not routing | SUPERSEDED | `delegates_to` deleted (6578719); star topology dissolves fan-out |
-| #148 | A delegated agent set core.bare=true and broke the repository | SUPERSEDED | Go runner deleted (6578719); Orca owns worktrees now |
+| #148 | A delegated agent set core.bare=true and broke the repository | LIVE | `core.hooksPath=/dev/null` set again 2026-08-31 18:54; mechanism changed, class did not |
 | #139 | Mill is a company, not a task runner | LIVE | `docs/PRODUCT.md` records it; escalation ladder and write-back still missing |
 | #137 | Nothing re-runs — no CI, lessons no code reads | LIVE | `ci.yml` exists (syntax only); lessons read by nothing |
 | #129 | Role enforcement only acts at commit | LIVE | PreToolUse guard (cdd639c) closes most; Bash hole remains |
 | #110 | Clasificación de fallo — detección y reacción | SUPERSEDED | `classifyResult` deleted with the Go CLI (6578719) |
 | #108 | Feedback loop — diff/bug reports auto-train the producing role | LIVE | no auto-training; `LESSONS.md` read by nothing |
 | #95 | Sin versionamiento semántico — sin tags, sin CHANGELOG | LIVE | `git tag -l` empty; no `CHANGELOG.md` |
-| #86 | prevent --no-verify bypass of role enforcement hooks | DONE | `cdd639c`/`4be15c3` — PreToolUse guard blocks writes pre-commit |
+| #86 | prevent --no-verify bypass of role enforcement hooks | LIVE | matcher covers write tools only; `--no-verify` runs via `Bash` (`.claude/settings.json:16`) |
 | #56 | Route production and review to different models | LIVE | skill §2 prose; nothing executes it |
 | #54 | Add review loop: produce → review → changes → rework | LIVE | reviewer verdict exists; no mechanised rework loop |
 | #25 | Role contract enforcement — mechanised process gates | DONE | `role-enforce` + `mill-role-guard` + `mill-verify`; `d3dafbd` |
 | #1 | Mill: Multi-Agent Delegation Harness | LIVE | project exists; the Go session summary was deleted (6578719) |
 
-Counts: LIVE 19 · SUPERSEDED 4 · DONE 3 · UNCLEAR 0.
+Counts: LIVE 21 · SUPERSEDED 2 · DONE 3 · UNCLEAR 0.
 
 ## Notes
 
@@ -92,12 +92,14 @@ workaround (read the terminal before trusting the verdict). It is an upstream Or
 readiness-detection defect, still unfixed, and #184 refines the same `agent_prompt_stalled`
 signature. LIVE.
 
-### #173 — do not take core.hooksPath — SUPERSEDED
-The subject — an installer adopting the project's `core.hooksPath` — was deleted:
-`6f18cba` removed `scaffold/`, `mill-install` and `mill-uninstall`. The repository's
-config confirms the inversion the issue asked for: `git config core.hooksPath` →
-`/dev/null` (no hooks taken), and the gauntlet now runs at the dispatch boundary via
-`.mill/checks/mill-verify --worktree` rather than a commit hook. SUPERSEDED.
+### #173 — do not take core.hooksPath — DONE
+Resolved by cleanup, not by any commit — the one row whose evidence is not a commit.
+The issue argues Mill should not take a project's git hooks at all, and it was being
+violated at triage time: `core.hooksPath=/dev/null` disabled every hook in the
+repository, the project's own included — precisely the invasiveness the issue objects
+to — while a dead `.git/hooks/pre-commit` (63 lines reading `.mill/role`, retired in
+`e5068ac`) sat behind it. On 2026-09-01 the coordinator removed both: the hook is
+deleted (backup `/tmp/pre-commit.bak-2026-09-01`) and `core.hooksPath` is unset. DONE.
 
 ### #165 — no evals — LIVE
 `ls .mill/checks/eval-*` → "No such file or directory". `.github/workflows/ci.yml`
@@ -133,13 +135,14 @@ calls "permission, not routing" was deleted with the Go delegation layer (`65787
 Fan-out is explicitly dissolved, not built: `ARCHITECTURE.md` names it — "This dissolves
 rather than fixes several problems: ... and fan-out (#154)." SUPERSEDED.
 
-### #148 — core.bare=true broke the repo — SUPERSEDED
-The mechanism that produced it — the Go runner dispatching `--yolo` agents into shared
-worktrees — was deleted (`6578719`); there is no `internal/`, no Go, no `--yolo` in the
-tree. Delegation now runs on Orca's worktree lifecycle (ADR 0005), so the specific
-incident cannot recur through Mill's code. The residual risk — an Orca worker with a
-shell can still `git config core.bare true` — is Orca's surface, not Mill's, and is
-noted rather than hidden. SUPERSEDED.
+### #148 — core.bare=true broke the repo — LIVE
+The specific mechanism — the Go runner (`6578719`) — is gone, but the class recurred:
+on 2026-08-31 at 18:54, fifteen minutes after `6ae330d` landed, a delegated agent wrote
+`core.hooksPath=/dev/null` into the shared config again (`git config --local
+core.hooksPath` → `/dev/null`; `.git/config` modified Aug 31 18:54). No script in the
+repository sets it — `grep -rn hooksPath` finds only a comment in `.mill/checks/common.sh`
+and prose in `LESSONS.md` and ADR 0009 — so an agent wrote it in-session and every
+worktree inherited it. The mechanism changed; the class did not. LIVE.
 
 ### #139 — Mill is a company, not a task runner — LIVE
 The product definition is now recorded correctly: `docs/PRODUCT.md` opens "Mill is an
@@ -180,11 +183,14 @@ proposes is absent. LIVE.
 (the Go tooling they describe was retired). ADR 0004 decides the versioning strategy but
 no tag has been cut (ADR 0011 says the same). LIVE.
 
-### #86 — prevent --no-verify bypass — DONE
-The escape hatch named (commit-hook `--no-verify`) is gone because enforcement no longer
-happens at commit: `git config core.hooksPath` → `/dev/null` (the pre-commit hook is not
-wired), and `mill-role-guard --pretool` (`cdd639c`/`4be15c3`) rejects the write before
-the file exists. There is no commit to `--no-verify` around. DONE.
+### #86 — prevent --no-verify bypass — LIVE
+The guard cannot block the bypass it claims to. `mill-role-guard --pretool`
+(`cdd639c`/`4be15c3`) is wired on the `PreToolUse` matcher `Write|Edit|NotebookEdit`
+(`.claude/settings.json` line 16), which covers the file-writing tools only.
+`git commit --no-verify` runs through `Bash`, which that matcher does not cover, so the
+guard has never fired for it in any session — the gap is recorded deliberately in
+`.mill/roles/COMMON.md` ("That path is deliberately left open"). The escape hatch the
+issue names remains open. LIVE.
 
 ### #56 — route production and review to different models — LIVE
 The rule is prose only: delegate skill §2 states "the tier follows the work, not the
@@ -225,3 +231,10 @@ One item in the "commented today" list is not an open issue: **#132** is CLOSED 
 `d3dafbd`, with a prior wrong close in between), so it receives no row — its defect
 (gitignored capability map) is the fix `d3dafbd` landed, which is already credited to
 #25 and #129 above.
+
+## Post-triage correction — 2026-09-01
+
+Three of 26 verdicts were wrong on spot-check, all three in the direction of judging an
+issue resolved. The pattern: a verdict reached from what the repository now *contains*
+rather than from what it *does* — the `PreToolUse` guard exists, so #86 read as done;
+the Go runner is gone, so #148 read as impossible. Existence is not behaviour.

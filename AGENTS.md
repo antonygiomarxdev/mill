@@ -1,29 +1,39 @@
 # Mill — Agent Delegation Harness
 
-A skill plus a policy directory (`docs/adr/0006-mill-is-a-skill-not-a-binary.md`).
-The coordinator is the **Product Engineer** (`roles/product-engineer/ROLE.md`).
-Delegation goes through the `delegate` skill (`.claude/skills/delegate/SKILL.md`).
-Delegation runs on Orca's orchestration layer; load its guide with `orca skills get`.
+Mill delegates work to worker roles through Orca's orchestration CLI; no
+binary (see `docs/adr/0006-mill-is-a-skill-not-a-binary.md`). The coordinator
+is the Product Engineer (`.mill/roles/product-engineer/ROLE.md`).
 
-## Topology
+## Load Orca's guides first
 
-One coordinator dispatches workers. Workers execute and report; no worker
-dispatches another worker. Role files define what each role produces and what
-it may write:
+Orca owns dispatch, messaging, waiting and release. Load both guides by name
+before any dispatch command; Mill does not restate them:
 
-- `roles/COMMON.md` — shared rules for all roles
-- `roles/<role>/ROLE.md` — one per role under `roles/`
+    orca skills get orca-cli
+    orca skills get orchestration
 
-## Verification
+## Coordinator procedure
 
-After every dispatch the coordinator runs `.mill/checks/mill-verify` from this
-repository against the worker's worktree. Full procedure in the Product
-Engineer role file.
+`.claude/skills/delegate/SKILL.md` is the coordinator's dispatch procedure.
+Shared rules for every role: `.mill/roles/COMMON.md`. Each role directory
+under `.mill/roles/` holds its own ROLE.md.
+
+Dispatch is one command:
+
+    .mill/checks/mill-dispatch --brief <file> --role <role> --agent <agent> \
+        --name <slug> --title <title> --writes <path>
+
+Judge a worker's output with:
+
+    .mill/checks/mill-verify --worktree <path> --role <role> \
+        --files-modified "<list>"
+
+## Installing Mill
+
+`INSTALL.md` installs Mill into another project.
 
 ## Project layout
 
-```
-.mill/           policy: roles, checks, skills, docs, phases
-docs/            ADRs, research, FINDINGS
-local/           operator-local state (gitignored)
-```
+    .mill/   roles and checks (the harness)
+    docs/    ADRs, product, research
+    local/   brief files

@@ -17,8 +17,11 @@ user's session, with the user watching.
 ## 1. Install the extension
 
 Ask which harness the project uses, then install Mill's extension for it.
+Mill ships one manifest per supported harness; each declares the skill
+directory and the hooks that keep the coordinator's identity in context.
 
-**Claude Code.** Install Mill from its marketplace:
+**Claude Code** (`.claude-plugin/plugin.json`). Install Mill from its
+marketplace:
 
 ```
 /plugin install mill@<marketplace>
@@ -31,15 +34,47 @@ fails or the plugin is not listed after running it, the extension is not
 registered — check the harness's plugin list for `mill` before continuing, and
 stop if it is not there.
 
-**Pi.** Mill's repo-root `package.json` declares the `pi-package` keyword and a
-`pi` block naming its skill directory. Install the package with Pi's package
-command for the Mill repository; Pi reads the skill path from those fields.
-Mill ships no `.pi/extensions/*.ts`, so Pi's context-injection hook is not
-implemented — only the skill is available.
+**Codex** (`.codex-plugin/plugin.json`). Add Mill's marketplace, then install
+the plugin:
 
-**Any other harness.** Mill's manifests declare Claude Code and Pi only. Do not
-install for a harness Mill has not been verified on: report that the harness is
-unsupported and stop.
+```
+codex plugin marketplace add <source>
+codex plugin add mill@<marketplace>
+```
+
+`<source>` is a local path, `owner/repo`, or Git URL naming Mill's marketplace,
+and `<marketplace>` is the name that marketplace declares. Mill ships its
+marketplace manifest as `.agents/plugins/marketplace.json`, which declares the
+name `mill-dev` and the plugin `mill`, so once that marketplace is added the
+install is `codex plugin add mill@mill-dev`. Mill is not yet published, so
+these commands cannot run against a live marketplace today. If the add fails
+or `codex plugin list` does not show `mill`, the marketplace was not added —
+re-run `codex plugin marketplace add`, then `codex plugin list`, and stop if
+`mill` is still absent.
+
+**Cursor** (`.cursor-plugin/plugin.json`). Cursor has no single package-install
+command: it reads a repository's manifest from an added marketplace. Add Mill's
+marketplace:
+
+```
+cursor-agent plugin marketplace add <gitUrl>
+```
+
+`<gitUrl>` is the Git URL of Mill's repository; the Cursor app then lists the
+plugin for install from the manifest. For a local checkout, the terminal agent
+loads the plugin directory directly with `cursor-agent --plugin-dir <path>`.
+Mill is not yet published, so the marketplace command cannot run today. If the
+plugin does not appear in the Plugins panel after the marketplace is added, the
+manifest was not read — confirm `.cursor-plugin/plugin.json` is present at the
+repository root and stop if it is not.
+
+**Any other harness.** Mill ships a manifest only where a harness can load the
+skill, inject the coordinator's identity per prompt, and run the bash gates. A
+harness that cannot do all three is not supported.
+`docs/adr/0012-harness-extension-plus-prompt.md` records, for every harness
+Mill has examined, which of the three hold and which do not — read its table
+before installing for a harness not named here, and stop if its row is not
+`keep` or `write`.
 
 ## 2. Create `.mill/gauntlet`
 

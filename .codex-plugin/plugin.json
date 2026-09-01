@@ -15,6 +15,5 @@
     "gates",
     "policy"
   ],
-  "skills": "./.claude/skills",
-  "hooks": "./.claude/settings.json"
+  "skills": "./.claude/skills"
 }

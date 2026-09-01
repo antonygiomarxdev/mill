@@ -17,6 +17,5 @@
   ],
   "skills": [
     ".claude/skills"
-  ],
-  "hooks": ".claude/settings.json"
+  ]
 }

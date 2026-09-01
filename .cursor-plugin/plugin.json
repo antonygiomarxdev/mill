@@ -16,6 +16,5 @@
     "gates",
     "policy"
   ],
-  "skills": "./.claude/skills",
-  "hooks": "./hooks/hooks-cursor.json"
+  "skills": "./.claude/skills"
 }

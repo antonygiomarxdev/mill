@@ -146,6 +146,28 @@ not a write. Landing requires exit 0 plus the coordinator re-running the
 acceptance criteria itself — never trusting the worker's report. Full
 procedure: `.mill/roles/product-engineer/ROLE.md`.
 
+### 5.1 Write back to the issue
+
+A landing writes one comment to its issue only when the landing commit closes
+it. The trigger is mechanical, not judged:
+
+- the subject carries `(#N)`, or
+- the body carries `Closes #N`, `Fixes #N`, or `Resolves #N`.
+
+A bare `#N`, `Refs #N`, or a `(#N)` in the body is not a close — it writes
+nothing. On 2026-08-31 this selected 4 of 38 landings (#184, #159, #132,
+#176); the rest named no issue or merely touched one. A comment per landing is
+noise.
+
+The issue number and commit come from the close signal, never re-typed:
+
+    gh issue comment <N> --body "Closed by <sha>. <what remains>"
+
+`<sha>` is the landing commit; `<what remains>` is the one thing `git log`
+cannot give a reader — empty for a clean close, or "kept open for <X>" when the
+landing closed only part of the issue. Restate nothing the body already says.
+A close with no close signal in the commit is not written back automatically.
+
 ## 6. Current vs history
 
 Two rules decide what is authoritative:

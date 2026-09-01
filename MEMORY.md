@@ -64,5 +64,11 @@ Current operational facts. If a fact stops being true, edit the line. History li
 ## Rejections log (read by 2026-10-01)
 
 - `.mill/rejections.log` records every role rejection as one line — timestamp (ISO-8601 UTC), source (`preflight`|`verify`), role, path.
-- It answers: does `mill-verify --role` ever reject a path that `mill-preflight --brief-file` did not catch first?
+- It answers: does `mill-verify --role` ever reject a path that `mill-preflight --brief` did not catch first?
 - Read by 2026-10-01: if every `verify` line has a matching `preflight` line for the same path, retire output-side role enforcement; if not, keep it.
+
+## --brief-file removed 2026-08-31
+
+- `--brief-file` parsed the brief's Markdown to guess which paths the role would write and rejected any criterion naming a path the role could not write.
+- It fired five times for zero true positives. A Markdown extractor cannot tell why a path appears (exception, test data, glob, shell syntax) — and rewriting briefs to please it made criteria worse.
+- `--brief <role> <path>...` remains: the coordinator names the paths, the gate checks them.

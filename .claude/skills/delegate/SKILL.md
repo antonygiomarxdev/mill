@@ -100,18 +100,15 @@ The guide owns, by name:
 Read the guide for their syntax; the names above exist only so a reader who
 skipped it knows what it covers.
 
-What is Mill's own, and lives here:
+Mill's own dispatch loop is one command:
 
 ```
-.mill/checks/mill-preflight --brief <role> <path> [<path>...]   # refuse a brief that asks for what the role cannot write
-orca orchestration task-create --spec "<brief text or path>" --task-title "<short>"
-orca orchestration worker-start --task <task_id> --agent <agent> \
-    --worktree new-top-level --name mill-<slug>
+.mill/checks/mill-dispatch --brief <file> --role <role> --agent <agent> \
+    --name <slug> --title <title> --writes <path> [--writes <path> ...]
 ```
 
-The sequence is brief → task → worker, then verify. `mill-preflight` refuses a
-bad brief; `task-create` records it; `worker-start` runs it; `mill-verify`
-(`--role`, `--files-modified`, `--dispatch`) judges the result — see section 5.
+It sequences preflight → task → worker → wait → report → release; it never
+verifies or lands, which remain the coordinator's own steps (section 5).
 
 ## 4. Brief structure
 

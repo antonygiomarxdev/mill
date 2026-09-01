@@ -1,0 +1,21 @@
+{
+  "name": "mill",
+  "displayName": "Mill",
+  "description": "Skill plus policy directory: role definitions and gate scripts that turn one AI session into a coordinator dispatching specialised workers through Orca",
+  "version": "0.1.0",
+  "author": {
+    "name": "antonygiomarxdev"
+  },
+  "homepage": "https://github.com/antonygiomarxdev/mill",
+  "repository": "https://github.com/antonygiomarxdev/mill",
+  "keywords": [
+    "agents",
+    "orchestration",
+    "delegation",
+    "skills",
+    "gates",
+    "policy"
+  ],
+  "skills": "./.claude/skills",
+  "hooks": "./hooks/hooks-cursor.json"
+}

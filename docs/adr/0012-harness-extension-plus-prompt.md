@@ -54,14 +54,18 @@ Claude Code, Gemini, Pi and OpenCode are verified from files read in the
 superpowers 6.3.0 package on this machine; `omp`'s `@oh-my-pi/pi-coding-agent`
 name is unverified.
 
-| Harness | Convention | Evidence (file read) | Status |
-|---|---|---|---|
-| Claude Code | `.claude-plugin/plugin.json` + `marketplace.json`; `hooks/hooks.json` SessionStart | `…/superpowers/6.3.0/.claude-plugin/plugin.json` and `marketplace.json` both name `superpowers` 6.3.0 | verified |
-| Gemini | `gemini-extension.json` (`contextFileName: GEMINI.md`) | `…/superpowers/6.3.0/gemini-extension.json` | verified |
-| Pi | repo-root `package.json` declares `"keywords": ["pi-package"]` and a `"pi"` block with `"extensions"` and `"skills"`; `.pi/extensions/<name>.ts` | `…/superpowers/6.3.0/package.json` (both keys present) and `.pi/extensions/superpowers.ts` | verified |
-| OpenCode | `.opencode/plugins/<name>.js`; `package.json` `"main"` points at it | `…/superpowers/6.3.0/package.json` (`"main": ".opencode/plugins/superpowers.js"`) and `.opencode/plugins/superpowers.js` | verified |
-| Cursor | `hooks/hooks-cursor.json` (`sessionStart`) | `…/superpowers/6.3.0/hooks/hooks-cursor.json` | verified (hooks only) |
-| omp | the brief states Mill's catalog records `omp` as `@oh-my-pi/pi-coding-agent` | `~/.omp/agent/mcp.json` schema URL names `can1357/oh-my-pi`, `packages/coding-agent`; `omp --version` → `omp/18.1.0`. No file in Mill's repository records the literal string `@oh-my-pi/pi-coding-agent` — `.mill/agents.example` lists `omp` as an agent with no package identity | lineage verified; the package name `@oh-my-pi/pi-coding-agent` is **unverified** — it would be confirmed by a file that names that package, such as the omp install manifest or a `~/.omp` config entry |
+| Harness | Loads skill (Q1) | Injects identity per prompt (Q2) | Runs bash gates (Q3) | Manifest |
+|---|---|---|---|---|
+| Claude Code | verified — `.claude-plugin/plugin.json` (`skills`) | verified — `.claude/settings.json` (`UserPromptSubmit` → `mill-role-guard --context`) | verified — shell tool | keep |
+| Codex | verified — `.codex-plugin/plugin.json` (`skills`); `.agents/` is Codex's marketplace dir, not a separate harness | verified — `~/.codex/hooks.json` (`UserPromptSubmit`); path form `"hooks": "./hooks.json"` per `~/.codex/.tmp/plugins/.agents/skills/plugin-creator/references/plugin-json-spec.md` | verified — shell tool | write |
+| Cursor | verified — `.cursor-plugin/plugin.json` (`skills`) | verified — `~/.cursor/hooks.json` (`beforeSubmitPrompt`); `hooks/hooks-cursor.json` (`version: 1` Cursor shape) | verified — shell tool | write |
+| Kimi | verified — `.kimi-plugin/plugin.json` (`skills`) | unverified — `UserPromptSubmit` exists only in `~/.kimi-code/config.toml` (user TOML); the plugin manifest has no `hooks` field. Would confirm: a Kimi plugin manifest that ships a hook | verified — shell tool | none |
+| Devin | fails — `.devin-plugin/plugin.json` has no `skills` field | fails — no hooks | verified — shell tool | none |
+| Gemini | verified — `gemini-extension.json` (`contextFileName`); `skills/` auto-discovered | fails — `~/.gemini/config/hooks.json` lists only `PreInvocation`/`PostInvocation`/`Stop`/`PostToolUse`; no per-prompt event | verified — shell tool | none |
+| Pi | verified — `package.json` (`pi.skills`) | unverified — `.pi/extensions/superpowers.ts` `context` event is per-turn, but Mill ships no extension and no file shows a Pi extension running `mill-role-guard`. Would confirm: a Pi extension that runs the guard | verified — shell tool | none (pi block removed) |
+| OpenCode | verified — `.opencode/plugins/superpowers.js` (`config` hook) | unverified — `experimental.chat.messages.transform` is per-step, but no file shows it running `mill-role-guard`. Would confirm: an OpenCode plugin that runs the guard | verified — shell tool | none |
+| Hermes | verified — `.hermes-plugin/__init__.py` (`register_skill`) | unverified — `pre_llm_call` fires per LLM call, but no file shows it running `mill-role-guard`. Would confirm: a Hermes plugin that runs the guard | verified — shell tool | none |
+| omp | unverified — no manifest read; catalog name `@oh-my-pi/pi-coding-agent` remains unverified (no file names it) | unverified — no manifest read | verified — shell tool | none |
 
 The package root also carries `.codex-plugin/`, `.cursor-plugin/`,
 `.devin-plugin/`, `.kimi-plugin/`, `.hermes-plugin/` and `.agents/` directories.

@@ -1,0 +1,263 @@
+#!/usr/bin/env bash
+# mill-dispatch — run the whole supervised dispatch loop as one command.
+#
+# The coordinator kept dropping steps: preflight, the task, the worker, the
+# wait, and the release that may only follow a settled worker_done. This script
+# sequences them so prose never has to. It is a thin sequence of existing
+# `orca orchestration` subcommands (Orca's "Preferred Supervised Worker Loop");
+# it reimplements none of Orca's behaviour.
+#
+#   mill-dispatch --brief <file> --role <role> --agent <agent> --name <slug> \
+#       --title <title> [--writes <path>]... [--timeout-ms <n>]
+#
+# In order:
+#   1. mill-preflight --brief <role> <paths...>   refuse a brief the role cannot write
+#   2. orca orchestration task-create             record the brief as a task
+#   3. orca orchestration worker-start            top-level worktree <slug>, repo default base
+#   4. orca orchestration check --wait            block for worker_done/escalation/question
+#   5. report: dispatch id, worktree path, commits added — then stop
+#   6. orca orchestration worker-release          ONLY after a settled worker_done
+#
+# It never merges, pushes, or verifies; verification and landing remain the
+# coordinator's own steps. It never answers a question, never retries a failed
+# start, and never releases a worker on a timeout, a question, an escalation, a
+# heartbeat, or a stale worker_done.
+#
+# A Run must already be bound to the invoking terminal (orca orchestration
+# run-create / run-use, once, before the loop). This script does not create one.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+    cat <<'EOF'
+usage: mill-dispatch --brief <file> --role <role> --agent <agent> --name <slug> \
+                     --title <title> [--writes <path>]... [--timeout-ms <n>]
+
+Run the supervised dispatch loop end to end: preflight, create the task, start
+the worker, wait for the dispatch to settle, report, then release the worker.
+
+It does not verify or land. Verification and landing are the coordinator's own
+steps, run separately after this script exits.
+
+  --brief <file>     the brief to dispatch (read in as the task spec)
+  --role <role>      the worker role; mill-preflight judges it against --writes
+  --agent <agent>    the agent id passed to worker-start
+  --name <slug>      the new top-level worktree name
+  --title <title>    the task title
+  --writes <path>    a path the brief asks the role to write; repeatable
+  --timeout-ms <n>   wait window for check --wait (default 900000)
+  -h, --help         this help
+EOF
+}
+
+# --- options ---------------------------------------------------------------
+brief=""
+role=""
+agent=""
+slug=""
+title=""
+writes=()
+timeout_ms=900000
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --brief)      brief="${2:-}"; shift 2 ;;
+        --role)       role="${2:-}"; shift 2 ;;
+        --agent)      agent="${2:-}"; shift 2 ;;
+        --name)       slug="${2:-}"; shift 2 ;;
+        --title)      title="${2:-}"; shift 2 ;;
+        --writes)     writes+=("${2:-}"); shift 2 ;;
+        --timeout-ms) timeout_ms="${2:-$timeout_ms}"; shift 2 ;;
+        -h|--help)    usage; exit 0 ;;
+        *)            echo "mill-dispatch: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+    esac
+done
+
+if [[ -z "$brief" || -z "$role" || -z "$agent" || -z "$slug" || -z "$title" ]]; then
+    echo "mill-dispatch: --brief, --role, --agent, --name and --title are all required" >&2
+    usage >&2
+    exit 2
+fi
+if [[ ! -f "$brief" ]]; then
+    echo "mill-dispatch: brief not found: $brief" >&2
+    exit 2
+fi
+if [[ ! "$timeout_ms" =~ ^[0-9]+$ ]]; then
+    echo "mill-dispatch: --timeout-ms must be a non-negative integer" >&2
+    exit 2
+fi
+
+# --- 1. Preflight: refuse before creating anything ---------------------------
+# A path the role cannot write fails here, before any task or worktree exists,
+# so a rejected brief never leaves an orphan task behind.
+echo "mill-dispatch: preflight: $here/mill-preflight --brief $role ${writes[*]}"
+if ! "$here/mill-preflight" --brief "$role" "${writes[@]}"; then
+    echo "mill-dispatch: preflight rejected — no task created, nothing started" >&2
+    exit 1
+fi
+
+# --- 2. Create the task from the brief file ---------------------------------
+spec="$(<"$brief")"
+echo "mill-dispatch: creating task: $title"
+if ! task_json="$(orca orchestration task-create --spec "$spec" --task-title "$title" --json 2>/dev/null)"; then
+    echo "mill-dispatch: task-create failed:" >&2
+    printf '%s\n' "$task_json" >&2
+    exit 1
+fi
+task_id="$(printf '%s' "$task_json" | jq -r '.result.task.id // .result.taskId // empty' 2>/dev/null || true)"
+if [[ -z "$task_id" ]]; then
+    echo "mill-dispatch: task-create returned no task id:" >&2
+    printf '%s\n' "$task_json" >&2
+    exit 1
+fi
+echo "mill-dispatch: task $task_id"
+
+# --- 3. Start the worker on a new top-level worktree -------------------------
+# --base-branch is deliberately omitted: Orca bases a new top-level worktree on
+# the repo's default base, which is exactly "the current default branch head".
+# A failed or unknown start exits non-zero; it is surfaced, never auto-retried.
+echo "mill-dispatch: starting worker (agent=$agent, worktree=$slug)"
+if ! start_json="$(orca orchestration worker-start \
+        --task "$task_id" \
+        --worktree new-top-level \
+        --name "$slug" \
+        --agent "$agent" \
+        --setup run \
+        --json 2>/dev/null)"; then
+    echo "mill-dispatch: worker-start failed (no automatic retry); receipt:" >&2
+    printf '%s\n' "$start_json" >&2
+    exit 1
+fi
+dispatch_id="$(printf '%s' "$start_json" | jq -r '.result.dispatchId // empty' 2>/dev/null || true)"
+if [[ -z "$dispatch_id" ]]; then
+    echo "mill-dispatch: worker-start returned no dispatch id:" >&2
+    printf '%s\n' "$start_json" >&2
+    exit 1
+fi
+worktree_effect="$(printf '%s' "$start_json" | jq -r '.result.effects[]? | select(.kind == "worktree") | .id' 2>/dev/null | sed -n '1p')"
+worktree_path="${worktree_effect#*::}"
+echo "mill-dispatch: dispatch $dispatch_id, worktree ${worktree_path:-<unresolved>}"
+
+# --- 4. Wait for the dispatch to settle --------------------------------------
+# Orca's blocking wait, not a poll loop and not a TUI read. Keepalive lines go
+# to stderr and are discarded; stdout is the Delivery JSON.
+echo "mill-dispatch: waiting for dispatch $dispatch_id to settle (timeout ${timeout_ms} ms)"
+delivery="$(orca orchestration check --wait --types worker_done,escalation,question --timeout-ms "$timeout_ms" --json 2>/dev/null || true)"
+
+count="$(printf '%s' "$delivery" | jq -r '.result.count // 0' 2>/dev/null || true)"
+if [[ -z "$delivery" ]] || [[ ! "$count" =~ ^[0-9]+$ ]] || [[ "$count" -eq 0 ]]; then
+    timed_out="$(printf '%s' "$delivery" | jq -r '.result.timedOut // false' 2>/dev/null || true)"
+    echo "mill-dispatch: dispatch $dispatch_id did NOT settle (timedOut=$timed_out, count=$count)." >&2
+    echo "mill-dispatch: worker left live — release was NOT performed." >&2
+    echo "mill-dispatch: inspect with: orca orchestration worker-show --dispatch $dispatch_id" >&2
+    exit 1
+fi
+
+# Process every message in full. Only a settled worker_done for THIS dispatch
+# authorises release; question, escalation, and stale worker_done all stop here.
+settled=0
+while IFS= read -r msg; do
+    [[ -z "$msg" ]] && continue
+    mtype="$(printf '%s' "$msg" | jq -r '.type // empty' 2>/dev/null || true)"
+    mid="$(printf '%s' "$msg" | jq -r '.id // empty' 2>/dev/null || true)"
+    msubj="$(printf '%s' "$msg" | jq -r '.subject // empty' 2>/dev/null || true)"
+    mbody="$(printf '%s' "$msg" | jq -r '.body // empty' 2>/dev/null || true)"
+
+    case "$mtype" in
+        question)
+            # An unanswered question kills itself when the dispatch settles.
+            # Stop loudly, print the body verbatim, and never answer on the
+            # coordinator's behalf.
+            echo "mill-dispatch: WORKER ASKED A QUESTION — dispatch $dispatch_id will not settle until it is answered." >&2
+            echo "question id: $mid" >&2
+            echo "--- question body (verbatim) ---" >&2
+            printf '%s\n' "$mbody" >&2
+            echo "--- end question body ---" >&2
+            echo "mill-dispatch: answer with: orca orchestration reply --id $mid --body '<answer>'" >&2
+            echo "mill-dispatch: worker NOT released." >&2
+            exit 1
+            ;;
+        escalation)
+            echo "mill-dispatch: WORKER ESCALATED — surfacing in full; worker NOT released." >&2
+            echo "escalation id: $mid" >&2
+            printf '%s\n' "$msubj" >&2
+            printf '%s\n' "$mbody" >&2
+            exit 1
+            ;;
+        worker_done)
+            wd_dispatch="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .dispatchId) catch empty' 2>/dev/null || true)"
+            wd_task="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .taskId) catch empty' 2>/dev/null || true)"
+            wd_outcome="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .outcome) catch empty' 2>/dev/null || true)"
+            if [[ "$wd_dispatch" == "$dispatch_id" && "$wd_task" == "$task_id" ]]; then
+                # A worker_done for this task + dispatch marks it settled,
+                # whether the outcome succeeded or failed. This is the one and
+                # only message that authorises the release below.
+                echo "mill-dispatch: settled worker_done for dispatch $dispatch_id (outcome=$wd_outcome)"
+                printf '%s\n' "$msubj" "$mbody"
+                settled=1
+            else
+                # Stale or rejected worker_done: not this dispatch. Surface it,
+                # never release on it.
+                echo "mill-dispatch: ignoring stale worker_done (task=$wd_task dispatch=$wd_dispatch) — not this dispatch" >&2
+                printf '%s\n' "$msubj" "$mbody" >&2
+            fi
+            ;;
+        *)
+            # heartbeat/status/etc: surface in full, but never a release signal.
+            echo "mill-dispatch: [$mtype] $msubj" >&2
+            [[ -n "$mbody" ]] && printf '%s\n' "$mbody" >&2
+            ;;
+    esac
+done <<< "$(printf '%s' "$delivery" | jq -c '.result.messages[]?')"
+
+if [[ "$settled" -ne 1 ]]; then
+    echo "mill-dispatch: no settled worker_done for dispatch $dispatch_id; worker NOT released." >&2
+    exit 1
+fi
+
+# --- 5. Report and stop ------------------------------------------------------
+# Print what the coordinator needs next, then stop: this script never merges,
+# pushes, or verifies.
+echo
+echo "mill-dispatch: dispatch settled."
+echo "  dispatch id : $dispatch_id"
+echo "  task id     : $task_id"
+echo "  worktree    : ${worktree_path:-<unresolved>}"
+if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
+    echo "  commits added on the branch:"
+    base="$(git -C "$worktree_path" reflog --format=%H 2>/dev/null | tail -n 1 || true)"
+    if [[ -n "$base" && "$(git -C "$worktree_path" cat-file -t "$base" 2>/dev/null)" == "commit" ]]; then
+        git -C "$worktree_path" log --oneline "${base}..HEAD" 2>/dev/null || true
+    else
+        git -C "$worktree_path" log --oneline -10 2>/dev/null || true
+    fi
+fi
+
+# --- 6. Release the worker — only now, after a settled worker_done ----------
+# Orca RPC errors are JSON on stdout (ok:false); stderr is discarded so the
+# receipt below is always parseable.
+echo "mill-dispatch: releasing worker for dispatch $dispatch_id"
+if release_out="$(orca orchestration worker-release --dispatch "$dispatch_id" --json 2>/dev/null)"; then
+    release_rc=0
+else
+    release_rc=$?
+fi
+printf '%s\n' "$release_out"
+rel_state="$(printf '%s' "$release_out" | jq -r '.result.state // .result.status // .result.outcome // empty' 2>/dev/null || true)"
+rel_recovery="$(printf '%s' "$release_out" | jq -r '.result.recovery // .result.recoveryAction // .recovery // (.error.data.nextCommandArgs | join(" ")) // empty' 2>/dev/null || true)"
+
+if [[ "$release_rc" -ne 0 || "$rel_state" == "release_unknown" ]]; then
+    echo "mill-dispatch: worker-release not clean (rc=$release_rc state=$rel_state)." >&2
+    [[ -n "$rel_recovery" ]] && echo "mill-dispatch: recovery action from the receipt: $rel_recovery" >&2
+    echo "mill-dispatch: do NOT substitute any other command." >&2
+    exit 1
+fi
+if [[ "$rel_state" == "release_pending" ]]; then
+    echo "mill-dispatch: release pending — follow the recovery action in the receipt above; do NOT substitute any other command." >&2
+    [[ -n "$rel_recovery" ]] && echo "mill-dispatch: recovery action: $rel_recovery" >&2
+else
+    echo "mill-dispatch: worker released ($rel_state)."
+fi
+
+exit 0

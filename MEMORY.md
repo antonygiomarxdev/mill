@@ -9,7 +9,7 @@ Current operational facts. If a fact stops being true, edit the line. History li
 - `.claude/skills/delegate/SKILL.md` — the dispatch recipe (98 lines).
 - `LESSONS.md` — history; not a checklist.
 - `.mill/roles/*/ROLE.md` — one per worker role; brief reads its target role.
-- `.mill/checks/` — seven scripts: `common.sh`, `mill-dispatch`, `mill-preflight`, `mill-verify`, `pre-commit`, `pre-push`, `role-enforce`.
+- `.mill/checks/` — five scripts: `common.sh`, `mill-dispatch`, `mill-preflight`, `mill-verify`, `role-enforce`.
 - No Mill binary (ADR 0006).
 
 ## Orca's coordination guide

@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# role-enforce — pre-commit capability enforcement.
+# role-enforce — role capability enforcement (--test only).
 # Usage:
-#   checks/role-enforce              — git pre-commit hook
 #   checks/role-enforce --test <role> <file>  — test mode
 #   checks/role-enforce --test <role> --base-dir <path> <file>  — test mode,
-#       read the file's content from <path> instead of the current directory.
+#       read the file's content from <path> instead of the current directory,
 #       while the role definition and the role-capabilities config are still
 #       resolved from the script's own location (the coordinator's Mill root).
 #       The trust rule is unchanged; this only widens where the file content is
 #       read from.
+#
+# --test is the only mode. Any other invocation — bare, or a git hook script
+# invoking this as its capability check — prints this usage and exits 2: a
+# gate's default must never be a silent pass.
 #
 # Exits 0 if allowed, 1 if blocked, 2 on usage error.
 
@@ -29,7 +32,7 @@ ROLES_DIR=".mill/roles"
 CAPABILITIES_FILE=".mill/role-capabilities"
 
 # BASE_DIR is the directory the file-content read is resolved against in
-# --test mode. Defaults to the current directory (pre-commit hook behaviour).
+# --test mode. Defaults to the current directory.
 # mill-verify passes --base-dir <worktree> so a worker's new file is read
 # from the worktree, not from the coordinator's repository where it does not
 # exist. The role definition and the capability map always resolve from
@@ -66,7 +69,7 @@ resolve_categories() {
     local categories
     categories=$(parse_list "allowed_files" "$role_md")
     if [[ -z "$categories" ]]; then
-        echo "pre-commit: BLOCKED — role '$role' has no file permissions." >&2
+        echo "role-enforce: BLOCKED — role '$role' has no file permissions." >&2
         echo "  $role has an empty allowed_files list." >&2
         echo "  To proceed: the role comes from the dispatch; the coordinator verifies with 'mill-verify --role <role>'." >&2
         exit 1
@@ -77,7 +80,7 @@ resolve_categories() {
     # top of this script.
     local cfg="$mill_root/$CAPABILITIES_FILE"
     if [[ ! -f "$cfg" ]]; then
-        echo "pre-commit: BLOCKED — role '$role' cannot commit: no $CAPABILITIES_FILE." >&2
+        echo "role-enforce: BLOCKED — role '$role' cannot commit: no $CAPABILITIES_FILE." >&2
         echo "  Role '$role' may write: $categories" >&2
         echo "  Map those categories to file patterns in .mill/role-capabilities" >&2
         echo "  (copy the example from .mill/role-capabilities.example)." >&2
@@ -100,7 +103,7 @@ resolve_categories() {
         expanded="$expanded $patterns"
     done
     if [[ -n "$missing" ]]; then
-        echo "pre-commit: BLOCKED — role '$role' declares categories not in $CAPABILITIES_FILE:$missing" >&2
+        echo "role-enforce: BLOCKED — role '$role' declares categories not in $CAPABILITIES_FILE:$missing" >&2
         echo "  Add the missing category or edit the role's allowed_files." >&2
         echo "  To proceed: the role comes from the dispatch; the coordinator verifies with 'mill-verify --role <role>'." >&2
         exit 1
@@ -143,7 +146,7 @@ enforce_file() {
     if ! check_forbidden "$file" "$forbidden"; then
         local basename
         basename=$(basename "$file")
-        echo "pre-commit: BLOCKED — role '$role' cannot modify $basename (forbidden)." >&2
+        echo "role-enforce: BLOCKED — role '$role' cannot modify $basename (forbidden)." >&2
         exit 1
     fi
 
@@ -160,10 +163,9 @@ enforce_file() {
     #    Anything extensionless that is not a shell script still matches no
     #    pattern, so it stays blocked: this widens nothing but shell scripts.
     #
-    #    The shebang read uses BASE_DIR (set by --base-dir in --test mode, or
-    #    empty in pre-commit mode). In pre-commit mode cwd is the worker's
-    #    repo, so the file is there; in --test mode invoked from the
-    #    coordinator, BASE_DIR is the worktree so the file is read from there.
+    #    The shebang read uses BASE_DIR (set by --base-dir). With no --base-dir
+    #    the file is read relative to the current directory; mill-verify passes
+    #    --base-dir <worktree>, so the file is read from the worktree.
     #    The role definition and the capability map are always read from
     #    mill_root (see the invariant at the top of this script) and are never
     #    affected by BASE_DIR — only the file content read above is.
@@ -206,7 +208,7 @@ enforce_file() {
     # Not allowed
     local allowed_list
     allowed_list=$(echo "$allowed" | tr ' ' ', ')
-    echo "pre-commit: BLOCKED — role '$role' cannot commit $ext_lc files." >&2
+    echo "role-enforce: BLOCKED — role '$role' cannot commit $ext_lc files." >&2
     echo "  $role can produce: $allowed_list" >&2
     echo "  To proceed: the role comes from the dispatch; the coordinator verifies with 'mill-verify --role <role>'." >&2
     exit 1
@@ -260,64 +262,10 @@ if [[ "${1:-}" == "--test" ]]; then
     exit 0
 fi
 
-# --- pre-commit mode --------------------------------------------------------
-# Check for --no-verify
-for arg in "$@"; do
-    if [[ "$arg" == "--no-verify" ]]; then
-        exit 0
-    fi
-done
-
-# Read active role
-MILL_DIR=".mill"
-ROLE_STATE="$MILL_DIR/role"
-if [[ ! -f "$ROLE_STATE" ]]; then
-    exit 0
-fi
-
-ROLE=$(tr -d '[:space:]' < "$ROLE_STATE")
-if [[ -z "$ROLE" ]]; then
-    exit 0
-fi
-
-ROLE_MD="$mill_root/$ROLES_DIR/$ROLE/ROLE.md"
-if [[ ! -f "$ROLE_MD" ]]; then
-    echo "pre-commit: BLOCKED — role '$ROLE' names a role with no ROLE.md at $ROLE_MD" >&2
-    exit 1
-fi
-
-# Get staged files
-STAGED=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)
-if [[ -z "$STAGED" ]]; then
-    exit 0
-fi
-
-# Check each staged file
-BLOCKED_FILES=""
-while IFS= read -r f; do
-    [[ -z "$f" ]] && continue
-
-    # Run enforcement as subshell to capture violation without exiting main loop
-    if ! enforce_file "$ROLE" "$ROLE_MD" "$f"; then
-        # enforce_file already printed the error; capture via subshell result
-        if [[ -z "$BLOCKED_FILES" ]]; then
-            BLOCKED_FILES="$f"
-        else
-            BLOCKED_FILES="$BLOCKED_FILES $f"
-        fi
-    fi
-done <<< "$STAGED"
-
-if [[ -n "$BLOCKED_FILES" ]]; then
-    # Log enforcement
-    TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    mkdir -p "$MILL_DIR"
-    echo "[$TIMESTAMP] BLOCKED $ROLE $BLOCKED_FILES" >> "$MILL_DIR/enforcement.log"
-
-    # Re-run enforcement on first file to get the error message (it exits 1)
-    FIRST=$(echo "$BLOCKED_FILES" | cut -d' ' -f1)
-    enforce_file "$ROLE" "$ROLE_MD" "$FIRST"
-    exit 1
-fi
-
-exit 0
+# --- no other mode ----------------------------------------------------------
+# --test is the only mode. Any other invocation — bare, or with arguments that
+# are not --test — is a usage error, never a silent pass. Mill ships no git
+# hook script, so nothing may run this as one; a hook calling it with no
+# arguments gets a loud failure, not an acceptance.
+echo "Usage: $0 --test <role> [--base-dir <path>] <file>" >&2
+exit 2

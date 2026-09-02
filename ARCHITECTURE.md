@@ -48,7 +48,8 @@ knows who comes next; PM is a worker role like the others.
 - the role definitions and their capabilities, under `.mill/roles/`
 - the phase sequence: FRD → spec → tasks → implementation → review
 - `.mill/checks/role-enforce`: what each role may write, categories resolved
-  to file patterns through `.mill/role-capabilities`
+  to file patterns through `.mill/role-capabilities`; `--test` is its only
+  mode, invoked by `mill-verify` over a change set
 - brief construction from role definition, issue, and upstream artifact
 - model tier selection per dispatch
 
@@ -63,7 +64,7 @@ knows who comes next; PM is a worker role like the others.
 
 - `.mill/roles/` — role definitions (Markdown + YAML frontmatter)
 - `.mill/checks/` — gate and dispatch scripts: common.sh, mill-dispatch,
-  mill-preflight, mill-verify, pre-commit, pre-push, role-enforce
+  mill-preflight, mill-verify, role-enforce
 - `.mill/gauntlet` — per-project build, lint, test commands
 - `.mill/role-capabilities` — category → file-pattern map
 
@@ -74,14 +75,17 @@ per-project; each ships a tracked example template beside it.
 
 Enforcement happens at the dispatch boundary, not per prompt or per write:
 
-- `.mill/checks/role-enforce` resolves each changed file to a category through
-  `.mill/role-capabilities` and refuses files outside the dispatched role's
-  allowed set.
 - `.mill/checks/mill-verify` runs the gauntlet from `.mill/gauntlet`, invokes
-  `role-enforce` over the change set, and requires the work to be committed. It
-  is a command the coordinator runs.
+  `role-enforce --test` over the change set, and requires the work to be
+  committed. It is a command the coordinator runs.
+- `role-enforce`'s only mode is `--test`: it resolves each changed file to a
+  category through `.mill/role-capabilities` and refuses files outside the
+  dispatched role's allowed set. Invoked with no `--test` argument it prints
+  usage and fails — a gate's default is never a silent pass.
 
-Mill installs no git hooks.
+Mill ships no git hook script and never writes git configuration. No
+hook-named script exists under `.mill/checks/`, and no code path expects to
+run as a hook.
 
 ## Phased workflow
 

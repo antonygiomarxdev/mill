@@ -3,8 +3,8 @@
 #
 # Each gauntlet step is a shell command run by .mill/checks/mill-verify, the
 # verification entry point the coordinator invokes against a worker's worktree
-# after every dispatch. The gauntlet structure — build, lint, test, coverage,
-# each a named check that blocks — is language-agnostic; only the commands are
+# after every dispatch. The gauntlet structure — build, lint, test — each a
+# named check that blocks — is language-agnostic; only the commands are
 # ecosystem-specific, and they are declared here.
 #
 # Leave a step unset to skip it. A project with no .mill/gauntlet file at all
@@ -18,6 +18,3 @@
 build="npm run build"
 lint="npm run lint"
 test="npm test"
-# Optional: a command whose output contains a percentage (e.g. "87.3%"). The
-# lowest percentage seen must be >= 90, else the verification is rejected.
-# coverage="npm run coverage"

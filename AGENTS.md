@@ -25,7 +25,7 @@ Dispatch is one command:
 
 Judge a worker's output with:
 
-    .mill/checks/mill-verify --worktree <path> --role <role> \
+    .mill/checks/mill-verify --project-root <path> --worktree <path> --role <role> \
         --files-modified "<list>"
 
 ## Installing Mill

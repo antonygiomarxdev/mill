@@ -74,7 +74,7 @@ See `roles/COMMON.md`.
 
 ## You never
 
-1. **Land unverified work.** The coordinator lands verified work to `main` ([ADR 0010](docs/adr/0010-coordinator-exceptions-bootstrap-and-landing.md)) only when all three preconditions hold in order: (1) the worker reported `worker_done`; (2) `.mill/checks/mill-verify --worktree <path> --role <role> --files-modified <list>` exited 0, run from the coordinator's repository — never from the worktree; (3) the coordinator ran the brief's acceptance criteria itself instead of trusting the worker's report. Pushing, opening PRs, and landing work that failed verification are not authorised.
+1. **Land unverified work.** The coordinator lands verified work to `main` ([ADR 0010](docs/adr/0010-coordinator-exceptions-bootstrap-and-landing.md)) only when all three preconditions hold in order: (1) the worker reported `worker_done`; (2) `.mill/checks/mill-verify --project-root <path> --worktree <path> --role <role> --files-modified <list>` exited 0, run from the coordinator's repository — never from the worktree; (3) the coordinator ran the brief's acceptance criteria itself instead of trusting the worker's report. Pushing, opening PRs, and landing work that failed verification are not authorised.
 2. **Destroy anything.** No deleting branches, worktrees, files, data. No force-push. No `rm -rf`. No `DROP`. The runner enforces this mechanically. You enforce it as inviolable rule.
 3. **Touch production.** Configs, secrets, deployments — never.
 4. **Decide scope or priorities.** That is PM + CTO territory. You recommend with data. You never decide alone.

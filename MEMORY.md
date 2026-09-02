@@ -46,7 +46,7 @@ Current operational facts. If a fact stops being true, edit the line. History li
 
 - `--agent command-code` rejects `--model`. The model comes from `~/.commandcode/config.json`, which is global and which command-code rewrites itself, so two models cannot run concurrently.
 - Orca marks a command-code dispatch `failed` with `lastError: agent_prompt_stalled` while the worker is running normally. The prompt did arrive. Read the terminal before believing the verdict: `orca terminal read --terminal <handle> --limit 60`. A live worker shows `esc to interrupt`.
-- `.mill/agents` is a catalog of what runs on this machine (gitignored; `.mill/agents.example` is the template). No script reads it; every dispatch names its agent and model.
+- `.mill/agents` is a catalog of what runs on this machine (gitignored; `.mill/agents.example` is the template). `mill-dispatch` reads each agent's `submit:` marker (whether the brief needs an explicit enter); no script reads it to pick the agent or model — every dispatch names its agent and model.
 
 ## Scaffold and installers are gone
 

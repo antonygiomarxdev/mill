@@ -1,12 +1,14 @@
 # Installing Mill
 
-Mill installs in two halves, and this document is the second half.
+Mill installs into two roots, and this document is the second of them. The two
+are named and separated in `docs/adr/0014-two-roots-install-and-project.md`.
 
-The **extension** ships the mechanism — the `delegate` skill and the gate
-scripts in `.mill/checks/`. It is identical for every project and is updated
-by the harness's own plugin or extension channel.
+The **install root** ships the mechanism — the `delegate` skill, the role
+definitions in `.mill/roles/`, and the gate scripts in `.mill/checks/`. It is
+identical for every project and is updated by the harness's own plugin or
+extension channel.
 
-This document is the **prompt** that guides the project's own state:
+This document is the **project root** — the state that differs per project:
 `.mill/gauntlet` (that project's build, lint and test commands) and
 `.mill/role-capabilities` (that project's file patterns). Neither can be
 packaged — both differ per project — and both are files a human should see and

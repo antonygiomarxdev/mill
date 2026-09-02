@@ -55,6 +55,10 @@ if ! orca status 2>/dev/null | grep -q "runtimeReachable: true"; then
 fi
 
 # 2. Must be in a Mill project
+# This is a working-directory layout check, not a role-definition read: it
+# only asks whether the caller is inside a Mill project. The role definitions
+# that decide what a role may write resolve from mill_root in the --brief
+# branch below, never from this directory.
 if [[ ! -d .mill/roles ]]; then
     echo "error: Not a Mill project (no .mill/roles/)." >&2
     exit 1
@@ -70,16 +74,22 @@ if [[ "$brief_mode" -eq 1 ]]; then
         echo "error: --brief requires at least one path" >&2
         exit 2
     fi
-    if [[ ! -f ".mill/roles/$brief_role/ROLE.md" ]]; then
-        echo "error: unknown role '$brief_role' (no .mill/roles/$brief_role/ROLE.md)" >&2
-        exit 2
-    fi
-
+    # The role definitions resolve from the coordinator's Mill root — this
+    # script's own location — never from the caller's working directory. A
+    # role's ROLE.md decides what that role may write, so it must come from
+    # the repository the checks live in, not from wherever this was invoked.
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    mill_root="$(cd "$here/../.." && pwd)"
+    roles_dir="$mill_root/.mill/roles"
     role_enforce="$here/role-enforce"
     if [[ ! -x "$role_enforce" ]]; then
         echo "error: role-enforce not found next to mill-preflight" >&2
         exit 1
+    fi
+
+    if [[ ! -f "$roles_dir/$brief_role/ROLE.md" ]]; then
+        echo "error: unknown role '$brief_role' (no $roles_dir/$brief_role/ROLE.md)" >&2
+        exit 2
     fi
 
     # The roles that can write a path are found by asking role-enforce the same
@@ -88,7 +98,7 @@ if [[ "$brief_mode" -eq 1 ]]; then
     # gate that enforces it. A role directory with no ROLE.md is skipped.
     determine_owners() {
         local path="$1" role_dir role owners=""
-        for role_dir in .mill/roles/*/; do
+        for role_dir in "$roles_dir"/*/; do
             [[ -d "$role_dir" && -f "$role_dir/ROLE.md" ]] || continue
             role="$(basename "$role_dir")"
             if "$role_enforce" --test "$role" "$path" >/dev/null 2>&1; then

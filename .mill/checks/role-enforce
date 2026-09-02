@@ -5,15 +5,26 @@
 #   checks/role-enforce --test <role> <file>  — test mode
 #   checks/role-enforce --test <role> --base-dir <path> <file>  — test mode,
 #       read the file's content from <path> instead of the current directory.
-#       Used by mill-verify so the file being judged is read from the worktree
-#       while the role-capabilities config is still resolved from the script's
-#       own location (the coordinator's Mill root). The trust rule for config
-#       is unchanged; this only widens where the file content is read from.
+#       while the role definition and the role-capabilities config are still
+#       resolved from the script's own location (the coordinator's Mill root).
+#       The trust rule is unchanged; this only widens where the file content is
+#       read from.
 #
 # Exits 0 if allowed, 1 if blocked, 2 on usage error.
 
 set -euo pipefail
 
+# mill_root is the coordinator's Mill root — the repository these checks live
+# in, derived from this script's own location, never from the current working
+# directory. Every file that decides what a role may write resolves from here:
+# the role definitions (.mill/roles/*/ROLE.md) and the capability map
+# (.mill/role-capabilities). No such file may be read from the working
+# directory or the worktree being judged — configuration that governs a worker
+# cannot live in that worker's output, or the worker could widen its own
+# permissions by editing the file. Only the content of the files under
+# judgement comes from the worktree (BASE_DIR below); the rules that judge it
+# never do.
+mill_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ROLES_DIR=".mill/roles"
 CAPABILITIES_FILE=".mill/role-capabilities"
 
@@ -21,8 +32,8 @@ CAPABILITIES_FILE=".mill/role-capabilities"
 # --test mode. Defaults to the current directory (pre-commit hook behaviour).
 # mill-verify passes --base-dir <worktree> so a worker's new file is read
 # from the worktree, not from the coordinator's repository where it does not
-# exist. Configuration (.mill/role-capabilities) is always resolved from
-# mill_root below and is unaffected by this variable.
+# exist. The role definition and the capability map always resolve from
+# mill_root above and are unaffected by this variable.
 BASE_DIR=""
 
 # --- helpers ----------------------------------------------------------------
@@ -61,12 +72,9 @@ resolve_categories() {
         exit 1
     fi
 
-    # Load the category → pattern map from the repository the checks live in
-    # (the coordinator's Mill root), never from the worktree being verified:
-    # configuration that governs a worker cannot live in that worker's output,
-    # or the worker could widen its own permissions by editing the file.
-    local mill_root
-    mill_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    # Load the category → pattern map from mill_root (the coordinator's Mill
+    # root), never from the worktree being verified — see the invariant at the
+    # top of this script.
     local cfg="$mill_root/$CAPABILITIES_FILE"
     if [[ ! -f "$cfg" ]]; then
         echo "pre-commit: BLOCKED — role '$role' cannot commit: no $CAPABILITIES_FILE." >&2
@@ -156,9 +164,9 @@ enforce_file() {
     #    empty in pre-commit mode). In pre-commit mode cwd is the worker's
     #    repo, so the file is there; in --test mode invoked from the
     #    coordinator, BASE_DIR is the worktree so the file is read from there.
-    #    Configuration (.mill/role-capabilities) is always read from mill_root
-    #    in resolve_categories and is never affected by BASE_DIR — the trust
-    #    rule for the capability map is preserved.
+    #    The role definition and the capability map are always read from
+    #    mill_root (see the invariant at the top of this script) and are never
+    #    affected by BASE_DIR — only the file content read above is.
     local base ext ext_lc shebang content_path
     base=$(basename "$file")
     if [[ -n "$BASE_DIR" ]]; then
@@ -206,8 +214,9 @@ enforce_file() {
 
 # --- test mode --------------------------------------------------------------
 # Parse --test <role> [--base-dir <path>] <file>. --base-dir is optional and
-# only affects where the file content is read from; the capability map is still
-# resolved from mill_root (this script's own location) so the trust rule holds.
+# only affects where the file content is read from; the role definition and the
+# capability map still resolve from mill_root (this script's own location) so
+# the trust rule holds.
 if [[ "${1:-}" == "--test" ]]; then
     shift
     ROLE=""
@@ -241,7 +250,7 @@ if [[ "${1:-}" == "--test" ]]; then
         exit 2
     fi
 
-    ROLE_MD="$ROLES_DIR/$ROLE/ROLE.md"
+    ROLE_MD="$mill_root/$ROLES_DIR/$ROLE/ROLE.md"
     if [[ ! -f "$ROLE_MD" ]]; then
         echo "role-enforce: unknown role '$ROLE' (no $ROLE_MD)" >&2
         exit 2
@@ -271,7 +280,7 @@ if [[ -z "$ROLE" ]]; then
     exit 0
 fi
 
-ROLE_MD="$ROLES_DIR/$ROLE/ROLE.md"
+ROLE_MD="$mill_root/$ROLES_DIR/$ROLE/ROLE.md"
 if [[ ! -f "$ROLE_MD" ]]; then
     echo "pre-commit: BLOCKED — role '$ROLE' names a role with no ROLE.md at $ROLE_MD" >&2
     exit 1
@@ -285,7 +294,6 @@ fi
 
 # Check each staged file
 BLOCKED_FILES=""
-FIRST_BLOCKED_REASON=""
 while IFS= read -r f; do
     [[ -z "$f" ]] && continue
 

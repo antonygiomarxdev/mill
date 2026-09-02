@@ -146,8 +146,8 @@ step 1 and re-check the install.
 
 ## 5. What Mill does not do
 
-- Mill registers no hooks of any kind: nothing in it runs on any event.
+- Mill ships no git hook script at all: nothing in it runs on any git event.
 - Mill writes nothing outside `.mill/` and the entry files.
-- Mill never changes git configuration: no `git config`, no `core.hooksPath`.
+- Mill never writes git configuration: no `git config`, no `core.hooksPath`.
   Issues #148 and #173 exist because an earlier Mill did exactly those things;
   this one does not.

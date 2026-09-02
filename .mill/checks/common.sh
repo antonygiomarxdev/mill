@@ -1,7 +1,6 @@
 #!/bin/bash
 # Shared helpers for the mill gauntlet. Used by mill-verify (the verification
-# entry point at the dispatch boundary) and, when a project opts in with
-# --with-hooks, by the git hooks.
+# entry point at the dispatch boundary) and the other .mill/checks scripts.
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -18,21 +17,17 @@ fail() { echo -e "${RED}FAIL${NC} $*"; exit 1; }
 # mill-verify runs against a worker's worktree, but the config is read from
 # the coordinator's repo: a worker that edits its own copy widens its own
 # gate. The commands still execute in the worktree (run_step evaluates them
-# in the caller's cwd), so they check exactly what the worker produced. When
-# a project opts into hooks (core.hooksPath -> .mill/checks), the hooks run
-# from the project's own copy of the checks and read that project's config,
-# as before. It is plain bash that the checks source with `source` — no
+# in the caller's cwd), so they check exactly what the worker produced. It
+# is plain bash that the checks source with `source` — no
 # parser, no new dependency. A project that configures nothing is a project
-# with no gauntlet: load_gauntlet reports that and returns 0, so a fresh
-# install never breaks the first commit and mill-verify still enforces the
-# role.
+# with no gauntlet: load_gauntlet reports that and returns 0, and mill-verify
+# still enforces the role.
 #
 # The config declares one shell command per gauntlet step, e.g.:
 #
 #   build="npm run build"
 #   lint="npm run lint"
 #   test="npm test"
-#   coverage="npm run coverage"   # optional; a step that reports a percentage
 #
 # Environment variables in the command are expanded at run time, so
 # `test="go test $PKG"` works. Variables from the project's own environment are
@@ -50,7 +45,7 @@ load_gauntlet() {
 
 # run_step runs one named gauntlet step: the command from $stepname, or a clear
 # skip when the config does not define one. Failure of a configured command
-# fails the verification (or rejects the commit, in the opt-in hook path).
+# fails the verification.
 run_step() {
     local stepname="$1"
     local cmd
@@ -65,27 +60,4 @@ run_step() {
     else
         fail "$stepname — run: $cmd"
     fi
-}
-
-# run_coverage_step is the optional coverage gate. The step's command must print
-# a single percentage; the lowest percentage seen blocks the push. Without a
-# configured command, the step is skipped like any other.
-run_coverage_step() {
-    local cmd="${coverage:-}"
-    if [[ -z "$cmd" ]]; then
-        echo "mill: coverage: not configured (no coverage=... in .mill/gauntlet)"
-        return 0
-    fi
-    echo "mill: coverage: $cmd"
-    local output
-    output="$(eval "$cmd" 2>&1)" || fail "coverage — run: $cmd"
-    local cov
-    cov="$(echo "$output" | grep -oP '[0-9]+([.][0-9]+)?%' | tr -d '%' | sort -n | head -1)"
-    if [[ -z "$cov" ]]; then
-        fail "coverage — could not parse a percentage from the output"
-    fi
-    if awk "BEGIN {exit !($cov < 90)}"; then
-        fail "coverage ${cov}% < 90% — add tests for uncovered code"
-    fi
-    pass "coverage ${cov}%"
 }

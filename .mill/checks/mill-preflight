@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # mill-preflight — refuse to dispatch when Mill cannot.
 # Called by the coordinator before any dispatch. Exits non-zero with an
-# actionable message when Orca's runtime is unreachable or the working
-# directory is not a Mill project.
+# actionable message when Orca's runtime is unreachable, or the working
+# directory is not a git work tree or a Mill project.
 #
 # Optional brief check:
 #   mill-preflight [--project-root <path>] --brief <role> <path> [<path> ...]
 #
-# With --brief, after the two environment checks below, every named path is
+# With --brief, after the environment checks below, every named path is
 # judged against <role>'s allowed_files (via role-enforce --test). The
 # role-capabilities map role-enforce reads comes from the project root —
 # --project-root when given, the current directory otherwise (this script
 # runs before any worktree exists, so the working directory is the project).
 # A path the role may not write fails the preflight, and the roles that can
 # write it are named so the coordinator can route the work instead of
-# guessing. With no --brief, behaviour is exactly the two environment checks
+# guessing. With no --brief, behaviour is exactly the environment checks
 # below.
 set -euo pipefail
 
@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             echo "usage: mill-preflight [--project-root <path>] [--brief <role> <path> [<path>...]]"
-            echo "  (no arguments)              check Orca reachability and Mill project layout"
+            echo "  (no arguments)              check Orca reachability, git work tree, and Mill project layout"
             echo "  --project-root <path>       project root supplying .mill/role-capabilities"
             echo "                               (--brief only); defaults to the current directory"
             echo "  --brief <role> <path>...     refuse every path <role> cannot write, naming"
@@ -69,7 +69,27 @@ if ! orca status 2>/dev/null | grep -q "runtimeReachable: true"; then
     exit 1
 fi
 
-# 2. Must be in a Mill project
+# 2. Must be inside a git work tree.
+# This is a working-directory check, like the .mill/roles layout check below:
+# it judges the tree the coordinator is dispatching from, so it reads the
+# working directory — never mill_root. The role-definition reads in the
+# --brief branch below resolve from mill_root for a different reason: a
+# role's ROLE.md is authority about the role, and that authority comes from
+# the repository this script lives in, not from wherever it was invoked.
+# After ADR 0014 those are two distinct roots; judging this one by mill_root
+# would be issue #195 from the other side.
+#
+# A linked worktree is a real checkout and passes: the command below prints
+# 'true' there. A bare repository prints 'false' (exit 0) and a directory
+# outside any repository makes the command fail; both are refused. A bare
+# repository must not pass silently — issue #148 is an agent setting
+# core.bare=true and breaking a checkout.
+if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" != "true" ]]; then
+    echo "error: Not inside a git work tree (a bare repository is not a checkout). Run 'git init' (or 'git clone') here first." >&2
+    exit 1
+fi
+
+# 3. Must be in a Mill project
 # This is a working-directory layout check, not a role-definition read: it
 # only asks whether the caller is inside a Mill project. The role definitions
 # that decide what a role may write resolve from mill_root in the --brief
@@ -79,7 +99,7 @@ if [[ ! -d .mill/roles ]]; then
     exit 1
 fi
 
-# 3. --brief: the named role must be able to write every named path.
+# 4. --brief: the named role must be able to write every named path.
 if [[ "$brief_mode" -eq 1 ]]; then
     if [[ -z "$brief_role" ]]; then
         echo "error: --brief requires a role" >&2

@@ -10,9 +10,12 @@ description: >-
 
 # Delegate
 
-Dispatch a worker role through Orca's orchestration CLI. The coordinator (the
-Product Engineer) sequences work; workers execute and report. Read
-`.mill/roles/COMMON.md` first, then the worker's own `ROLE.md`.
+Dispatching work through Orca's orchestration CLI is what establishes your
+identity: `[Mill · Product Engineer] coordinator — you delegate and verify; you
+do not write implementation code. Dispatch with orca orchestration
+worker-start; verify with .mill/checks/mill-verify.`
+Workers execute and report; you sequence work. Read `.mill/roles/COMMON.md`
+first, then the worker's own `ROLE.md`.
 
 ## 1. Picking a role
 

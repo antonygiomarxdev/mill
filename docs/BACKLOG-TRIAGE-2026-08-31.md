@@ -27,14 +27,14 @@ needed here.
 | #148 | A delegated agent set core.bare=true and broke the repository | LIVE | `core.hooksPath=/dev/null` set again 2026-08-31 18:54; mechanism changed, class did not |
 | #139 | Mill is a company, not a task runner | LIVE | `docs/PRODUCT.md` records it; escalation ladder and write-back still missing |
 | #137 | Nothing re-runs — no CI, lessons no code reads | LIVE | `ci.yml` exists (syntax only); lessons read by nothing |
-| #129 | Role enforcement only acts at commit | LIVE | PreToolUse guard (cdd639c) closes most; Bash hole remains |
+| #129 | Role enforcement only acts at commit | LIVE | `role-enforce` runs only at the `mill-verify` boundary |
 | #110 | Clasificación de fallo — detección y reacción | SUPERSEDED | `classifyResult` deleted with the Go CLI (6578719) |
 | #108 | Feedback loop — diff/bug reports auto-train the producing role | LIVE | no auto-training; `LESSONS.md` read by nothing |
 | #95 | Sin versionamiento semántico — sin tags, sin CHANGELOG | LIVE | `git tag -l` empty; no `CHANGELOG.md` |
-| #86 | prevent --no-verify bypass of role enforcement hooks | LIVE | matcher covers write tools only; `--no-verify` runs via `Bash` (`.claude/settings.json:16`) |
+| #86 | prevent --no-verify bypass of role enforcement hooks | LIVE | enforcement is a manual gate (`.mill/checks/mill-verify`); `--no-verify` runs via `Bash` |
 | #56 | Route production and review to different models | LIVE | skill §2 prose; nothing executes it |
 | #54 | Add review loop: produce → review → changes → rework | LIVE | reviewer verdict exists; no mechanised rework loop |
-| #25 | Role contract enforcement — mechanised process gates | DONE | `role-enforce` + `mill-role-guard` + `mill-verify`; `d3dafbd` |
+| #25 | Role contract enforcement — mechanised process gates | DONE | `role-enforce` + `mill-verify`; `d3dafbd` |
 | #1 | Mill: Multi-Agent Delegation Harness | LIVE | project exists; the Go session summary was deleted (6578719) |
 
 Counts: LIVE 21 · SUPERSEDED 2 · DONE 3 · UNCLEAR 0.
@@ -160,11 +160,10 @@ by no code and injected into no prompt, which is the issue's point about correct
 surviving only as prose. LIVE.
 
 ### #129 — enforcement only at commit — LIVE
-The literal claim is now false: `.claude/settings.json` wires `mill-role-guard --pretool`
-as a `PreToolUse` hook on `Write|Edit|NotebookEdit` (`cdd639c`/`4be15c3`), so the
-coordinator's writes are blocked before they happen, not at commit. The issue stays open
-on the hole its own comment names: the matcher excludes `Bash`, so a heredoc or `sed -i`
-still writes unblocked — recorded as a known limit in `roles/COMMON.md`. LIVE.
+Role enforcement happens at the dispatch boundary, after the work is committed:
+`.mill/checks/mill-verify` runs `role-enforce` over the change set. There is no
+per-write guard, so a write through `Bash` — `sed -i`, a heredoc, a redirect — is
+judged only when that boundary check runs. LIVE.
 
 ### #110 — failure classification taxonomy — SUPERSEDED
 The taxonomy was implemented as Go (`classifyResult`, `classify.go`); that code was
@@ -184,13 +183,10 @@ proposes is absent. LIVE.
 no tag has been cut (ADR 0011 says the same). LIVE.
 
 ### #86 — prevent --no-verify bypass — LIVE
-The guard cannot block the bypass it claims to. `mill-role-guard --pretool`
-(`cdd639c`/`4be15c3`) is wired on the `PreToolUse` matcher `Write|Edit|NotebookEdit`
-(`.claude/settings.json` line 16), which covers the file-writing tools only.
-`git commit --no-verify` runs through `Bash`, which that matcher does not cover, so the
-guard has never fired for it in any session — the gap is recorded deliberately in
-`.mill/roles/COMMON.md` ("That path is deliberately left open"). The escape hatch the
-issue names remains open. LIVE.
+Enforcement is a boundary check, not a hook: `.mill/checks/mill-verify` runs
+`role-enforce` over the change set, and nothing intercepts a write before it lands.
+`git commit --no-verify` runs through `Bash`, which no gate covers, so the escape
+hatch the issue names remains open. LIVE.
 
 ### #56 — route production and review to different models — LIVE
 The rule is prose only: delegate skill §2 states "the tier follows the work, not the
@@ -206,11 +202,11 @@ manual sequencing, with no gate or script enforcing the round-trip. LIVE.
 
 ### #25 — role contract enforcement mechanised — DONE
 The principle is now embodied in bash, which is exactly what the issue asks: `role-enforce`
-(by category via `.mill/role-capabilities`), `mill-role-guard` (PreToolUse write block),
-and `mill-verify` (dispatch-boundary check) are all scripts, and `d3dafbd` commits the
-capability map so a fresh clone can enforce. The issue's specific "gates to mechanise"
-table (spec ≤9 criteria, granularity, brief format) was the six phase gates deleted in
-`6166ada` and replaced by dispatch-boundary verification (ADR 0009). DONE.
+(by category via `.mill/role-capabilities`) and `mill-verify` (dispatch-boundary check) are
+scripts, and `d3dafbd` commits the capability map so a fresh clone can enforce. The issue's
+specific "gates to mechanise" table (spec ≤9 criteria, granularity, brief format) was the
+six phase gates deleted in `6166ada` and replaced by dispatch-boundary verification (ADR
+0009). DONE.
 
 ### #1 — the original epic — LIVE
 The epic's destination ("open-source multi-agent delegation harness") still describes
@@ -236,5 +232,5 @@ One item in the "commented today" list is not an open issue: **#132** is CLOSED 
 
 Three of 26 verdicts were wrong on spot-check, all three in the direction of judging an
 issue resolved. The pattern: a verdict reached from what the repository now *contains*
-rather than from what it *does* — the `PreToolUse` guard exists, so #86 read as done;
+rather than from what it *does* — the per-write guard existed, so #86 read as done;
 the Go runner is gone, so #148 read as impossible. Existence is not behaviour.

@@ -180,7 +180,86 @@ If it prints `error: Orca is not running. Run 'orca open' first.` start Orca
 .mill/roles/)` the extension's role files are not in the project — go back to
 step 1 and re-check the install.
 
-## 5. What Mill does not do
+## 5. The first dispatch (#200)
+
+Step 4 proves the install works. This step proves a dispatch works: one brief,
+one worker, one landing. The commands below are the recorded first dispatch —
+#200, adding a git-work-tree gate to `mill-preflight` — written as a
+procedure. `<...>` placeholders are that run's values; a new dispatch
+substitutes its own.
+
+**Bind a Run.** A dispatch runs inside an Orca Run. If the terminal has none
+bound, bind one:
+
+```
+orca orchestration run-use --id <run_id>
+```
+
+Do not probe with `orca orchestration run-show`: it requires `--id`, and
+called without one it returns
+`{"ok": false, "error": {"message": "Missing required --id"}}`. That is an
+argument error, not evidence that no Run is bound.
+
+**Write a brief.** Every dispatch starts from a brief with five parts, in
+order: *Why*, *What to produce*, *Do not touch*, *Acceptance criteria*, and
+*Raise a hand*. What goes in each is the delegate skill's, not this document's
+— read `.claude/skills/delegate/SKILL.md`, section 4, and write the brief from
+it.
+
+**Dispatch.** One command runs the whole loop — preflight, the task, the
+worker, the wait for the worker to settle, and the release:
+
+```
+.mill/checks/mill-dispatch --brief <file> --role <role> --agent <agent> \
+    --name <slug> --title <title> --writes <path>
+```
+
+`--writes` is repeatable, one per path the brief asks the worker to write. The
+command does not return until the worker has settled and been released; there
+is no separate wait step and no separate release step.
+
+It prints one line that reads as a failure and is not one:
+
+```
+mill-dispatch: worker-start: failed (agent_prompt_stalled) — brief pasted but unsent
+```
+
+For an agent catalogued `submit: explicit`, Orca pastes the brief and leaves it
+unsent; `mill-dispatch` sends the enter and confirms it (`mill-dispatch: enter
+accepted and confirmed ...`). The line appears on every successful dispatch to
+such an agent. A `submit: self` agent submits its own brief and never produces
+it.
+
+**Verify.** Run from the coordinator's repository — never from the worktree,
+which is the thing being judged:
+
+```
+.mill/checks/mill-verify --project-root <project-root> --worktree <worktree> \
+    --role <role> --files-modified "<files-modified>" --dispatch <ctx_id>
+```
+
+`--project-root` names the project whose `.mill/gauntlet` and
+`.mill/role-capabilities` judge the worktree. A pass is necessary and not
+sufficient: the coordinator re-runs the brief's acceptance criteria itself
+rather than trusting the worker's report. That rule is
+`.mill/roles/product-engineer/ROLE.md`; it is not restated here.
+
+**Land and clean up.** Land the verified commit to `main` — the landing rule
+is the delegate skill's, `.claude/skills/delegate/SKILL.md` section 5 — then
+remove the worktree:
+
+```
+git worktree remove <worktree>
+```
+
+If `mill-dispatch` returned early, its stderr says `no settled worker_done for
+dispatch <id>; worker NOT released` — an unacknowledgeable stale delivery
+flushed the wait window. The worker is still live: wait for its report,
+release it manually (`orca orchestration worker-release --dispatch <ctx_id>`),
+then remove the worktree. That early return is #191, still open; it is the
+exception, not the main path.
+
+## 6. What Mill does not do
 
 - Mill ships no git hook script at all: nothing in it runs on any git event.
 - Mill writes nothing outside `.mill/` and the entry files.

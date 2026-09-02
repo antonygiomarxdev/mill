@@ -5,7 +5,8 @@
 **Decided by:** Architect
 **Related:** #162, #148, #173. Supersedes the mechanism of ADR 0011; retains its
 analysis. Superseded by ADR 0013, which retires the per-prompt-identity
-criterion.
+criterion. Extended by ADR 0014, which names the install root and the project
+root and restates the safety rule for two roots.
 
 ## Context
 

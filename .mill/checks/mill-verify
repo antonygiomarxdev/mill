@@ -3,13 +3,21 @@
 # The single verification entry point at the dispatch boundary. Invoked by the
 # coordinator after worker_done, in the worker's own worktree:
 #
-#   mill-verify --worktree <path> --role <role> [--files-modified <a,b,c>]
+#   mill-verify --worktree <path> --role <role> --project-root <path> [--files-modified <a,b,c>]
+#
+# --project-root is required and must NOT be the worktree. It names the
+# project whose .mill/role-capabilities and .mill/gauntlet judge the worktree.
+# This script is the caller that enters the worktree, so it resolves the
+# project root BEFORE cd'ing into the tree under judgement and passes it down
+# (ADR 0014, #194); when both resolve to the same tree it refuses — a worker
+# whose output is judged by the file that governs its own permissions defeats
+# the gate (#195).
 #
 # What it checks, in order:
 #   1. The gauntlet — build and lint (pre-commit steps) and test (pre-push
-#      step). The config is read from the coordinator's Mill root (the repo
-#      the checks live in); the commands run inside the worktree, so they
-#      check exactly what the worker produced.
+#      step). The config is read from the project root's .mill/gauntlet; the
+#      commands run inside the worktree, so they check exactly what the worker
+#      produced.
 #   2. Role capability enforcement — every changed file must be allowed for
 #      the dispatched role. The change set is --files-modified when given
 #      (the worker_done payload is the authoritative record), otherwise the
@@ -23,6 +31,7 @@ set -euo pipefail
 
 worktree=""
 role=""
+project_root=""
 files_modified=""
 dispatch=""
 
@@ -30,12 +39,17 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --worktree) worktree="${2:-}"; shift 2 ;;
         --role) role="${2:-}"; shift 2 ;;
+        --project-root) project_root="${2:-}"; shift 2 ;;
         --files-modified) files_modified="${2:-}"; shift 2 ;;
         --dispatch) dispatch="${2:-}"; shift 2 ;;
         -h|--help)
-            echo "usage: mill-verify --worktree <path> --role <role> [--files-modified <a,b,c>] [--dispatch <ctx_id>]"
-            echo "  --worktree <path>       the worker's worktree"
+            echo "usage: mill-verify --worktree <path> --role <role> --project-root <path> [--files-modified <a,b,c>] [--dispatch <ctx_id>]"
+            echo "  --worktree <path>       the worker's worktree (the tree under judgement)"
             echo "  --role <role>           the dispatched role (its ROLE.md in .mill/roles/)"
+            echo "  --project-root <path>   the project root; supplies .mill/role-capabilities and"
+            echo "                          .mill/gauntlet. Required, and must not be the worktree —"
+            echo "                          a run whose project root equals the judged worktree is"
+            echo "                          refused (ADR 0014)"
             echo "  --files-modified <list> the worker_done change set; judged instead of the"
             echo "                          git diff since the worktree base commit"
             echo "  --dispatch <ctx_id>     before the gauntlet, print that dispatch's mailbox"
@@ -152,7 +166,12 @@ if [[ -n "$dispatch" ]]; then
 fi
 
 if [[ -z "$worktree" || -z "$role" ]]; then
-    echo "usage: mill-verify --worktree <path> --role <role> [--files-modified <a,b,c>]" >&2
+    echo "usage: mill-verify --worktree <path> --role <role> --project-root <path> [--files-modified <a,b,c>]" >&2
+    exit 2
+fi
+if [[ -z "$project_root" ]]; then
+    echo "error: --project-root is required (it supplies .mill/role-capabilities and .mill/gauntlet; it is never inferred from the working directory)" >&2
+    echo "usage: mill-verify --worktree <path> --role <role> --project-root <path> [--files-modified <a,b,c>]" >&2
     exit 2
 fi
 
@@ -160,16 +179,35 @@ if [[ ! -d "$worktree" ]]; then
     echo "error: no such worktree: $worktree" >&2
     exit 1
 fi
+if [[ ! -d "$project_root" ]]; then
+    echo "error: no such project root: $project_root" >&2
+    exit 1
+fi
 
 # Resolve the checks' own directory before moving into the worktree: the
-# role-capabilities and gauntlet configs are read from the repository the
-# checks live in (the coordinator's Mill root), never from the worktree
-# being verified. Resolving after `cd "$worktree"` would pick up the
-# worktree's copy of these scripts instead.
+# role definitions read from the install root (where these checks live);
+# the worktree's copy must never be picked up instead. Resolving after
+# `cd "$worktree"` would do exactly that.
 here="$(cd "$(dirname "$0")" && pwd)"
 role_enforce="$here/role-enforce"
 if [[ ! -x "$role_enforce" ]]; then
     echo "error: role-enforce not found next to mill-verify" >&2
+    exit 1
+fi
+
+# ADR 0014 (#194): the project root is resolved HERE, before cd'ing into the
+# worktree — never after, and never inferred from the working directory, which
+# inside this script is the tree under judgement. Resolve both to real paths
+# (pwd -P follows symlinks) so a symlink or a trailing slash cannot defeat the
+# comparison, then refuse when they are the same tree: judging a worktree with
+# the .mill/role-capabilities that governs it lets a worker supply the file
+# that decides its own permissions (#195).
+project_root="$(cd "$project_root" && pwd -P)"
+worktree="$(cd "$worktree" && pwd -P)"
+if [[ "$project_root" == "$worktree" ]]; then
+    echo "error: the project root and the worktree are the same tree; refusing" >&2
+    echo "  project root: $project_root" >&2
+    echo "  worktree:     $worktree" >&2
     exit 1
 fi
 
@@ -179,7 +217,7 @@ violation=0
 
 # --- 1. The gauntlet: build, lint, test in the worktree ----------------------
 # load_gauntlet and run_step live in common.sh beside this script. The config
-# is read from the coordinator's Mill root (where the checks live), but
+# is read from the project root (.mill/gauntlet, passed via --project-root), but
 # run_step evaluates the commands in the current cwd — the worktree — so the
 # gauntlet checks exactly what the worker produced. With no .mill/gauntlet
 # configured, load_gauntlet says so and skips the steps — a project with no
@@ -188,7 +226,7 @@ violation=0
 # shellcheck source=common.sh
 source "$here/common.sh"
 
-load_gauntlet
+load_gauntlet "$project_root"
 run_step build
 run_step lint
 run_step test
@@ -205,7 +243,7 @@ run_step test
 # (R) judge the new path and skip the old as a deletion. Anything unrecognised
 # is judged as a write — fail closed.
 judge_write() {
-    if ! "$role_enforce" --test "$role" --base-dir "$worktree" "$1" >/dev/null 2>&1; then
+    if ! "$role_enforce" --test "$role" --project-root "$project_root" --base-dir "$worktree" "$1" >/dev/null 2>&1; then
         echo "error: $1 is not allowed for role '$role'" >&2
         violation=1
         printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" verify "$role" "$1" >> "$here/../rejections.log" 2>/dev/null || true

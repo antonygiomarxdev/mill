@@ -12,16 +12,18 @@ fail() { echo -e "${RED}FAIL${NC} $*"; exit 1; }
 
 # load_gauntlet reads the gauntlet configuration.
 #
-# The config lives at .mill/gauntlet in the Mill root — the repository the
-# check scripts themselves live in, derived from this file's own location.
-# mill-verify runs against a worker's worktree, but the config is read from
-# the coordinator's repo: a worker that edits its own copy widens its own
-# gate. The commands still execute in the worktree (run_step evaluates them
-# in the caller's cwd), so they check exactly what the worker produced. It
-# is plain bash that the checks source with `source` — no
-# parser, no new dependency. A project that configures nothing is a project
-# with no gauntlet: load_gauntlet reports that and returns 0, and mill-verify
-# still enforces the role.
+# The config lives at .mill/gauntlet in the PROJECT ROOT, passed in as the
+# first argument — never computed from this file's own location. .mill/gauntlet
+# differs per project and cannot be packaged (ADR 0014, #194), so the project
+# root is resolved by the caller (mill-verify) before it enters the worktree
+# and passed explicitly. mill-verify runs the gauntlet against a worker's
+# worktree, but the config is read from the project: a worker that edits its
+# own copy widens its own gate. The commands still execute in the worktree
+# (run_step evaluates them in the caller's cwd), so they check exactly what
+# the worker produced. It is plain bash that the checks source with `source`
+# — no parser, no new dependency. A project that configures nothing is a
+# project with no gauntlet: load_gauntlet reports that and returns 0, and
+# mill-verify still enforces the role.
 #
 # The config declares one shell command per gauntlet step, e.g.:
 #
@@ -33,7 +35,12 @@ fail() { echo -e "${RED}FAIL${NC} $*"; exit 1; }
 # `test="go test $PKG"` works. Variables from the project's own environment are
 # available too; variables read here are named GAUNTLET_* to avoid clobbering.
 load_gauntlet() {
-    GAUNTLET_CONFIG="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.mill/gauntlet"
+    local project_root="${1:-}"
+    if [[ -z "$project_root" ]]; then
+        echo "mill: load_gauntlet called without a project root" >&2
+        return 0
+    fi
+    GAUNTLET_CONFIG="$project_root/.mill/gauntlet"
     if [[ ! -f "$GAUNTLET_CONFIG" ]]; then
         echo "mill: no .mill/gauntlet — no gauntlet commands configured for this project"
         echo "mill: (copy the example from .mill/gauntlet.example and set build/lint/test)"

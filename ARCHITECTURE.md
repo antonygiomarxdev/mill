@@ -62,14 +62,23 @@ knows who comes next; PM is a worker role like the others.
 
 ## Where policy lives
 
-- `.mill/roles/` — role definitions (Markdown + YAML frontmatter)
-- `.mill/checks/` — gate and dispatch scripts: common.sh, mill-dispatch,
-  mill-preflight, mill-verify, role-enforce
-- `.mill/gauntlet` — per-project build, lint, test commands
-- `.mill/role-capabilities` — category → file-pattern map
+Two roots, named and separated in ADR 0014
+(`docs/adr/0014-two-roots-install-and-project.md`):
 
-`.mill/gauntlet`, `.mill/role-capabilities`, and the agent catalog are
-per-project; each ships a tracked example template beside it.
+- **Install root** — where the scripts live: `.mill/roles/` (role
+  definitions, Markdown + YAML frontmatter) and `.mill/checks/` (gate and
+  dispatch scripts: common.sh, mill-dispatch, mill-preflight, mill-verify,
+  role-enforce).
+- **Project root** — the repository Mill is used on: `.mill/gauntlet`
+  (per-project build, lint, test commands) and `.mill/role-capabilities`
+  (category → file-pattern map).
+
+`.mill/gauntlet` and `.mill/role-capabilities` differ per project and each
+ships a tracked example template. The agent catalog `.mill/agents` is
+machine-local (gitignored; `.mill/agents.example` is its tracked template).
+`.mill/role-capabilities` decides what a role may write, so it is read from
+the project root only — never from the worktree being judged, whose files
+must not govern their own permissions.
 
 ## Enforcement
 

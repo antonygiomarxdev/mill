@@ -5,29 +5,44 @@
 # directory is not a Mill project.
 #
 # Optional brief check:
-#   mill-preflight --brief <role> <path> [<path> ...]
+#   mill-preflight [--project-root <path>] --brief <role> <path> [<path> ...]
 #
 # With --brief, after the two environment checks below, every named path is
-# judged against <role>'s allowed_files (via role-enforce --test). A path the
-# role may not write fails the preflight, and the roles that can write it are
-# named so the coordinator can route the work instead of guessing. With no
-# --brief, behaviour is exactly the two environment checks below.
+# judged against <role>'s allowed_files (via role-enforce --test). The
+# role-capabilities map role-enforce reads comes from the project root —
+# --project-root when given, the current directory otherwise (this script
+# runs before any worktree exists, so the working directory is the project).
+# A path the role may not write fails the preflight, and the roles that can
+# write it are named so the coordinator can route the work instead of
+# guessing. With no --brief, behaviour is exactly the two environment checks
+# below.
 set -euo pipefail
 
 # --- argument parsing --------------------------------------------------------
 brief_mode=0
 brief_role=""
 brief_paths=()
+project_root=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --project-root)
+            project_root="${2:-}"
+            shift 2
+            ;;
+        --project-root=*)
+            project_root="${1#--project-root=}"
+            shift
+            ;;
         --brief)
             brief_mode=1
             brief_role="${2:-}"
             shift 2
             ;;
         -h|--help)
-            echo "usage: mill-preflight [--brief <role> <path> [<path>...]]"
+            echo "usage: mill-preflight [--project-root <path>] [--brief <role> <path> [<path>...]]"
             echo "  (no arguments)              check Orca reachability and Mill project layout"
+            echo "  --project-root <path>       project root supplying .mill/role-capabilities"
+            echo "                               (--brief only); defaults to the current directory"
             echo "  --brief <role> <path>...     refuse every path <role> cannot write, naming"
             echo "                               the role(s) that can write each one"
             exit 0
@@ -87,6 +102,24 @@ if [[ "$brief_mode" -eq 1 ]]; then
         exit 1
     fi
 
+    # The project root supplies .mill/role-capabilities (via role-enforce).
+    # It defaults to the current directory because mill-preflight runs in the
+    # project root BEFORE any dispatch, when no worktree exists yet — this
+    # directory is the project, not a tree under judgement, so reading the
+    # capability map from it does not violate the ADR 0014 rule. An explicit
+    # --project-root overrides the default (e.g. a real install where the
+    # caller is not inside the project). role-enforce itself still receives
+    # the root explicitly and never infers it.
+    if [[ -n "$project_root" ]]; then
+        if [[ ! -d "$project_root" ]]; then
+            echo "error: no such project root: $project_root" >&2
+            exit 1
+        fi
+        project_root="$(cd "$project_root" && pwd -P)"
+    else
+        project_root="$(pwd -P)"
+    fi
+
     if [[ ! -f "$roles_dir/$brief_role/ROLE.md" ]]; then
         echo "error: unknown role '$brief_role' (no $roles_dir/$brief_role/ROLE.md)" >&2
         exit 2
@@ -101,7 +134,7 @@ if [[ "$brief_mode" -eq 1 ]]; then
         for role_dir in "$roles_dir"/*/; do
             [[ -d "$role_dir" && -f "$role_dir/ROLE.md" ]] || continue
             role="$(basename "$role_dir")"
-            if "$role_enforce" --test "$role" "$path" >/dev/null 2>&1; then
+            if "$role_enforce" --test "$role" --project-root "$project_root" "$path" >/dev/null 2>&1; then
                 owners="${owners}${owners:+, }$role"
             fi
         done
@@ -110,7 +143,7 @@ if [[ "$brief_mode" -eq 1 ]]; then
 
     failed=0
     for path in "${brief_paths[@]}"; do
-        if ! "$role_enforce" --test "$brief_role" "$path" >/dev/null 2>&1; then
+        if ! "$role_enforce" --test "$brief_role" --project-root "$project_root" "$path" >/dev/null 2>&1; then
             owners="$(determine_owners "$path")"
             if [[ -z "$owners" ]]; then
                 echo "mill-preflight: '$path' is not allowed for role '$brief_role' (no role can write it; cannot determine an owner)" >&2

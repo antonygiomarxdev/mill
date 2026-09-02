@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # role-enforce — role capability enforcement (--test only).
 # Usage:
-#   checks/role-enforce --test <role> <file>  — test mode
-#   checks/role-enforce --test <role> --base-dir <path> <file>  — test mode,
-#       read the file's content from <path> instead of the current directory,
-#       while the role definition and the role-capabilities config are still
-#       resolved from the script's own location (the coordinator's Mill root).
-#       The trust rule is unchanged; this only widens where the file content is
-#       read from.
+#   checks/role-enforce --test <role> --project-root <path> <file>  — test mode
+#   checks/role-enforce --test <role> --project-root <path> --base-dir <path> <file>
+#       — test mode, read the file's content from <path> instead of the current
+#       directory. The role definition still resolves from the script's own
+#       location (the install root), and the role-capabilities config resolves
+#       from --project-root (the project root the caller supplies). The trust
+#       rule is unchanged; this only widens where the file content is read from.
 #
 # --test is the only mode. Any other invocation — bare, or a git hook script
 # invoking this as its capability check — prints this usage and exits 2: a
@@ -17,26 +17,38 @@
 
 set -euo pipefail
 
-# mill_root is the coordinator's Mill root — the repository these checks live
-# in, derived from this script's own location, never from the current working
-# directory. Every file that decides what a role may write resolves from here:
-# the role definitions (.mill/roles/*/ROLE.md) and the capability map
-# (.mill/role-capabilities). No such file may be read from the working
-# directory or the worktree being judged — configuration that governs a worker
-# cannot live in that worker's output, or the worker could widen its own
-# permissions by editing the file. Only the content of the files under
-# judgement comes from the worktree (BASE_DIR below); the rules that judge it
-# never do.
+# mill_root is the install root — the repository these checks live in, derived
+# from this script's own location, never from the current working directory.
+# The role definitions (.mill/roles/*/ROLE.md) resolve from here.
+#
+# #195 — the trust rule: no file that decides what a role may write may be
+# read from the working directory or the worktree being judged. Configuration
+# that governs a worker cannot live in that worker's output, or the worker
+# could widen its own permissions by editing the file. Only the content of the
+# files under judgement comes from the worktree (BASE_DIR below); the rules
+# that judge it never do.
+#
+# #194 / ADR 0014 — two roots: the capability map (.mill/role-capabilities)
+# does NOT resolve from mill_root. It resolves from the project root the
+# caller supplies via --project-root, because the map differs per project and
+# cannot be packaged. The project root is resolved by the caller before it
+# enters the worktree, and passed explicitly. It is never inferred from the
+# working directory by the script that reads the file, because inside
+# mill-verify that directory is the tree under judgement. The project root and
+# the judged worktree must be distinct trees, and the tooling refuses to run
+# when they are not. --project-root is required: an absent flag is a loud
+# usage error, never a silent fallback to the working directory.
 mill_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ROLES_DIR=".mill/roles"
 CAPABILITIES_FILE=".mill/role-capabilities"
+PROJECT_ROOT=""
 
 # BASE_DIR is the directory the file-content read is resolved against in
 # --test mode. Defaults to the current directory.
 # mill-verify passes --base-dir <worktree> so a worker's new file is read
 # from the worktree, not from the coordinator's repository where it does not
-# exist. The role definition and the capability map always resolve from
-# mill_root above and are unaffected by this variable.
+# exist. The role definition resolves from mill_root above and the capability
+# map from PROJECT_ROOT; neither is affected by this variable.
 BASE_DIR=""
 
 # --- helpers ----------------------------------------------------------------
@@ -75,10 +87,10 @@ resolve_categories() {
         exit 1
     fi
 
-    # Load the category → pattern map from mill_root (the coordinator's Mill
-    # root), never from the worktree being verified — see the invariant at the
-    # top of this script.
-    local cfg="$mill_root/$CAPABILITIES_FILE"
+    # Load the category → pattern map from PROJECT_ROOT (the project root the
+    # caller passed via --project-root), never from the worktree being
+    # verified — see the invariant at the top of this script.
+    local cfg="$PROJECT_ROOT/$CAPABILITIES_FILE"
     if [[ ! -f "$cfg" ]]; then
         echo "role-enforce: BLOCKED — role '$role' cannot commit: no $CAPABILITIES_FILE." >&2
         echo "  Role '$role' may write: $categories" >&2
@@ -166,9 +178,9 @@ enforce_file() {
     #    The shebang read uses BASE_DIR (set by --base-dir). With no --base-dir
     #    the file is read relative to the current directory; mill-verify passes
     #    --base-dir <worktree>, so the file is read from the worktree.
-    #    The role definition and the capability map are always read from
-    #    mill_root (see the invariant at the top of this script) and are never
-    #    affected by BASE_DIR — only the file content read above is.
+    #    The role definition reads from mill_root and the capability map from
+    #    PROJECT_ROOT (see the invariants at the top of this script); neither
+    #    is affected by BASE_DIR — only the file content read above is.
     local base ext ext_lc shebang content_path
     base=$(basename "$file")
     if [[ -n "$BASE_DIR" ]]; then
@@ -215,16 +227,25 @@ enforce_file() {
 }
 
 # --- test mode --------------------------------------------------------------
-# Parse --test <role> [--base-dir <path>] <file>. --base-dir is optional and
-# only affects where the file content is read from; the role definition and the
-# capability map still resolve from mill_root (this script's own location) so
-# the trust rule holds.
+# Parse --test <role> --project-root <path> [--base-dir <path>] <file>.
+# --project-root is required: it names the project root whose
+# .mill/role-capabilities judges the file, and it must come from the caller —
+# never from the working directory (see the ADR 0014 invariant above).
+# --base-dir is optional and only affects where the file content is read from.
 if [[ "${1:-}" == "--test" ]]; then
     shift
     ROLE=""
     FILE=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --project-root)
+                PROJECT_ROOT="${2:-}"
+                shift 2
+                ;;
+            --project-root=*)
+                PROJECT_ROOT="${1#--project-root=}"
+                shift
+                ;;
             --base-dir)
                 BASE_DIR="${2:-}"
                 shift 2
@@ -248,7 +269,16 @@ if [[ "${1:-}" == "--test" ]]; then
         esac
     done
     if [[ -z "$ROLE" || -z "$FILE" ]]; then
-        echo "Usage: $0 --test <role> [--base-dir <path>] <file>" >&2
+        echo "Usage: $0 --test <role> --project-root <path> [--base-dir <path>] <file>" >&2
+        exit 2
+    fi
+    # Safe default: there is none. An absent --project-root never falls back to
+    # the working directory — inside mill-verify that directory is the tree
+    # under judgement, and a capability map read from there is a worker
+    # supplying the file that governs its own permissions (#195). Refuse.
+    if [[ -z "$PROJECT_ROOT" ]]; then
+        echo "role-enforce: missing --project-root (the project root supplies .mill/role-capabilities; it is never inferred from the working directory)" >&2
+        echo "Usage: $0 --test <role> --project-root <path> [--base-dir <path>] <file>" >&2
         exit 2
     fi
 
@@ -267,5 +297,5 @@ fi
 # are not --test — is a usage error, never a silent pass. Mill ships no git
 # hook script, so nothing may run this as one; a hook calling it with no
 # arguments gets a loud failure, not an acceptance.
-echo "Usage: $0 --test <role> [--base-dir <path>] <file>" >&2
+echo "Usage: $0 --test <role> --project-root <path> [--base-dir <path>] <file>" >&2
 exit 2

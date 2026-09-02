@@ -2,10 +2,9 @@
 
 Mill installs in two halves, and this document is the second half.
 
-The **extension** ships the mechanism — the `delegate` skill, the two hooks
-that keep the coordinator's identity in context, and the gate scripts in
-`.mill/checks/`. It is identical for every project and is updated by the
-harness's own plugin or extension channel.
+The **extension** ships the mechanism — the `delegate` skill and the gate
+scripts in `.mill/checks/`. It is identical for every project and is updated
+by the harness's own plugin or extension channel.
 
 This document is the **prompt** that guides the project's own state:
 `.mill/gauntlet` (that project's build, lint and test commands) and
@@ -18,7 +17,7 @@ user's session, with the user watching.
 
 Ask which harness the project uses, then install Mill's extension for it.
 Mill ships one manifest per supported harness; each declares the skill
-directory and the hooks that keep the coordinator's identity in context.
+directory.
 
 **Claude Code** (`.claude-plugin/plugin.json`). Install Mill from its
 marketplace:
@@ -147,7 +146,7 @@ step 1 and re-check the install.
 
 ## 5. What Mill does not do
 
-- Mill takes no git hooks: nothing in it runs on commit or push.
+- Mill registers no hooks of any kind: nothing in it runs on any event.
 - Mill writes nothing outside `.mill/` and the entry files.
 - Mill never changes git configuration: no `git config`, no `core.hooksPath`.
   Issues #148 and #173 exist because an earlier Mill did exactly those things;

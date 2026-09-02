@@ -20,10 +20,9 @@ coordinator is the Product Engineer, the single head of a star topology.
 ## Entry file
 
 `AGENTS.md` (symlinked as `CLAUDE.md`) is read at session start. The
-coordinator identity is re-injected on every prompt by
-`.mill/checks/mill-role-guard`, wired through `.claude/settings.json`; the
-same guard, in pre-tool mode, blocks coordinator code-writes. Cursor receives
-the context hook from `hooks/hooks-cursor.json`.
+coordinator identity is established when the `delegate` skill is invoked, not
+re-injected on every prompt: a session that has not invoked the skill has no
+role context.
 
 ## Star topology
 
@@ -63,8 +62,8 @@ knows who comes next; PM is a worker role like the others.
 ## Where policy lives
 
 - `.mill/roles/` — role definitions (Markdown + YAML frontmatter)
-- `.mill/checks/` — gate and dispatch scripts: mill-dispatch, mill-verify,
-  mill-preflight, mill-role-guard, role-enforce, common.sh
+- `.mill/checks/` — gate and dispatch scripts: common.sh, mill-dispatch,
+  mill-preflight, mill-verify, pre-commit, pre-push, role-enforce
 - `.mill/gauntlet` — per-project build, lint, test commands
 - `.mill/role-capabilities` — category → file-pattern map
 
@@ -73,14 +72,14 @@ per-project; each ships a tracked example template beside it.
 
 ## Enforcement
 
-Two read points, neither skippable by a worker:
+Enforcement happens at the dispatch boundary, not per prompt or per write:
 
-- `.mill/checks/mill-role-guard` runs on every prompt and every write; it
-  keeps the coordinator identity in context and refuses writes outside the
-  active role's categories.
-- `.mill/checks/mill-verify` runs the gauntlet from `.mill/gauntlet`, checks
-  every changed file against the dispatched role, and requires the work to be
-  committed. It is a command the coordinator runs.
+- `.mill/checks/role-enforce` resolves each changed file to a category through
+  `.mill/role-capabilities` and refuses files outside the dispatched role's
+  allowed set.
+- `.mill/checks/mill-verify` runs the gauntlet from `.mill/gauntlet`, invokes
+  `role-enforce` over the change set, and requires the work to be committed. It
+  is a command the coordinator runs.
 
 Mill installs no git hooks.
 

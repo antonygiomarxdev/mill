@@ -30,13 +30,11 @@ The coordinator holds the sequencing state. Workers do not need to know who come
 
 **Who you are depends on your role file.** If your `ROLE.md` identifies you as the coordinator, you sequence and dispatch. Otherwise, you execute your brief and report.
 
-## The role is mechanised, not remembered
+## The role is established by the skill, not remembered
 
-The coordinator's identity is not something the coordinator is trusted to remember. `AGENTS.md` (with `CLAUDE.md` as a symlink) at the repository root re-injects it once on SessionStart, but a `/compact` wipes that and the coordinator silently stops delegating. The identity is re-injected on every prompt instead, by `.mill/checks/mill-role-guard --context` wired as a `UserPromptSubmit` hook.
+The coordinator's identity is not something the coordinator is trusted to remember. It is re-established when the `delegate` skill is invoked — the one place that re-establishes context every time it runs — and a session that has not invoked the skill has no role context. No hook and no ambient mechanism keeps it alive.
 
-The prohibition on writing implementation code is enforced by the same script in `--pretool` mode, wired as a `PreToolUse` hook on `Write|Edit|NotebookEdit`. When a write is blocked, stderr names the role that should have been dispatched, so a refusal always routes onward instead of just saying no.
-
-The guard covers the file-writing tools only. A coordinator that writes through `Bash` — `sed -i`, a heredoc, or a redirect — is not stopped by it. That path is deliberately left open: the coordinator needs `Bash` constantly for verification, and a heuristic guessing at write-intent would block far more real work than it caught. It is a known limit, recorded here so nobody mistakes the guard for a wall.
+The prohibition on writing implementation code is enforced at the dispatch boundary: `mill-verify` runs `role-enforce` over the change set and rejects files outside the dispatched role's categories. Nothing intercepts a coordinator's own tools, so a coordinator that writes through `Bash` — `sed -i`, a heredoc, or a redirect — is stopped only by the skill's own rule, not by a guard.
 
 ## Reporting
 

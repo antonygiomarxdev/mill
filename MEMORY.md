@@ -9,7 +9,7 @@ Current operational facts. If a fact stops being true, edit the line. History li
 - `.claude/skills/delegate/SKILL.md` — the dispatch recipe (98 lines).
 - `LESSONS.md` — history; not a checklist.
 - `.mill/roles/*/ROLE.md` — one per worker role; brief reads its target role.
-- `.mill/checks/` — seven scripts: `common.sh`, `mill-preflight`, `mill-role-guard`, `mill-verify`, `pre-commit`, `pre-push`, `role-enforce`.
+- `.mill/checks/` — seven scripts: `common.sh`, `mill-dispatch`, `mill-preflight`, `mill-verify`, `pre-commit`, `pre-push`, `role-enforce`.
 - No Mill binary (ADR 0006).
 
 ## Orca's coordination guide
@@ -28,8 +28,9 @@ Current operational facts. If a fact stops being true, edit the line. History li
 ## Coordinator is constant
 
 - The Product Engineer is the only role that talks to the CTO.
-- Identity is injected by the `UserPromptSubmit` hook in `.claude/settings.json` running `.mill/checks/mill-role-guard --context`. Survives compaction.
-- The `PreToolUse` guard matcher is `Write|Edit|NotebookEdit` and **not** `Bash`. Heredocs and `sed -i` go through unblocked — deliberate, because Bash is needed for verification.
+- Identity is established when the `delegate` skill is invoked — the one place
+  that re-establishes context every time it runs. A session that has not
+  invoked the skill has no role context.
 
 ## Verification
 

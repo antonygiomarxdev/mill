@@ -15,6 +15,40 @@ packaged — both differ per project — and both are files a human should see a
 approve rather than have a script write unattended. Run each step in the
 user's session, with the user watching.
 
+## 0. Confirm the prerequisites
+
+Before installing anything, confirm each of these six things is already true
+on the user's machine. Run the check in the user's session and read the
+result aloud; if a check does not produce the passing output, stop and report
+what you saw instead of continuing. Nothing in this step installs or writes.
+
+| Prerequisite | Check | Missing |
+| --- | --- | --- |
+| Orca is installed, running and reachable | `orca status` | not installed: `orca: command not found`. Installed but not running: `orca status` prints no `runtimeReachable: true` line — start it with `orca open`. Step 4's preflight names this failure: `error: Orca is not running. Run 'orca open' first.` |
+| An agent Orca can launch | none — there is no standalone check | the only way to learn whether an agent can be launched is to launch one, which is the dispatch itself; when the named agent is not configured, Orca fails the worker start with its own error. A fresh machine has no agents, and Mill records the ones it knows in `.mill/agents.example`. |
+| The operator's `.mill/agents` catalog | `grep -n 'submit: ' .mill/agents.example` — the template's markers; the operator's own file has no standalone check, `mill-dispatch` enforces it | `mill-dispatch` refuses with exit 2: `mill-dispatch: no submit marker for agent '<agent>' in .mill/agents` |
+| A git repository | `git rev-parse --is-inside-work-tree` | `fatal: not a git repository (or any of the parent directories): .git` |
+| bash | `bash --version` | `bash: command not found` — no named error; every gate script is `#!/usr/bin/env bash` and fails at first run |
+| jq | `jq --version` | `jq: command not found`; a dispatch that reaches it fails later with `task-create returned no task id` |
+
+`.mill/agents` needs more than a line. It is the catalog of the agents Orca
+has configured on this machine, one entry per agent. Each entry carries a
+`submit:` marker that `mill-dispatch` reads to decide whether the worker needs
+an empty enter after its brief is pasted: `submit: self` submits its own
+brief, `submit: explicit` needs the enter. `.mill/agents.example` is the
+tracked template. Copy it to `.mill/agents` and edit the entries, because the
+example's ids are this machine's — the operator's file records what actually
+runs on their machine. `.mill/agents` is gitignored (it can hold the
+operator's credentials) and never committed; the example stays tracked.
+
+Every dispatch names an agent and a model, and there is no default to hide
+behind. Each agent exposes its own models, and they are wired differently:
+`omp` takes no `--model` flag (the model is configured inside omp),
+`command-code` reads a global `~/.commandcode/config.json` that it rewrites
+itself, and `claude` and `cursor` accept `--model` at launch.
+`.mill/agents.example` records each agent's wiring; pick the model from what
+the chosen agent offers.
+
 ## 1. Install the extension
 
 Ask which harness the project uses, then install Mill's extension for it.

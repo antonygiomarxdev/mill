@@ -78,8 +78,13 @@ dispatch time. After landing, run
 `git log -1 --format="%(trailers:only=true)"` and confirm `Mill-Dispatch`
 appears — it would have caught `24f3019` and `f22dea7`.
 
-`.mill/agents` is a catalog of what exists on this machine. No script consults
-it and it decides nothing.
+`.mill/agents` is a catalog of what runs on this machine (gitignored;
+`.mill/agents.example` is the tracked template). `mill-dispatch` reads each
+agent's `submit:` marker from it — the local copy when present, the example
+otherwise — to decide whether the brief needs an explicit enter after it is
+pasted: `submit: explicit` agents get one, `submit: self` agents never do. A
+missing catalog or a missing marker is a loud refusal (exit 2), never a
+silent wrong guess.
 
 ## 3. The dispatch commands
 
@@ -127,20 +132,29 @@ Every brief that worked has the same five parts. Write them in order:
    output the worker pastes. Max 9. Countable — never adjectives.
 5. **Raise a hand.** The line a worker sends when the brief is unclear:
    `orca orchestration send --type question --subject "<short>" --body "<q>" --task-id <task-id> --dispatch-id <dispatch-id>`.
-   A question without `--task-id` and `--dispatch-id` cannot be tied to its
-   dispatch and will not be seen by `mill-verify --dispatch`.
+   A question is tied to its dispatch by the sender's own terminal —
+   `mill-verify --dispatch` resolves the handle from the dispatch record, and
+   a payload-less question carries nothing else. `--task-id` and
+   `--dispatch-id` put the ids in the payload, which keeps the question
+   attributable once the terminal no longer resolves.
 
 Reference files rather than inlining their content. A worker given its
 `ROLE.md` and a brief has everything it needs.
 
-Before dispatching, run `mill-preflight --brief <role>` with the paths the brief asks the worker to write.
+Before dispatching, run `mill-preflight --brief <role> <path>...` with the paths the brief asks the worker to write.
 
 ## 5. Verify and land
 
 ```
-.mill/checks/mill-verify --worktree <path> --role <role> --files-modified "<list>"
+.mill/checks/mill-verify --project-root <path> --worktree <path> --role <role> --files-modified "<list>"
 .mill/checks/mill-verify --dispatch <ctx_id>                   # refuse while a question is unanswered
 ```
+
+`--project-root` names the project whose `.mill/gauntlet` and
+`.mill/role-capabilities` judge the worktree; it has no default because inside
+the script the working directory is the tree under judgement — a guess there
+would read the permissions file from the tree being judged. The rule is ADR
+0014 (`docs/adr/0014-two-roots-install-and-project.md`), not restated here.
 
 Run it from the **coordinator's** repository, never from the worktree — the
 worktree is the thing being judged. `--files-modified` entries may carry a

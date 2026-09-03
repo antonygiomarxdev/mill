@@ -1,11 +1,17 @@
 # role-capabilities — per-project map from a role's declared capability
 # categories (in ROLE.md allowed_files) to file patterns. A list entry may be
-# an extension or an exact filename. This is the active file; the template
+# an extension, an exact filename, a basename glob (`*.test.*`), or a
+# repo-relative path glob (`test/*.sh`, `*/__tests__/*`) — see the matching
+# rules in .mill/checks/role-enforce. This is the active file; the template
 # new projects copy is .mill/role-capabilities.example.
 
 code=""
 docs=".md"
 config=".yml .yaml .json .toml .gitignore"
+# Tests are files, not an extension: a test file is a fact about its path.
+# `*/__tests__/*` and the `*.test.*`/`*.spec.*` infixes cover the common
+# layouts; `test/*.sh` is where this repository's own tests live.
+tests="test/*.sh */__tests__/* *.test.* *.spec.*"
 policy=".md .sh .example role-capabilities"
 scripts=".sh"
 design=".pen .fig"

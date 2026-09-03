@@ -75,7 +75,7 @@ cursor check: the agent's own elapsed clock (e.g. the `Worked for 44s` counter i
 the TUI, which stops incrementing), its accumulated spend, and the worktree diff
 (no new files appear). All three stall together when the session is dead.
 
-Runnable check — read twice, compare the tail (copy this):
+Runnable check — read twice, then read the last content lines (copy this):
 
 ```
 # READ 1
@@ -83,7 +83,8 @@ $ orca terminal read --terminal <handle> --json
 # wait at least 20 seconds — do NOT interact with the terminal
 # READ 2
 $ orca terminal read --terminal <handle> --json
-# compare result.terminal.tail (or nextCursor) between the two reads
+# compare result.terminal.tail between the two reads (did output advance?)
+# then read the LAST CONTENT LINE above the prompt — it tells you which state
 ```
 
 Evidence from this session (terminal `term_79bc3a2c-61e6-4069-bd1a-cbd5a71f100a`,
@@ -109,6 +110,40 @@ was right.
 When the session IS working, the same two reads show different tails (new output
 lines between them) and a moving elapsed clock. That is the only confirmation
 worth trusting.
+
+### Three states, and how to tell them apart
+
+A frozen cursor means "produced nothing recently" — **not** "dead." Jumping to
+"dead" is the mistake. A finished agent sitting at its prompt reads identically
+to a 503'd one: same `Ask your question...` tail, same zero-line advance, same
+`live` status. Both of today's workers were reported frozen by a coordinator
+monitor while they were *done*, not dead. Distinguish three states:
+
+**Working.** Cursor advances between the two reads (new tail lines, moving
+elapsed clock). The worktree is changing or has recent commits. This is the only
+state the cursor check detects directly.
+
+**Finished.** Cursor frozen, but the last content line above the prompt says
+what it finished — a completion message such as `The task is already complete`
+or `Nothing further to do`. That line is the first tie-break. The stronger one is
+the worktree: a finished worker has produced commits or at least changed files.
+
+**Dead (503'd or stalled mid-work).** Cursor frozen, and the last content line
+is *not* a completion message. A 503'd session shows the error and `Type continue
+to try again`. A session that died mid-work shows a truncated thought with
+neither a completion message nor the 503 prompt.
+
+The worktree is the strongest tie-breaker and the one that settles it:
+
+```
+$ git -C <worktree> status --short
+$ git -C <worktree> log --oneline -1
+```
+
+A finished worker has commits or changed files; a dead one does not. **Nothing an
+agent says about its own completion counts until that command agrees** — both of
+today's workers asserted "task complete" while their worktrees still held
+uncommitted work. Trust the worktree over the agent's self-report.
 
 ### Recovery
 

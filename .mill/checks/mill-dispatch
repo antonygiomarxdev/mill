@@ -275,77 +275,126 @@ fi
 # --- 4. Wait for the dispatch to settle --------------------------------------
 # Orca's blocking wait, not a poll loop and not a TUI read. Keepalive lines go
 # to stderr and are discarded; stdout is the Delivery JSON.
+#
+# The wait is bounded by a single deadline computed ONCE from --timeout-ms,
+# before the first check --wait. Each check --wait is capped at the time
+# remaining to that deadline, never the full timeout. The loop ends on exactly
+# three things: a settled worker_done for THIS dispatch, a question or
+# escalation (both stop today and keep stopping), or the deadline being spent.
+#
+# A stale worker_done — one that belongs to an earlier dispatch, not this one
+# — must NOT end the wait. check --wait returns the bound Run's oldest
+# unacknowledged delivery, so a stale worker_done can arrive before the live
+# one. The old code treated any non-settling first delivery as failure and
+# exited, abandoning the live worker (#191). We now ignore a worker_done that is
+# not ours and keep waiting until the real one arrives or the deadline is spent.
+#
+# Why the loop does not treat a zero-count return as the end of the wait:
+# check --wait returns count 0 only when its requested window elapses (the
+# server-side waiter holds the connection open until --timeout-ms expires — see
+# the CLI's message-check-handler + transport: a single RPC, the socket held
+# for the full window, _keepalive frames only refresh the idle timer and never
+# settle the request). Even so, the loop keys off the wall-clock deadline
+# below, not the count, so a zero-count return that ever came back early would
+# simply wait again with the leftover budget. The deadline is the sole source
+# of truth for "time is up".
+#
+# Why this matters to the coordinator: the loop's exit is authoritative, and
+# terminal output going quiet is NOT evidence either way. A frozen wait and a
+# finished worker look identical from outside — both stop writing to the
+# terminal. The only reliable signal that a dispatch has settled is this loop
+# exiting on a worker_done for the right dispatch; silence alone cannot
+# distinguish "still working" from "dead", and acting on it cost real time.
 echo "mill-dispatch: waiting for dispatch $dispatch_id to settle (timeout ${timeout_ms} ms)"
-delivery="$(orca orchestration check --wait --types worker_done,escalation,question --timeout-ms "$timeout_ms" --json 2>/dev/null || true)"
-
-count="$(printf '%s' "$delivery" | jq -r '.result.count // 0' 2>/dev/null || true)"
-if [[ -z "$delivery" ]] || [[ ! "$count" =~ ^[0-9]+$ ]] || [[ "$count" -eq 0 ]]; then
-    timed_out="$(printf '%s' "$delivery" | jq -r '.result.timedOut // false' 2>/dev/null || true)"
-    echo "mill-dispatch: dispatch $dispatch_id did NOT settle (timedOut=$timed_out, count=$count)." >&2
-    echo "mill-dispatch: worker left live — release was NOT performed." >&2
-    echo "mill-dispatch: inspect with: orca orchestration worker-show --dispatch $dispatch_id" >&2
-    exit 1
-fi
-
-# Process every message in full. Only a settled worker_done for THIS dispatch
-# authorises release; question, escalation, and stale worker_done all stop here.
+deadline_ms=$(( $(date +%s%3N) + timeout_ms ))
 settled=0
-while IFS= read -r msg; do
-    [[ -z "$msg" ]] && continue
-    mtype="$(printf '%s' "$msg" | jq -r '.type // empty' 2>/dev/null || true)"
-    mid="$(printf '%s' "$msg" | jq -r '.id // empty' 2>/dev/null || true)"
-    msubj="$(printf '%s' "$msg" | jq -r '.subject // empty' 2>/dev/null || true)"
-    mbody="$(printf '%s' "$msg" | jq -r '.body // empty' 2>/dev/null || true)"
+while true; do
+    remaining_ms=$(( deadline_ms - $(date +%s%3N) ))
+    if [[ "$remaining_ms" -le 0 ]]; then
+        echo "mill-dispatch: wait deadline spent for dispatch $dispatch_id." >&2
+        break
+    fi
 
-    case "$mtype" in
-        question)
-            # An unanswered question kills itself when the dispatch settles.
-            # Stop loudly, print the body verbatim, and never answer on the
-            # coordinator's behalf.
-            echo "mill-dispatch: WORKER ASKED A QUESTION — dispatch $dispatch_id will not settle until it is answered." >&2
-            echo "question id: $mid" >&2
-            echo "--- question body (verbatim) ---" >&2
-            printf '%s\n' "$mbody" >&2
-            echo "--- end question body ---" >&2
-            echo "mill-dispatch: answer with: orca orchestration reply --id $mid --body '<answer>'" >&2
-            echo "mill-dispatch: worker NOT released." >&2
-            exit 1
-            ;;
-        escalation)
-            echo "mill-dispatch: WORKER ESCALATED — surfacing in full; worker NOT released." >&2
-            echo "escalation id: $mid" >&2
-            printf '%s\n' "$msubj" >&2
-            printf '%s\n' "$mbody" >&2
-            exit 1
-            ;;
-        worker_done)
-            wd_dispatch="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .dispatchId) catch empty' 2>/dev/null || true)"
-            wd_task="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .taskId) catch empty' 2>/dev/null || true)"
-            wd_outcome="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .outcome) catch empty' 2>/dev/null || true)"
-            if [[ "$wd_dispatch" == "$dispatch_id" && "$wd_task" == "$task_id" ]]; then
-                # A worker_done for this task + dispatch marks it settled,
-                # whether the outcome succeeded or failed. This is the one and
-                # only message that authorises the release below.
-                echo "mill-dispatch: settled worker_done for dispatch $dispatch_id (outcome=$wd_outcome)"
-                printf '%s\n' "$msubj" "$mbody"
-                settled=1
-            else
-                # Stale or rejected worker_done: not this dispatch. Surface it,
-                # never release on it.
-                echo "mill-dispatch: ignoring stale worker_done (task=$wd_task dispatch=$wd_dispatch) — not this dispatch" >&2
-                printf '%s\n' "$msubj" "$mbody" >&2
-            fi
-            ;;
-        *)
-            # heartbeat/status/etc: surface in full, but never a release signal.
-            echo "mill-dispatch: [$mtype] $msubj" >&2
-            [[ -n "$mbody" ]] && printf '%s\n' "$mbody" >&2
-            ;;
-    esac
-done <<< "$(printf '%s' "$delivery" | jq -c '.result.messages[]?')"
+    delivery="$(orca orchestration check --wait --types worker_done,escalation,question --timeout-ms "$remaining_ms" --json 2>/dev/null || true)"
+
+    count="$(printf '%s' "$delivery" | jq -r '.result.count // 0' 2>/dev/null || true)"
+    if [[ -z "$delivery" ]] || [[ ! "$count" =~ ^[0-9]+$ ]] || [[ "$count" -le 0 ]]; then
+        # Nothing to process this iteration: either the window elapsed (count 0,
+        # the common case) or the call came back empty/unparseable. A
+        # zero-count return never ends the loop on its own — only the
+        # wall-clock deadline above does. If the window truly elapsed, the next
+        # pass's remaining_ms is ~0 and we break; if the call returned early we
+        # simply wait again with the time still left. Either way we never exit
+        # here, so a stale worker_done arriving first cannot end the wait.
+        continue
+    fi
+
+    # Process every message in full. Only a settled worker_done for THIS
+    # dispatch authorises release; question and escalation both exit, and a
+    # stale worker_done is ignored so the loop keeps waiting for the real one.
+    while IFS= read -r msg; do
+        [[ -z "$msg" ]] && continue
+        mtype="$(printf '%s' "$msg" | jq -r '.type // empty' 2>/dev/null || true)"
+        mid="$(printf '%s' "$msg" | jq -r '.id // empty' 2>/dev/null || true)"
+        msubj="$(printf '%s' "$msg" | jq -r '.subject // empty' 2>/dev/null || true)"
+        mbody="$(printf '%s' "$msg" | jq -r '.body // empty' 2>/dev/null || true)"
+
+        case "$mtype" in
+            question)
+                # An unanswered question kills itself when the dispatch settles.
+                # Stop loudly, print the body verbatim, and never answer on the
+                # coordinator's behalf.
+                echo "mill-dispatch: WORKER ASKED A QUESTION — dispatch $dispatch_id will not settle until it is answered." >&2
+                echo "question id: $mid" >&2
+                echo "--- question body (verbatim) ---" >&2
+                printf '%s\n' "$mbody" >&2
+                echo "--- end question body ---" >&2
+                echo "mill-dispatch: answer with: orca orchestration reply --id $mid --body '<answer>'" >&2
+                echo "mill-dispatch: worker NOT released." >&2
+                exit 1
+                ;;
+            escalation)
+                echo "mill-dispatch: WORKER ESCALATED — surfacing in full; worker NOT released." >&2
+                echo "escalation id: $mid" >&2
+                printf '%s\n' "$msubj" >&2
+                printf '%s\n' "$mbody" >&2
+                exit 1
+                ;;
+            worker_done)
+                wd_dispatch="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .dispatchId) catch empty' 2>/dev/null || true)"
+                wd_task="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .taskId) catch empty' 2>/dev/null || true)"
+                wd_outcome="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .outcome) catch empty' 2>/dev/null || true)"
+                if [[ "$wd_dispatch" == "$dispatch_id" && "$wd_task" == "$task_id" ]]; then
+                    # A worker_done for this task + dispatch marks it settled,
+                    # whether the outcome succeeded or failed. This is the one
+                    # and only message that authorises the release below.
+                    echo "mill-dispatch: settled worker_done for dispatch $dispatch_id (outcome=$wd_outcome)"
+                    printf '%s\n' "$msubj" "$mbody"
+                    settled=1
+                else
+                    # Stale or rejected worker_done: not this dispatch. Surface it,
+                    # never release on it, and keep waiting — exiting here is the
+                    # bug this loop fixes (#191).
+                    echo "mill-dispatch: ignoring stale worker_done (task=$wd_task dispatch=$wd_dispatch) — not this dispatch" >&2
+                    printf '%s\n' "$msubj" "$mbody" >&2
+                fi
+                ;;
+            *)
+                # heartbeat/status/etc: surface in full, but never a release signal.
+                echo "mill-dispatch: [$mtype] $msubj" >&2
+                [[ -n "$mbody" ]] && printf '%s\n' "$mbody" >&2
+                ;;
+        esac
+    done <<< "$(printf '%s' "$delivery" | jq -c '.result.messages[]?')"
+
+    if [[ "$settled" -eq 1 ]]; then
+        break
+    fi
+done
 
 if [[ "$settled" -ne 1 ]]; then
     echo "mill-dispatch: no settled worker_done for dispatch $dispatch_id; worker NOT released." >&2
+    echo "mill-dispatch: inspect with: orca orchestration worker-show --dispatch $dispatch_id" >&2
     exit 1
 fi
 

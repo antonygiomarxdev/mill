@@ -180,12 +180,12 @@ If it prints `error: Orca is not running. Run 'orca open' first.` start Orca
 .mill/roles/)` the extension's role files are not in the project — go back to
 step 1 and re-check the install.
 
-## 5. The first dispatch (#200)
+## 5. The first dispatch
 
 Step 4 proves the install works. This step proves a dispatch works: one brief,
 one worker, one landing. The commands below are the recorded first dispatch —
-#200, adding a git-work-tree gate to `mill-preflight` — written as a
-procedure. `<...>` placeholders are that run's values; a new dispatch
+commit `317172e`, adding a git-work-tree gate to `mill-preflight` — written as
+a procedure. `<...>` placeholders are that run's values; a new dispatch
 substitutes its own.
 
 **Bind a Run.** A dispatch runs inside an Orca Run. If the terminal has none
@@ -252,12 +252,12 @@ remove the worktree:
 git worktree remove <worktree>
 ```
 
-If `mill-dispatch` returned early, its stderr says `no settled worker_done for
-dispatch <id>; worker NOT released` — an unacknowledgeable stale delivery
-flushed the wait window. The worker is still live: wait for its report,
-release it manually (`orca orchestration worker-release --dispatch <ctx_id>`),
-then remove the worktree. That early return is #191, still open; it is the
-exception, not the main path.
+`mill-dispatch` returns without releasing the worker when the wait loop stops
+for any reason other than a settled `worker_done`: the wait window can be spent,
+or the worker can ask a question or raise an escalation, both of which halt the
+loop by design. The worker is still live. Wait for its report, release it
+manually (`orca orchestration worker-release --dispatch <ctx_id>`), then remove
+the worktree. These are the exception, not the main path.
 
 ## 6. What Mill does not do
 

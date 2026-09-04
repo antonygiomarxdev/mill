@@ -91,6 +91,24 @@ if [[ ! "$timeout_ms" =~ ^[0-9]+$ ]]; then
     echo "mill-dispatch: --timeout-ms must be a non-negative integer" >&2
     exit 2
 fi
+
+# --- Terminal identity and exit verdict -------------------------------------
+# The supervisor runs in an Orca terminal (see delegate/SKILL.md §3), so its
+# tab title is the only thing a human sees at a glance. On exit — every exit,
+# including failure — rename the tab to encode the verdict. Best effort: a
+# rename that fails must never change the exit code.
+#
+# Orca sets ORCA_TERMINAL_HANDLE in the environment of every terminal it
+# manages; that is how this process knows its own handle without guessing. If
+# it is absent, skip the rename silently rather than guessing a handle.
+verdict="failed"
+supervisor_handle="${ORCA_TERMINAL_HANDLE:-}"
+rename_to() {
+    if [[ -n "$supervisor_handle" ]]; then
+        orca terminal rename --terminal "$supervisor_handle" --title "$1" >/dev/null 2>&1 || true
+    fi
+}
+trap 'rename_to "$verdict $slug"' EXIT
 # --- 0. Read the per-agent submit requirement from the catalog ----------------
 # Whether a worker needs an explicit enter after worker-start pastes the brief
 # is a property of the agent, and the fact lives in the catalog: `.mill/agents`
@@ -307,92 +325,172 @@ fi
 # distinguish "still working" from "dead", and acting on it cost real time.
 echo "mill-dispatch: waiting for dispatch $dispatch_id to settle (timeout ${timeout_ms} ms)"
 deadline_ms=$(( $(date +%s%3N) + timeout_ms ))
+# Slice size for each check --wait, in ms. Not the whole budget: a worker
+# killed by a provider error sends no message, so a supervisor that only
+# listens waits out the whole --timeout-ms (up to 45 min) supervising a
+# corpse. Slicing the wait and probing liveness between slices bounds how
+# long a dead worker can go unnoticed to one slice.
+slice_ms=60000
 settled=0
+liveness_warned=0
 while true; do
     remaining_ms=$(( deadline_ms - $(date +%s%3N) ))
     if [[ "$remaining_ms" -le 0 ]]; then
         echo "mill-dispatch: wait deadline spent for dispatch $dispatch_id." >&2
+        verdict="timeout"
         break
     fi
 
-    delivery="$(orca orchestration check --wait --types worker_done,escalation,question --timeout-ms "$remaining_ms" --json 2>/dev/null || true)"
+    # Cap each check --wait at one slice, never the whole remaining budget.
+    # Between slices we run mill-liveness to detect a worker that died without
+    # sending a message.
+    wait_ms=$(( remaining_ms < slice_ms ? remaining_ms : slice_ms ))
+    delivery="$(orca orchestration check --wait --types worker_done,escalation,question --timeout-ms "$wait_ms" --json 2>/dev/null || true)"
 
     count="$(printf '%s' "$delivery" | jq -r '.result.count // 0' 2>/dev/null || true)"
-    if [[ -z "$delivery" ]] || [[ ! "$count" =~ ^[0-9]+$ ]] || [[ "$count" -le 0 ]]; then
-        # Nothing to process this iteration: either the window elapsed (count 0,
-        # the common case) or the call came back empty/unparseable. A
-        # zero-count return never ends the loop on its own — only the
-        # wall-clock deadline above does. If the window truly elapsed, the next
-        # pass's remaining_ms is ~0 and we break; if the call returned early we
-        # simply wait again with the time still left. Either way we never exit
-        # here, so a stale worker_done arriving first cannot end the wait.
-        continue
+    if [[ -n "$delivery" ]] && [[ "$count" =~ ^[0-9]+$ ]] && [[ "$count" -gt 0 ]]; then
+        # Process every message in full. Only a settled worker_done for THIS
+        # dispatch authorises release; question and escalation both exit, and a
+        # stale worker_done is ignored so the loop keeps waiting for the real
+        # one.
+        while IFS= read -r msg; do
+            [[ -z "$msg" ]] && continue
+            mtype="$(printf '%s' "$msg" | jq -r '.type // empty' 2>/dev/null || true)"
+            mid="$(printf '%s' "$msg" | jq -r '.id // empty' 2>/dev/null || true)"
+            msubj="$(printf '%s' "$msg" | jq -r '.subject // empty' 2>/dev/null || true)"
+            mbody="$(printf '%s' "$msg" | jq -r '.body // empty' 2>/dev/null || true)"
+
+            case "$mtype" in
+                question)
+                    # An unanswered question kills itself when the dispatch
+                    # settles. Stop loudly, print the body verbatim, and never
+                    # answer on the coordinator's behalf.
+                    echo "mill-dispatch: WORKER ASKED A QUESTION — dispatch $dispatch_id will not settle until it is answered." >&2
+                    echo "question id: $mid" >&2
+                    echo "--- question body (verbatim) ---" >&2
+                    printf '%s\n' "$mbody" >&2
+                    echo "--- end question body ---" >&2
+                    echo "mill-dispatch: answer with: orca orchestration reply --id $mid --body '<answer>'" >&2
+                    echo "mill-dispatch: worker NOT released." >&2
+                    exit 1
+                    ;;
+                escalation)
+                    echo "mill-dispatch: WORKER ESCALATED — surfacing in full; worker NOT released." >&2
+                    echo "escalation id: $mid" >&2
+                    printf '%s\n' "$msubj" >&2
+                    printf '%s\n' "$mbody" >&2
+                    exit 1
+                    ;;
+                worker_done)
+                    wd_dispatch="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .dispatchId) catch empty' 2>/dev/null || true)"
+                    wd_task="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .taskId) catch empty' 2>/dev/null || true)"
+                    wd_outcome="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .outcome) catch empty' 2>/dev/null || true)"
+                    if [[ "$wd_dispatch" == "$dispatch_id" && "$wd_task" == "$task_id" ]]; then
+                        # A worker_done for this task + dispatch marks it
+                        # settled, whether the outcome succeeded or failed. This
+                        # is the one and only message that authorises the release
+                        # below.
+                        echo "mill-dispatch: settled worker_done for dispatch $dispatch_id (outcome=$wd_outcome)"
+                        printf '%s\n' "$msubj" "$mbody"
+                        verdict="done"
+                        settled=1
+                    else
+                        # Stale or rejected worker_done: not this dispatch.
+                        # Surface it, never release on it, and keep waiting —
+                        # exiting here is the bug this loop fixes (#191).
+                        echo "mill-dispatch: ignoring stale worker_done (task=$wd_task dispatch=$wd_dispatch) — not this dispatch" >&2
+                        printf '%s\n' "$msubj" "$mbody" >&2
+                    fi
+                    ;;
+                *)
+                    # heartbeat/status/etc: surface in full, but never a
+                    # release signal.
+                    echo "mill-dispatch: [$mtype] $msubj" >&2
+                    [[ -n "$mbody" ]] && printf '%s\n' "$mbody" >&2
+                    ;;
+            esac
+        done <<< "$(printf '%s' "$delivery" | jq -c '.result.messages[]?')"
+
+        if [[ "$settled" -eq 1 ]]; then
+            break
+        fi
     fi
 
-    # Process every message in full. Only a settled worker_done for THIS
-    # dispatch authorises release; question and escalation both exit, and a
-    # stale worker_done is ignored so the loop keeps waiting for the real one.
-    while IFS= read -r msg; do
-        [[ -z "$msg" ]] && continue
-        mtype="$(printf '%s' "$msg" | jq -r '.type // empty' 2>/dev/null || true)"
-        mid="$(printf '%s' "$msg" | jq -r '.id // empty' 2>/dev/null || true)"
-        msubj="$(printf '%s' "$msg" | jq -r '.subject // empty' 2>/dev/null || true)"
-        mbody="$(printf '%s' "$msg" | jq -r '.body // empty' 2>/dev/null || true)"
-
-        case "$mtype" in
-            question)
-                # An unanswered question kills itself when the dispatch settles.
-                # Stop loudly, print the body verbatim, and never answer on the
-                # coordinator's behalf.
-                echo "mill-dispatch: WORKER ASKED A QUESTION — dispatch $dispatch_id will not settle until it is answered." >&2
-                echo "question id: $mid" >&2
-                echo "--- question body (verbatim) ---" >&2
-                printf '%s\n' "$mbody" >&2
-                echo "--- end question body ---" >&2
-                echo "mill-dispatch: answer with: orca orchestration reply --id $mid --body '<answer>'" >&2
-                echo "mill-dispatch: worker NOT released." >&2
-                exit 1
+    # Between slices: probe liveness. A worker killed by a provider error
+    # sends no message, so the listen-only loop would wait out the whole
+    # budget. mill-liveness reads the worktree's git state and the terminal's
+    # cursor to tell "still working" from "dead" (#214). Resolve it from the
+    # same directory as this script, the way mill-preflight is resolved.
+    if [[ -x "$here/mill-liveness" ]]; then
+        live_rc=0
+        live_out="$( "$here/mill-liveness" --dispatch "$dispatch_id" 2>&1 )" || live_rc=$?
+        case "$live_rc" in
+            0)
+                # working — normal path. Stay quiet: a per-slice line would
+                # make a supervisor's log unreadable.
                 ;;
-            escalation)
-                echo "mill-dispatch: WORKER ESCALATED — surfacing in full; worker NOT released." >&2
-                echo "escalation id: $mid" >&2
-                printf '%s\n' "$msubj" >&2
-                printf '%s\n' "$mbody" >&2
-                exit 1
+            20)
+                # parked on a human prompt — healthy, but no further waiting
+                # helps. Report what agentWait said.
+                echo "mill-dispatch: worker PARKED on a human prompt for dispatch $dispatch_id." >&2
+                echo "$live_out" >&2
+                echo "mill-dispatch: worker NOT released — release requires a settled worker_done." >&2
+                verdict="parked"
+                break
                 ;;
-            worker_done)
-                wd_dispatch="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .dispatchId) catch empty' 2>/dev/null || true)"
-                wd_task="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .taskId) catch empty' 2>/dev/null || true)"
-                wd_outcome="$(printf '%s' "$msg" | jq -r 'try (.payload | fromjson | .outcome) catch empty' 2>/dev/null || true)"
-                if [[ "$wd_dispatch" == "$dispatch_id" && "$wd_task" == "$task_id" ]]; then
-                    # A worker_done for this task + dispatch marks it settled,
-                    # whether the outcome succeeded or failed. This is the one
-                    # and only message that authorises the release below.
-                    echo "mill-dispatch: settled worker_done for dispatch $dispatch_id (outcome=$wd_outcome)"
-                    printf '%s\n' "$msubj" "$mbody"
-                    settled=1
-                else
-                    # Stale or rejected worker_done: not this dispatch. Surface it,
-                    # never release on it, and keep waiting — exiting here is the
-                    # bug this loop fixes (#191).
-                    echo "mill-dispatch: ignoring stale worker_done (task=$wd_task dispatch=$wd_dispatch) — not this dispatch" >&2
-                    printf '%s\n' "$msubj" "$mbody" >&2
+            10|40)
+                # finished (10) or uncommitted (40): work exists in the
+                # worktree and no settled worker_done arrived. Report the
+                # state, worktree path, and commit count. Do NOT release: the
+                # release rule requires a settled worker_done.
+                echo "mill-dispatch: worker $live_rc for dispatch $dispatch_id — work exists, no settled worker_done." >&2
+                echo "$live_out" >&2
+                echo "mill-dispatch: worktree ${worktree_path:-<unresolved>}" >&2
+                if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
+                    echo "mill-dispatch: commits on branch:" >&2
+                    git -C "$worktree_path" log --oneline main..HEAD 2>/dev/null || true
+                fi
+                echo "mill-dispatch: worker NOT released — release requires a settled worker_done." >&2
+                verdict="uncommitted"
+                break
+                ;;
+            30)
+                # dead — stop loudly, print the last content line of the
+                # worker's terminal as evidence. This is the case the CTO
+                # described and it must never cost more than one slice to
+                # notice.
+                echo "mill-dispatch: WORKER DEAD for dispatch $dispatch_id." >&2
+                echo "$live_out" >&2
+                echo "mill-dispatch: worker NOT released — release requires a settled worker_done." >&2
+                verdict="dead"
+                break
+                ;;
+            2)
+                # unresolvable — a probe that cannot read a terminal is not
+                # proof of anything. Log once and continue.
+                if [[ "$liveness_warned" -eq 0 ]]; then
+                    echo "mill-dispatch: mill-liveness returned unresolvable (2) for $dispatch_id — continuing to wait." >&2
+                    liveness_warned=1
                 fi
                 ;;
-            *)
-                # heartbeat/status/etc: surface in full, but never a release signal.
-                echo "mill-dispatch: [$mtype] $msubj" >&2
-                [[ -n "$mbody" ]] && printf '%s\n' "$mbody" >&2
-                ;;
         esac
-    done <<< "$(printf '%s' "$delivery" | jq -c '.result.messages[]?')"
-
-    if [[ "$settled" -eq 1 ]]; then
-        break
+    else
+        if [[ "$liveness_warned" -eq 0 ]]; then
+            echo "mill-dispatch: mill-liveness not found at $here/mill-liveness — falling back to listen-only wait." >&2
+            liveness_warned=1
+        fi
     fi
 done
 
 if [[ "$settled" -ne 1 ]]; then
+    # Before concluding nothing arrived, read the inbox: a delivery consumed
+    # by a concurrent supervisor (#213) is invisible to check --wait but
+    # sits in the inbox. dispatchId lives inside payload, which is a JSON
+    # string needing a second parse.
+    if inbox_hits="$(orca orchestration inbox --json 2>/dev/null | jq -r --arg d "$dispatch_id" '.result.messages[]? | select((.payload//"{}"|fromjson?|.dispatchId)==$d) | "\(.type): \(.subject // "")"' 2>/dev/null)" && [[ -n "$inbox_hits" ]]; then
+        echo "mill-dispatch: inbox has a delivery for this dispatch that this supervisor never saw (see #213):" >&2
+        echo "$inbox_hits" >&2
+    fi
     echo "mill-dispatch: no settled worker_done for dispatch $dispatch_id; worker NOT released." >&2
     echo "mill-dispatch: inspect with: orca orchestration worker-show --dispatch $dispatch_id" >&2
     exit 1

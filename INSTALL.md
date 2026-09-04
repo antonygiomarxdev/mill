@@ -30,6 +30,7 @@ what you saw instead of continuing. Nothing in this step installs or writes.
 | A git repository | `git rev-parse --is-inside-work-tree` | `fatal: not a git repository (or any of the parent directories): .git` |
 | bash | `bash --version` | `bash: command not found` — no named error; every gate script is `#!/usr/bin/env bash` and fails at first run |
 | jq | `jq --version` | `jq: command not found`; a dispatch that reaches it fails later with `task-create returned no task id` |
+| Orca's orchestration experimental feature is enabled | open Settings > Experimental and confirm the orchestration toggle is on — there is no standalone CLI check for this | `orca orchestration` commands fail at runtime; the exact failure text is not documented here, so the check is the Settings pane itself |
 
 ### Orca CLI resolution
 

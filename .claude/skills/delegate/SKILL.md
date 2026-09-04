@@ -247,6 +247,16 @@ cannot give a reader — empty for a clean close, or "kept open for <X>" when th
 landing closed only part of the issue. Restate nothing the body already says.
 A close with no close signal in the commit is not written back automatically.
 
+## 5.2 Correcting a supervised worker
+
+A correction to a supervised worker is structured inbox mail, not keystrokes. Send it to the worker's dispatch address, not to its terminal:
+
+```
+<orca> orchestration send --to dispatch:<dispatch_id> --subject "<short>" --body "<guidance>" --json
+```
+
+`dispatch:<id>` routes to the exact supervised worker; the worker's next `orca orchestration check` receives it. Do not use `orca terminal send --text … --enter` for a correction — that is free-form keystrokes into a TUI, and is only for a free-form prompt to an agent that is not a supervised worker.
+
 ## 6. Current vs history
 
 Two rules decide what is authoritative:

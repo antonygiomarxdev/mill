@@ -146,6 +146,21 @@ That failure is clean — no task, no worktree, no worker — but it is silent
 unless the coordinator reads the supervisor terminal, which is the habit this
 section exists to establish.
 
+The supervisor no longer relies only on listening for a worker's message: it
+slices its wait into short windows and runs `.mill/checks/mill-liveness
+--dispatch <ctx_id>` between them. A worker killed by a provider error sends no
+message, so a listen-only loop would wait out the whole `--timeout-ms`
+supervising a corpse; the liveness probe notices a dead, parked, or uncommitted
+worker within one slice and stops. The single wall-clock deadline from
+`--timeout-ms` is unchanged and remains the sole source of truth for "time is
+up".
+
+After creating the supervisor, the coordinator launches `orca terminal wait
+--terminal <handle> --for exit` so it is woken when the dispatch ends instead
+of polling. The supervisor renames its own tab on every exit to encode the
+verdict (`done`, `dead`, `parked`, `uncommitted`, `timeout`, `failed`), so a
+glance at the tab tells the coordinator what happened without opening it.
+
 ## 4. Brief structure
 
 Every brief that worked has the same five parts. Write them in order:

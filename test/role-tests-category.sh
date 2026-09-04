@@ -80,6 +80,14 @@ failures=0
 # `tests` category existed.
 enforce 0 qa-docs "test/role-tests-category.sh" \
     "qa-docs may commit test/role-tests-category.sh"
+# A `/` pattern matches by pattern, not by what happens to exist on disk where
+# the gate runs: `test/nonexistent-file.sh` matches `test/*.sh` and must be
+# allowed even though no such file exists. Before the array fix, `for a in
+# $allowed` glob-expanded `test/*.sh` against the cwd (this harness runs from
+# a tmp tree whose test/ holds real files), so a matching-but-absent path was
+# wrongly BLOCKED — a verdict that depended on the caller's cwd.
+enforce 0 qa-docs "test/nonexistent-file.sh" \
+    "qa-docs may commit a test/ path not present on disk (glob not cwd-expanded)"
 # The original provocation: a .ts test file under a __tests__ directory. A
 # test file is a fact about its path, so this must pass without qa-docs
 # gaining `code`.

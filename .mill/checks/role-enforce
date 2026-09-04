@@ -222,7 +222,17 @@ enforce_file() {
     #      entry like `role-capabilities` cannot match `my-role-capabilities`
     #      or `role-capabilities.example`. A leading dot stays part of the
     #      entry, so `.gitignore` matches `.gitignore` and nothing else.
-    for a in $allowed; do
+    # Read the pattern list into an array without pathname expansion. A bare
+    # `for a in $allowed` would word-split AND let bash glob each pattern
+    # against the current working directory before the loop saw it, so
+    # `test/*.sh` became whatever test files happened to exist where the gate
+    # was invoked — a verdict that depends on the caller's cwd (the same
+    # class as the #195 rule above). `read -a` splits on IFS and globs
+    # nothing; each element below is still pattern-matched because `$a` stays
+    # unquoted on the right of `==`.
+    local -a allowed_arr
+    read -r -a allowed_arr <<< "$allowed"
+    for a in "${allowed_arr[@]}"; do
         if [[ "$a" == */* ]]; then
             # Form 1: repo-relative path glob.
             if [[ "$file" == $a ]]; then

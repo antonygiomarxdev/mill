@@ -16,6 +16,7 @@
     "policy"
   ],
   "skills": [
-    "./.claude/skills"
-  ]
+    ".claude/skills"
+  ],
+  "hooks": ".claude/settings.json"
 }

@@ -339,6 +339,13 @@ deadline_ms=$(( $(date +%s%3N) + timeout_ms ))
 slice_ms=60000
 settled=0
 liveness_warned=0
+# The delivery id of the last Delivery this loop processed and must
+# acknowledge. check --wait returns the bound Run's oldest FIFO Delivery
+# (up to 50 messages) and replays that exact batch until --ack. The id is
+# on the Delivery (.result.deliveryId), not on any single message. Empty
+# until a Delivery with count>0 has been processed; we never acknowledge
+# a batch we did not handle (e.g. an early exit on a liveness verdict).
+last_delivery_id=""
 while true; do
     remaining_ms=$(( deadline_ms - $(date +%s%3N) ))
     if [[ "$remaining_ms" -le 0 ]]; then
@@ -353,6 +360,10 @@ while true; do
     wait_ms=$(( remaining_ms < slice_ms ? remaining_ms : slice_ms ))
     delivery="$($ORCA_CLI orchestration check --wait --types worker_done,escalation,question --timeout-ms "$wait_ms" --json 2>/dev/null || true)"
 
+    # The delivery id is on the Delivery, not on each message. check --json
+    # returns it at .result.deliveryId; we capture it here so we can ack the
+    # exact batch after processing every message in it.
+    delivery_id="$(printf '%s' "$delivery" | jq -r '.result.deliveryId // empty' 2>/dev/null || true)"
     count="$(printf '%s' "$delivery" | jq -r '.result.count // 0' 2>/dev/null || true)"
     if [[ -n "$delivery" ]] && [[ "$count" =~ ^[0-9]+$ ]] && [[ "$count" -gt 0 ]]; then
         # Process every message in full. Only a settled worker_done for THIS
@@ -418,7 +429,27 @@ while true; do
         done <<< "$(printf '%s' "$delivery" | jq -c '.result.messages[]?')"
 
         if [[ "$settled" -eq 1 ]]; then
+            # The settling Delivery's id — remembered so it can be acknowledged
+            # AFTER the release decision (the guide's order: process every
+            # message, make the release decision, then acknowledge). Not
+            # acknowledged here: release is the next step, and acknowledging
+            # first would discard a batch we still need.
+            if [[ -n "$delivery_id" ]]; then
+                last_delivery_id="$delivery_id"
+            fi
             break
+        fi
+
+        # A non-settling Delivery was fully processed. Acknowledge it now so
+        # the next check --wait returns a fresh batch instead of replaying
+        # this one forever. The release decision for this batch is "no
+        # release" (only a settled worker_done releases), which is already
+        # reflected in settled=0, so acknowledging now respects the guide's
+        # order: process every message, make the release decision, then
+        # acknowledge.
+        if [[ -n "$delivery_id" ]]; then
+            echo "mill-dispatch: acknowledging processed delivery $delivery_id"
+            $ORCA_CLI orchestration check --ack "$delivery_id" --json >/dev/null 2>&1 || true
         fi
     fi
 
@@ -544,6 +575,20 @@ if [[ "$rel_state" == "release_pending" ]]; then
     [[ -n "$rel_recovery" ]] && echo "mill-dispatch: recovery action: $rel_recovery" >&2
 else
     echo "mill-dispatch: worker released ($rel_state)."
+fi
+
+# --- 7. Acknowledge the processed Delivery — only now, after the release ----
+# The guide's order is process every message, make the release decision, then
+# acknowledge. check --wait replays the oldest unacknowledged Delivery until
+# --ack; without this the batch is replayed to every waiter forever, and the
+# inbox never drains (#213, #211, #210). We acknowledge by the Delivery's id
+# (.result.deliveryId), never a message or dispatch id. Only a Delivery we
+# actually processed is acknowledged: last_delivery_id is empty when the loop
+# exits early on a liveness verdict or timeout without processing a batch, and
+# in that case the batch is correctly left unacknowledged for redelivery.
+if [[ -n "$last_delivery_id" ]]; then
+    echo "mill-dispatch: acknowledging delivery $last_delivery_id"
+    $ORCA_CLI orchestration check --ack "$last_delivery_id" --json >/dev/null 2>&1 || true
 fi
 
 exit 0

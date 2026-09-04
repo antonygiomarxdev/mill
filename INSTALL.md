@@ -235,7 +235,7 @@ which is the thing being judged:
 
 ```
 .mill/checks/mill-verify --project-root <project-root> --worktree <worktree> \
-    --role <role> --files-modified "<files-modified>" --dispatch <ctx_id>
+    --role <role> --files-modified "<a,b,c>" --dispatch <ctx_id>
 ```
 
 `--project-root` names the project whose `.mill/gauntlet` and

@@ -259,6 +259,23 @@ skip_deleted() {
 if [[ -n "$files_modified" ]]; then
     # Trim spaces around commas: payloads may arrive as "a, b, c".
     entries="$(printf '%s' "$files_modified" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+
+    # Refuse an entry that still carries internal whitespace after the comma
+    # split. A space-separated list (the natural reading of the old <list>
+    # placeholder) collapses into ONE entry containing spaces; role-enforce
+    # then takes the basename of the whole string, so the entire change set is
+    # judged by whatever follows the last "/". A worker can smuggle a forbidden
+    # file into any position but the last and the gate never sees it. We do not
+    # guess a split on whitespace because a path may legally contain a space —
+    # refuse and say why, so the caller re-issues with commas.
+    while IFS= read -r entry; do
+        [[ -z "$entry" ]] && continue
+        if [[ "$entry" =~ [[:space:]] ]]; then
+            echo "error: --files-modified entry contains whitespace; separate paths with commas, not spaces: $entry" >&2
+            exit 2
+        fi
+    done <<< "$entries"
+
     while IFS= read -r entry; do
         [[ -z "$entry" ]] && continue
         if [[ "$entry" =~ ^([AMDR])[[:space:]]+(.+) ]]; then

@@ -24,12 +24,32 @@ what you saw instead of continuing. Nothing in this step installs or writes.
 
 | Prerequisite | Check | Missing |
 | --- | --- | --- |
-| Orca is installed, running and reachable | `orca status` | not installed: `orca: command not found`. Installed but not running: `orca status` prints no `runtimeReachable: true` line — start it with `orca open`. Step 4's preflight names this failure: `error: Orca is not running. Run 'orca open' first.` |
+| Orca is installed, running and reachable | `<orca> status` (see "Orca CLI resolution" below) | not installed: `<orca>: command not found`. Installed but not running: `<orca> status` prints no `runtimeReachable: true` line — start it with `<orca> open`. Step 4's preflight names this failure: `error: Orca is not running. Run '<orca> open' first.` |
 | An agent Orca can launch | none — there is no standalone check | the only way to learn whether an agent can be launched is to launch one, which is the dispatch itself; when the named agent is not configured, Orca fails the worker start with its own error. A fresh machine has no agents, and Mill records the ones it knows in `.mill/agents.example`. |
 | The operator's `.mill/agents` catalog | `grep -n 'submit: ' .mill/agents.example` — the template's markers; the operator's own file has no standalone check, `mill-dispatch` enforces it | `mill-dispatch` refuses with exit 2: `mill-dispatch: no submit marker for agent '<agent>' in .mill/agents` |
 | A git repository | `git rev-parse --is-inside-work-tree` | `fatal: not a git repository (or any of the parent directories): .git` |
 | bash | `bash --version` | `bash: command not found` — no named error; every gate script is `#!/usr/bin/env bash` and fails at first run |
 | jq | `jq --version` | `jq: command not found`; a dispatch that reaches it fails later with `task-create returned no task id` |
+
+### Orca CLI resolution
+
+Mill's examples write `<orca>` where the Orca CLI executable name depends on
+your platform and environment — substitute the right one for your machine.
+Bare `orca` collides with GNOME's screen reader at `/usr/bin/orca` on Linux;
+which one wins depends on `$PATH` order, so the name is not portable.
+
+Resolution order (the gates in `.mill/checks/` apply this automatically):
+
+1. `$ORCA_CLI_COMMAND` when set — Orca exports it for managed WSL sessions.
+2. `orca-dev` when `$ORCA_DEV_REPO_ROOT` is set.
+3. Linux **and** no `$ORCA_WORKSPACE_ID` → `orca-ide`. (`ORCA_WORKSPACE_ID`
+   is set by Orca in every terminal it manages; its absence means an
+   ordinary terminal.)
+4. Otherwise → `orca`.
+
+Whatever branch was taken, if the resolved executable begins with `#!` it is
+the screen reader, not Orca — set `ORCA_CLI_COMMAND` to the absolute path of
+your Orca CLI.
 
 `.mill/agents` needs more than a line. It is the catalog of the agents Orca
 has configured on this machine, one entry per agent. Each entry carries a
@@ -199,11 +219,11 @@ Run the preflight check:
 A passing run prints the coordination-guide note and exits 0:
 
 ```
-Orca's coordination guide: load with 'orca skills get orca-cli' and 'orca skills get orchestration'
+Orca's coordination guide: load with '<orca> skills get orca-cli' and '<orca> skills get orchestration'
 ```
 
-If it prints `error: Orca is not running. Run 'orca open' first.` start Orca
-(`orca open`) and re-run. If it prints `error: Not a Mill project (no
+If it prints `error: Orca is not running. Run '<orca> open' first.` start Orca
+(`<orca> open`) and re-run. If it prints `error: Not a Mill project (no
 .mill/roles/)` the extension's role files are not in the project — go back to
 step 1 and re-check the install.
 
@@ -219,10 +239,10 @@ substitutes its own.
 bound, bind one:
 
 ```
-orca orchestration run-use --id <run_id>
+<orca> orchestration run-use --id <run_id>
 ```
 
-Do not probe with `orca orchestration run-show`: it requires `--id`, and
+Do not probe with `<orca> orchestration run-show`: it requires `--id`, and
 called without one it returns
 `{"ok": false, "error": {"message": "Missing required --id"}}`. That is an
 argument error, not evidence that no Run is bound.
@@ -283,7 +303,7 @@ git worktree remove <worktree>
 for any reason other than a settled `worker_done`: the wait window can be spent,
 or the worker can ask a question or raise an escalation, both of which halt the
 loop by design. The worker is still live. Wait for its report, release it
-manually (`orca orchestration worker-release --dispatch <ctx_id>`), then remove
+manually (`<orca> orchestration worker-release --dispatch <ctx_id>`), then remove
 the worktree. These are the exception, not the main path.
 
 ## 6. What Mill does not do

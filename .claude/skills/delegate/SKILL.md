@@ -12,7 +12,7 @@ description: >-
 
 Dispatching work through Orca's orchestration CLI is what establishes your
 identity: `[Mill · Product Engineer] coordinator — you delegate and verify; you
-do not write implementation code. Dispatch with orca orchestration
+do not write implementation code. Dispatch with <orca> orchestration
 worker-start; verify with .mill/checks/mill-verify.`
 Workers execute and report; you sequence work. Read `.mill/roles/COMMON.md`
 first, then the worker's own `ROLE.md`.
@@ -94,8 +94,8 @@ waiting, releasing and reading a worker are Orca's surface and change between
 releases.
 
 ```
-orca skills get orca-cli
-orca skills get orchestration
+<orca> skills get orca-cli
+<orca> skills get orchestration
 ```
 
 The guide owns, by name:
@@ -120,18 +120,18 @@ verifies or lands, which remain the coordinator's own steps (section 5).
 
 `mill-dispatch` blocks until the worker settles. The coordinator must not solve
 that by backgrounding it in its own shell: a background job of the harness is
-invisible to `orca terminal list`, is unreadable with `orca terminal read`, and
+invisible to `<orca> terminal list`, is unreadable with `<orca> terminal read`, and
 dies with the session — and when it dies, the worker it was supervising is
 never released. The supervisor runs as an Orca terminal:
 
 ```
-orca terminal create --worktree path:<project-root> \
+<orca> terminal create --worktree path:<project-root> \
     --title "SUPERVISOR <slug>" \
-    --command "orca orchestration run-use --id <run_id> && .mill/checks/mill-dispatch --brief <file> --role <role> ..."
+    --command "<orca> orchestration run-use --id <run_id> && .mill/checks/mill-dispatch --brief <file> --role <role> ..."
 ```
 
-A supervisor hosted that way appears in `orca terminal list`, is readable with
-`orca terminal read`, and survives the coordinator's session.
+A supervisor hosted that way appears in `<orca> terminal list`, is readable with
+`<orca> terminal read`, and survives the coordinator's session.
 
 The `run-use` is not optional and is the part that is easy to miss. A Run is
 bound per terminal, so a freshly created terminal has none, and `task-create`
@@ -155,7 +155,7 @@ worker within one slice and stops. The single wall-clock deadline from
 `--timeout-ms` is unchanged and remains the sole source of truth for "time is
 up".
 
-After creating the supervisor, the coordinator launches `orca terminal wait
+After creating the supervisor, the coordinator launches `<orca> terminal wait
 --terminal <handle> --for exit` so it is woken when the dispatch ends instead
 of polling. The supervisor renames its own tab on every exit to encode the
 verdict (`done`, `dead`, `parked`, `uncommitted`, `timeout`, `failed`), so a
@@ -183,7 +183,7 @@ Every brief that worked has the same five parts. Write them in order:
    `git diff --stat`, which several briefs have used, passes identically on an
    uncommitted tree and cannot tell the two apart.
 5. **Raise a hand.** The line a worker sends when the brief is unclear:
-   `orca orchestration send --type question --subject "<short>" --body "<q>" --task-id <task-id> --dispatch-id <dispatch-id>`.
+   `<orca> orchestration send --type question --subject "<short>" --body "<q>" --task-id <task-id> --dispatch-id <dispatch-id>`.
    A question is tied to its dispatch by the sender's own terminal —
    `mill-verify --dispatch` resolves the handle from the dispatch record, and
    a payload-less question carries nothing else. `--task-id` and

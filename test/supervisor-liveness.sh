@@ -44,6 +44,11 @@ cp "$repo/.mill/agents.example"        "$tmp/.mill/agents"
 # Stub mill-liveness: its exit code is read from $state/liveness_rc, so each
 # scenario configures the verdict it wants. Its stdout is the evidence the
 # script reports.
+# mill-liveness is sourced by common.sh which sets ORCA_CLI; it then calls
+# $ORCA_CLI orchestration worker-show. The stub orca is on PATH. mill-liveness
+# itself must be an ELF binary (not `#!`) or the screen-reader guard in any
+# future gate that would source it would refuse — but mill-liveness is invoked
+# directly by mill-dispatch, not resolved, so a script stub is fine here.
 cat > "$checks/mill-liveness" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -68,8 +73,11 @@ printf '%s' "0" > "$state/release_called"
 printf '%s' "30" > "$state/liveness_rc"   # default: dead worker
 
 # The stub orca. It is the only `orca` on PATH for the run.
-mkdir -p "$tmp/bin"
-cat > "$tmp/bin/orca" <<'STUB'
+# mill-preflight refuses any executable beginning with `#!` (it is the
+# screen reader, not Orca), so the stub must be a real ELF binary: a small
+# C wrapper that execs the bash logic.
+mkdir -p "$tmp/bin" "$tmp/stub"
+cat > "$tmp/stub/orca.sh" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 state="${ORCA_STUB_STATE:?ORCA_STUB_STATE not set}"
@@ -124,10 +132,40 @@ case "$1" in
         ;;
 esac
 STUB
+chmod +x "$tmp/stub/orca.sh"
+
+# Compile a tiny ELF wrapper that execs the bash stub. The wrapper's first two
+# bytes are the ELF magic, not `#!`, so the screen-reader guard lets it through.
+export ORCA_STUB_BIN="$tmp/stub/orca.sh"
+cat > "$tmp/stub/orca.c" <<'EOF'
+#include <unistd.h>
+int main(int argc, char *argv[]) {
+    argv[0] = "orca";
+    execv("/tmp/stub/orca_placeholder", argv);
+    return 127;
+}
+EOF
+# We can't know the temp dir at compile time, so write a dispatcher that
+# reads the real path from the environment.
+cat > "$tmp/stub/orca.c" <<'EOF'
+#include <unistd.h>
+#include <stdlib.h>
+int main(int argc, char *argv[]) {
+    char *path = getenv("ORCA_STUB_BIN");
+    if (!path) { return 127; }
+    argv[0] = "orca";
+    execv(path, argv);
+    return 127;
+}
+EOF
+cc -o "$tmp/bin/orca" "$tmp/stub/orca.c"
 chmod +x "$tmp/bin/orca"
 
 mill_dispatch="$checks/mill-dispatch"
-stub_env="PATH=$tmp/bin:$PATH ORCA_STUB_STATE=$state ORCA_TERMINAL_HANDLE=term_test_handle"
+# ORCA_WORKSPACE_ID simulates an Orca-managed terminal: the resolver then
+# selects bare `orca` (found via the stub on PATH) instead of `orca-ide` (the
+# screen reader that the screen-reader guard would refuse).
+stub_env="PATH=$tmp/bin:$PATH ORCA_STUB_STATE=$state ORCA_TERMINAL_HANDLE=term_test_handle ORCA_WORKSPACE_ID=ws_test"
 
 # Per-run wall-clock bound, in seconds. Comfortably above a healthy run (which
 # finishes in well under a second because the stub returns immediately) but far

@@ -61,6 +61,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Resolve the Orca CLI executable early: check_dispatch_mailbox (step 0) runs
+# before the gauntlet and uses it. Source common.sh first so resolve_orca is
+# available.
+here="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=common.sh
+source "$here/common.sh"
+resolve_orca
+
 # --- 0. Dispatch mailbox check (--dispatch) ----------------------------------
 # Runs before the gauntlet and before worktree validation, so a coordinator can
 # interrogate a dispatch's mailbox without a worktree. `inbox` is used rather
@@ -68,8 +76,8 @@ done
 check_dispatch_mailbox() {
     local ctx="$1"
     local inbox_json
-    if ! inbox_json="$(orca orchestration inbox --json --limit 1000 2>/dev/null)"; then
-        echo "mill-verify: warning: cannot read the orchestration mailbox (orca orchestration inbox failed)" >&2
+    if ! inbox_json="$($ORCA_CLI orchestration inbox --json --limit 1000 2>/dev/null)"; then
+        echo "mill-verify: warning: cannot read the orchestration mailbox ($ORCA_CLI orchestration inbox failed)" >&2
         return 0
     fi
 
@@ -78,11 +86,11 @@ check_dispatch_mailbox() {
     # the terminal handle is the only link back to the dispatch. worker-list
     # maps ctx -> task; dispatch-show maps task -> the assignee terminal.
     local terminal="" task_id
-    task_id="$(orca orchestration worker-list --json 2>/dev/null | jq -r --arg c "$ctx" '
+    task_id="$($ORCA_CLI orchestration worker-list --json 2>/dev/null | jq -r --arg c "$ctx" '
         [ .result.workers[] | select(.dispatchId == $c) | .taskId ] | .[0] // empty
     ' 2>/dev/null)"
     if [[ -n "$task_id" ]]; then
-        terminal="$(orca orchestration dispatch-show --task "$task_id" --json 2>/dev/null | jq -r '.result.dispatch.assignee_handle // empty' 2>/dev/null)"
+        terminal="$($ORCA_CLI orchestration dispatch-show --task "$task_id" --json 2>/dev/null | jq -r '.result.dispatch.assignee_handle // empty' 2>/dev/null)"
     fi
 
     # A message belongs to this dispatch when the ctx id appears in its payload
@@ -184,11 +192,9 @@ if [[ ! -d "$project_root" ]]; then
     exit 1
 fi
 
-# Resolve the checks' own directory before moving into the worktree: the
-# role definitions read from the install root (where these checks live);
-# the worktree's copy must never be picked up instead. Resolving after
-# `cd "$worktree"` would do exactly that.
-here="$(cd "$(dirname "$0")" && pwd)"
+# role-enforce resolves from the checks' own directory, already captured in
+# $here above (before any cd into the worktree). The worktree's copy must
+# never be picked up instead.
 role_enforce="$here/role-enforce"
 if [[ ! -x "$role_enforce" ]]; then
     echo "error: role-enforce not found next to mill-verify" >&2
@@ -250,8 +256,8 @@ fi
 # configured, load_gauntlet says so and skips the steps — a project with no
 # gauntlet config fails nothing, like the hooks did. Role enforcement below
 # is independent and always runs.
-# shellcheck source=common.sh
-source "$here/common.sh"
+# common.sh was sourced above (before step 0), so load_gauntlet and run_step
+# are already available.
 
 load_gauntlet "$project_root"
 run_step build

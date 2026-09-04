@@ -129,16 +129,26 @@ chmod +x "$tmp/bin/orca"
 mill_dispatch="$checks/mill-dispatch"
 stub_env="PATH=$tmp/bin:$PATH ORCA_STUB_STATE=$state ORCA_TERMINAL_HANDLE=term_test_handle"
 
+# Per-run wall-clock bound, in seconds. Comfortably above a healthy run (which
+# finishes in well under a second because the stub returns immediately) but far
+# below the dispatch deadline: a script-under-test that never stops waiting —
+# the exact defect this suite asserts against — is killed fast instead of
+# hanging CI forever. Exit 124 from `timeout` is treated as a failure naming
+# the case.
+RUN_BOUND_SECS=15
+
 # run_dispatch runs the script-under-test with the given liveness exit code,
 # returning its output in $out, its exit code in $rc, and the elapsed
-# wall-clock milliseconds in $elapsed_ms.
+# wall-clock milliseconds in $elapsed_ms. If the script does not stop within
+# the per-run bound, `timeout` kills it with exit 124; callers treat that as
+# a failure naming the case (the script under test never stopped waiting).
 run_dispatch() {
     local liveness_rc="${1:-30}"
     printf '%s' "$liveness_rc" > "$state/liveness_rc"
     printf '%s' "0" > "$state/check_count"
     printf '%s' "0" > "$state/release_called"
     start_ms="$(date +%s%3N)"
-    if out="$(env $stub_env "$mill_dispatch" \
+    if out="$(env $stub_env timeout "$RUN_BOUND_SECS" "$mill_dispatch" \
             --brief "$brief" \
             --role product-engineer \
             --agent command-code \
@@ -154,6 +164,18 @@ run_dispatch() {
     elapsed_ms=$((end_ms - start_ms))
 }
 
+# run_dispatch_halted prints a timeout-failure message for the named case when
+# `run_dispatch` was killed by the bound (exit 124). Returns 1 on timeout.
+run_dispatch_halted() {
+    local case="$1"
+    if [[ "$rc" -eq 124 ]]; then
+        echo "FAIL [$case]: script under test did not stop within ${RUN_BOUND_SECS}s — it never stopped waiting." >&2
+        echo "$out" >&2
+        return 1
+    fi
+    return 0
+}
+
 failures=0
 
 # --- Scenario 1: a dead worker stops the loop within one slice ---------------
@@ -163,6 +185,9 @@ failures=0
 # check --wait returns immediately (count 0), so the elapsed time is dominated
 # by the probe and is well under the deadline.
 run_dispatch 30
+if ! run_dispatch_halted dead; then
+    failures=1
+fi
 if [[ "$rc" -eq 0 ]]; then
     echo "FAIL [dead]: expected non-zero exit (dead worker must not release), got exit 0" >&2
     echo "$out" >&2
@@ -195,7 +220,7 @@ printf '%s' "0" > "$state/liveness_rc"
 printf '%s' "0" > "$state/check_count"
 printf '%s' "0" > "$state/release_called"
 start_ms="$(date +%s%3N)"
-if out="$(env $stub_env "$mill_dispatch" \
+if out="$(env $stub_env timeout "$RUN_BOUND_SECS" "$mill_dispatch" \
         --brief "$brief" \
         --role product-engineer \
         --agent command-code \
@@ -209,6 +234,11 @@ else
 fi
 end_ms="$(date +%s%3N)"
 elapsed_ms=$((end_ms - start_ms))
+if [[ "$rc" -eq 124 ]]; then
+    echo "FAIL [working]: script under test did not stop within ${RUN_BOUND_SECS}s — it never stopped waiting." >&2
+    echo "$out" >&2
+    failures=1
+fi
 if [[ "$rc" -eq 0 ]]; then
     echo "FAIL [working]: expected non-zero exit (deadline spent, no settlement), got exit 0" >&2
     echo "$out" >&2
@@ -242,7 +272,7 @@ printf '%s' "2" > "$state/liveness_rc"
 printf '%s' "0" > "$state/check_count"
 printf '%s' "0" > "$state/release_called"
 start_ms="$(date +%s%3N)"
-if out="$(env $stub_env "$mill_dispatch" \
+if out="$(env $stub_env timeout "$RUN_BOUND_SECS" "$mill_dispatch" \
         --brief "$brief" \
         --role product-engineer \
         --agent command-code \
@@ -256,6 +286,11 @@ else
 fi
 end_ms="$(date +%s%3N)"
 elapsed_ms=$((end_ms - start_ms))
+if [[ "$rc" -eq 124 ]]; then
+    echo "FAIL [unresolvable]: script under test did not stop within ${RUN_BOUND_SECS}s — it never stopped waiting." >&2
+    echo "$out" >&2
+    failures=1
+fi
 if [[ "$rc" -eq 0 ]]; then
     echo "FAIL [unresolvable]: expected non-zero exit (deadline spent), got exit 0" >&2
     echo "$out" >&2
@@ -275,6 +310,10 @@ fi
 # worker-release. Scenario 1 already covered 30; here we check 10 and 40.
 for verdict_rc in 10 40; do
     run_dispatch "$verdict_rc"
+    if ! run_dispatch_halted "verdict $verdict_rc"; then
+        failures=1
+        continue
+    fi
     release_called="$(cat "$state/release_called")"
     if [[ "$release_called" -ne 0 ]]; then
         echo "FAIL [verdict $verdict_rc]: worker-release was called — release rule violated" >&2

@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# mill-liveness — is this dispatch's worker working, finished, parked, sitting on uncommitted work, or dead?
+#
+# The five states are distinct because the actions they call for are different.
+# UNCOMMITTED (frozen cursor, zero commits, dirty tree) must never share a
+# verdict with DEAD (frozen cursor, zero commits, clean tree): one gets a nudge,
+# the other gets buried. Collapsing them was the prototype's first bug, and both
+# live workers on the day this was written were UNCOMMITTED.
+#
+# A quiet terminal is not evidence of death: a finished agent at its prompt and
+# a crashed one read identically. The verdict rests on facts the agent does not
+# narrate — Orca's agentWait evidence and the worktree's git state — never on
+# Orca's own dispatch.status, which reports "failed" for healthy workers and
+# "completed" for ones that committed nothing (#177).
+#
+#   mill-liveness --dispatch <ctx_id> [--interval <seconds>]
+#
+# Exit: 0 working, 10 finished, 20 parked on a human prompt, 30 dead,
+#       40 uncommitted work, 2 usage or unresolvable.
+
+set -uo pipefail
+
+dispatch=""
+interval=30
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dispatch)  dispatch="${2:-}"; shift 2 ;;
+        --interval)  interval="${2:-}"; shift 2 ;;
+        *) echo "usage: mill-liveness --dispatch <ctx_id> [--interval <seconds>]" >&2; exit 2 ;;
+    esac
+done
+[[ -n "$dispatch" ]] || { echo "usage: mill-liveness --dispatch <ctx_id> [--interval <seconds>]" >&2; exit 2; }
+
+show="$(orca orchestration worker-show --dispatch "$dispatch" --json 2>/dev/null)" || true
+terminal="$(printf '%s' "$show" | jq -r '.result.worker.agent_terminal_handle // empty')"
+# worker-show does NOT return the worktree path (.result.worker.worktree_path
+# is null); it comes from orca terminal list, matched on the handle above.
+worktree="$(orca terminal list --json 2>/dev/null | jq -r --arg t "$terminal" '.result.terminals[]? | select(.handle==$t) | .worktreePath // empty')" || true
+
+# agentWait: Orca already knows about a worker parked on a prompt only a human
+# can answer. Null means it looked and found none; an absent field means it never
+# looked, which is not the same as "not waiting".
+wait_ev="$(printf '%s' "$show" | jq -c '.result.observation.agentWait // empty')"
+
+# dispatch.status is reported for the operator and never used to decide: Orca's
+# own status field reports "failed" for a healthy worker and "completed" for one
+# that committed nothing, sometimes in the same ten minutes (#177). Not evidence.
+status="$(printf '%s' "$show" | jq -r '.result.dispatch.status // "unknown"')"
+
+if [[ -z "$terminal" ]]; then
+    echo "mill-liveness: no agent terminal handle for $dispatch — cannot judge." >&2
+    exit 2
+fi
+
+echo "dispatch  $dispatch"
+echo "terminal  $terminal"
+echo "worktree  ${worktree:-<unknown>}"
+echo "status    $status   (Orca's own verdict — it reports failed for healthy workers and completed for empty ones; not evidence, see #177)"
+
+# 1. Orca already knows about a worker parked on a prompt only a human can
+#    answer. Null means it looked and found none; absent means it never looked,
+#    which is not the same as "not waiting".
+if [[ -n "$wait_ev" && "$wait_ev" != "null" ]]; then
+    echo "VERDICT   PARKED — waiting on a human prompt"
+    echo "evidence  $wait_ev"
+    exit 20
+fi
+
+cursor_of() {
+    orca terminal read --terminal "$1" --limit 1 --json 2>/dev/null \
+        | jq -r '.result.terminal.latestCursor // empty'
+}
+
+c1="$(cursor_of "$terminal")"
+sleep "$interval"
+c2="$(cursor_of "$terminal")"
+echo "cursor    $c1 -> $c2 over ${interval}s"
+
+if [[ -z "$c1" || -z "$c2" ]]; then
+    echo "mill-liveness: terminal read returned no cursor — cannot judge." >&2
+    exit 2
+fi
+
+if [[ "$c2" != "$c1" ]]; then
+    echo "VERDICT   WORKING — cursor advanced"
+    exit 0
+fi
+
+# 2. Frozen. The worktree is the arbiter: it is the one fact the agent cannot
+#    narrate its way around.
+if [[ -n "$worktree" && -d "$worktree" ]]; then
+    commits="$(git -C "$worktree" log --oneline main..HEAD 2>/dev/null | wc -l)"
+    dirty="$(git -C "$worktree" status --short 2>/dev/null | wc -l)"
+    echo "worktree  $commits commit(s) ahead of main, $dirty uncommitted path(s)"
+else
+    commits=0; dirty=0
+    echo "worktree  <missing> — treating as no work produced"
+fi
+
+echo "tail:"
+orca terminal read --terminal "$terminal" --screen --json 2>/dev/null \
+    | jq -r '.result.terminal.tail[]? // empty' | grep -v '^[[:space:]]*$' | tail -4
+
+if [[ "$commits" -gt 0 ]]; then
+    echo "VERDICT   FINISHED — cursor frozen and work is committed"
+    exit 10
+fi
+
+# Frozen with an uncommitted tree is not death. It is the most common way a
+# worker ends: it did the work, reported done, and never committed (#214).
+# It needs a nudge, not a burial — and the two must never share a verdict,
+# because the actions they call for are opposite.
+if [[ "$dirty" -gt 0 ]]; then
+    echo "VERDICT   UNCOMMITTED — work produced, nothing committed; nudge it to commit"
+    exit 40
+fi
+
+echo "VERDICT   DEAD — cursor frozen, nothing produced, nothing committed"
+exit 30

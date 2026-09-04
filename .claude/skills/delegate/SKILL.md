@@ -118,6 +118,34 @@ Mill's own dispatch loop is one command:
 It sequences preflight → task → worker → wait → report → release; it never
 verifies or lands, which remain the coordinator's own steps (section 5).
 
+`mill-dispatch` blocks until the worker settles. The coordinator must not solve
+that by backgrounding it in its own shell: a background job of the harness is
+invisible to `orca terminal list`, is unreadable with `orca terminal read`, and
+dies with the session — and when it dies, the worker it was supervising is
+never released. The supervisor runs as an Orca terminal:
+
+```
+orca terminal create --worktree path:<project-root> \
+    --title "SUPERVISOR <slug>" \
+    --command "orca orchestration run-use --id <run_id> && .mill/checks/mill-dispatch --brief <file> --role <role> ..."
+```
+
+A supervisor hosted that way appears in `orca terminal list`, is readable with
+`orca terminal read`, and survives the coordinator's session.
+
+The `run-use` is not optional and is the part that is easy to miss. A Run is
+bound per terminal, so a freshly created terminal has none, and `task-create`
+refuses before anything is created:
+
+    mill-dispatch: task-create failed:
+      "code": "run_required",
+      "message": "No Run is bound. Use orchestration run-create or run-use first.
+                  No effects were applied."
+
+That failure is clean — no task, no worktree, no worker — but it is silent
+unless the coordinator reads the supervisor terminal, which is the habit this
+section exists to establish.
+
 ## 4. Brief structure
 
 Every brief that worked has the same five parts. Write them in order:
@@ -129,7 +157,16 @@ Every brief that worked has the same five parts. Write them in order:
    a DO NOT conflict, DO NOT wins and the worker raises a hand.** State this
    in the brief — prohibitions cost real time when omitted.
 4. **Acceptance criteria.** Numbered. Each is a runnable command whose raw
-   output the worker pastes. Max 9. Countable — never adjectives.
+   output the worker pastes. Max 9. Countable — never adjectives. Every brief
+   carries these two commands verbatim as its last acceptance criterion:
+
+   ```
+   git log --oneline main..HEAD    # at least one commit
+   git status --short              # empty
+   ```
+
+   `git diff --stat`, which several briefs have used, passes identically on an
+   uncommitted tree and cannot tell the two apart.
 5. **Raise a hand.** The line a worker sends when the brief is unclear:
    `orca orchestration send --type question --subject "<short>" --body "<q>" --task-id <task-id> --dispatch-id <dispatch-id>`.
    A question is tied to its dispatch by the sender's own terminal —
@@ -144,6 +181,16 @@ Reference files rather than inlining their content. A worker given its
 Before dispatching, run `mill-preflight --brief <role> <path>...` with the paths the brief asks the worker to write.
 
 ## 5. Verify and land
+
+Before `mill-verify`, run `mill-liveness` and refuse to judge any worktree with
+zero commits ahead of `main`, whatever the worker's report says:
+
+    .mill/checks/mill-liveness --dispatch <ctx_id>
+
+Exit 0 working, 10 finished, 20 parked on a human prompt, 30 dead, 40 sitting
+on uncommitted work, 2 usage or unresolvable. This check does not depend on the
+worker having read anything — it reads the worktree's git state and the
+terminal's cursor directly — which is why it is the one that matters (#214).
 
 ```
 .mill/checks/mill-verify --project-root <path> --worktree <path> --role <role> --files-modified "<list>"

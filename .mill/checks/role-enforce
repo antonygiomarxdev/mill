@@ -203,17 +203,54 @@ enforce_file() {
     fi
     ext_lc=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
 
-    for a in $allowed; do
-        if [[ "$a" == "$ext_lc" ]]; then
-            return 0
-        fi
-        # A list entry may also be an exact basename. Match only the full
-        # basename — never a path, never a prefix, never a glob — so that an
-        # entry like `role-capabilities` cannot match `my-role-capabilities`
-        # or `role-capabilities.example`. A leading dot stays part of the
-        # entry, so `.gitignore` matches `.gitignore` and nothing else.
-        if [[ "$a" == "$base" ]]; then
-            return 0
+    # A list entry may name a file in one of three forms; the entry's own
+    # characters decide which, checked in this order:
+    #
+    #   1. Contains `/` — a glob matched against the file's repo-relative
+    #      path, exactly as it was passed in: `test/*.sh` allows
+    #      `test/role-tests-category.sh` and nothing outside test/. The
+    #      `[[ x == pattern ]]` globs let `*` cross `/`, so `*/__tests__/*`
+    #      reaches a __tests__ directory at any depth and `**` buys nothing.
+    #
+    #   2. Contains `*` but no `/` — a glob matched against the basename:
+    #      `*.test.*` allows `collections.test.ts` without letting the glob
+    #      reach the directories around it.
+    #
+    #   3. Contains neither — today's behaviour exactly: an extension if it
+    #      starts with `.`, an exact basename otherwise. Literal stays
+    #      literal — never a path, never a prefix, never a glob — so an
+    #      entry like `role-capabilities` cannot match `my-role-capabilities`
+    #      or `role-capabilities.example`. A leading dot stays part of the
+    #      entry, so `.gitignore` matches `.gitignore` and nothing else.
+    # Read the pattern list into an array without pathname expansion. A bare
+    # `for a in $allowed` would word-split AND let bash glob each pattern
+    # against the current working directory before the loop saw it, so
+    # `test/*.sh` became whatever test files happened to exist where the gate
+    # was invoked — a verdict that depends on the caller's cwd (the same
+    # class as the #195 rule above). `read -a` splits on IFS and globs
+    # nothing; each element below is still pattern-matched because `$a` stays
+    # unquoted on the right of `==`.
+    local -a allowed_arr
+    read -r -a allowed_arr <<< "$allowed"
+    for a in "${allowed_arr[@]}"; do
+        if [[ "$a" == */* ]]; then
+            # Form 1: repo-relative path glob.
+            if [[ "$file" == $a ]]; then
+                return 0
+            fi
+        elif [[ "$a" == *"*"* ]]; then
+            # Form 2: basename glob.
+            if [[ "$base" == $a ]]; then
+                return 0
+            fi
+        else
+            # Form 3: literal extension (case-insensitive) or exact basename.
+            if [[ "$a" == "$ext_lc" ]]; then
+                return 0
+            fi
+            if [[ "$a" == "$base" ]]; then
+                return 0
+            fi
         fi
     done
 

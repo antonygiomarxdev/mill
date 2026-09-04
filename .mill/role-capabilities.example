@@ -1,9 +1,9 @@
 # role-capabilities — maps a role's declared capabilities to file patterns.
 #
-# Roles declare categories (code, docs, config, policy, scripts, design) in the
-# allowed_files field of their ROLE.md. This file says what those mean HERE.
-# Mill ships no default: a project's languages are its own, and guessing them
-# is how the roles ended up hardcoded to .go.
+# Roles declare categories (code, docs, config, tests, policy, scripts,
+# design) in the allowed_files field of their ROLE.md. This file says what
+# those mean HERE. Mill ships no default: a project's languages are its own,
+# and guessing them is how the roles ended up hardcoded to .go.
 #
 # Uncomment and edit for your stack. Examples, not defaults:
 #
@@ -12,19 +12,26 @@
 #   code=".rs"                           # Rust
 #   code=".go"                           # Go
 #   code=".kt .java"                     # JVM
+#   tests="*.test.* *.spec.* */__tests__/*"   # a file is a test by its path
 #
 # Without this file role-enforce blocks everything and says so. That is
 # deliberate: a capability gate that fails open is not a gate.
 
 code=""
 docs=".md"
-# A list entry may be an extension or an exact filename. Extensions are
-# matched case-insensitively against the file's last component; an exact
-# filename is matched only against the file's basename, so `role-capabilities`
-# matches `role-capabilities` and nothing else (not `my-role-capabilities`,
-# not `role-capabilities.example`). `.gitignore` keeps its leading dot so the
-# matcher can tell a hidden-file basename from an extension.
+# A list entry may be one of three forms (see .mill/checks/role-enforce):
+# an extension (`.md`, matched case-insensitively against the file's last
+# component), an exact filename, a basename glob (`*.test.*`), or a
+# repo-relative path glob (`test/*.sh`, `*/__tests__/*`). Literal entries
+# match exactly: `role-capabilities` matches `role-capabilities` and nothing
+# else — not `my-role-capabilities`, not `role-capabilities.example`.
+# `.gitignore` keeps its leading dot so the matcher can tell a hidden-file
+# basename from an extension. A test file is a fact about its path, so tests
+# is a path-shaped category: `*/__tests__/*` covers a __tests__ directory at
+# any depth, `*.test.*`/`*.spec.*` the infixed names, and a project should
+# add the path its own test suite actually lives at (here: `test/*.sh`).
 config=".yml .yaml .json .toml .gitignore"
+tests="test/*.sh */__tests__/* *.test.* *.spec.*"
 policy=".md .sh .example role-capabilities"
 scripts=".sh"
 design=".pen .fig"

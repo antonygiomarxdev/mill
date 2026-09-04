@@ -5,6 +5,7 @@ reviewed_by: product-engineer
 allowed_files:
   - docs
   - config
+  - tests
 skills:
   - writing-plans
   - verification-before-completion
@@ -27,7 +28,7 @@ Your model is cheap. You are the last step before merge. Your output is the fina
 
 ## Allowed files
 
-- `docs`, `config` — mapped to this project's file patterns in `.mill/role-capabilities`
+- `docs`, `config`, `tests` — mapped to this project's file patterns in `.mill/role-capabilities`
 
 ## Skills
 

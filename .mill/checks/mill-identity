@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# mill-identity — print the coordinator identity and the resolved Orca CLI.
+#
+# The UserPromptSubmit hook calls this so the agent knows two things at the
+# start of every turn: the static identity lines from .mill/IDENTITY.md, and
+# the Orca CLI executable resolved for THIS machine. The second fact matters
+# because the name differs by platform and environment (orca on macOS and
+# inside an Orca terminal, orca-ide on Linux outside one, orca-dev in a dev
+# checkout) — the agent must not hardcode a single name.
+#
+# .mill/IDENTITY.md is the source of the static lines; this script prints it
+# verbatim, then appends one line naming the executable resolve_orca selected.
+# The IDENTITY.md is read from the CURRENT directory (not the script's), so
+# the behaviour matches the hook it replaces (`cat .mill/IDENTITY.md`): when
+# the caller is outside a Mill project there is no such file, and the script
+# prints nothing and exits 0.
+#
+# This script works standalone: it sources common.sh from its own directory,
+# so it does not depend on .claude/settings.json pointing at it. A follow-up
+# dispatch flips the hook; this script must work before that happens and after.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "$here/common.sh"
+
+# IDENTITY.md is read from the current directory, matching the old hook
+# (`cat .mill/IDENTITY.md 2>/dev/null`): the hook injects identity for the
+# project the session is working in, not for the directory the checks live in.
+identity=".mill/IDENTITY.md"
+if [[ ! -f "$identity" ]]; then
+    # Outside a Mill project: stay silent, like the old `cat ... || true`.
+    exit 0
+fi
+
+cat "$identity"
+
+resolve_orca
+echo "Orca CLI executable for this machine: $ORCA_CLI"

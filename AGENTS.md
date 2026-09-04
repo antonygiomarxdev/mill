@@ -9,8 +9,8 @@ is the Product Engineer (`.mill/roles/product-engineer/ROLE.md`).
 Orca owns dispatch, messaging, waiting and release. Load both guides by name
 before any dispatch command; Mill does not restate them:
 
-    orca skills get orca-cli
-    orca skills get orchestration
+    <orca> skills get orca-cli
+    <orca> skills get orchestration
 
 ## Coordinator procedure
 

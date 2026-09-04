@@ -33,6 +33,12 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# shellcheck source=common.sh
+source "$here/common.sh"
+
+# Resolve the Orca CLI executable once; every `orca` call below uses it.
+resolve_orca
+
 usage() {
     cat <<'EOF'
 usage: mill-dispatch --brief <file> --role <role> --agent <agent> --name <slug> \
@@ -105,7 +111,7 @@ verdict="failed"
 supervisor_handle="${ORCA_TERMINAL_HANDLE:-}"
 rename_to() {
     if [[ -n "$supervisor_handle" ]]; then
-        orca terminal rename --terminal "$supervisor_handle" --title "$1" >/dev/null 2>&1 || true
+        $ORCA_CLI terminal rename --terminal "$supervisor_handle" --title "$1" >/dev/null 2>&1 || true
     fi
 }
 trap 'rename_to "$verdict $slug"' EXIT
@@ -145,7 +151,7 @@ fi
 # --- 2. Create the task from the brief file ---------------------------------
 spec="$(<"$brief")"
 echo "mill-dispatch: creating task: $title"
-if ! task_json="$(orca orchestration task-create --spec "$spec" --task-title "$title" --json 2>/dev/null)"; then
+if ! task_json="$($ORCA_CLI orchestration task-create --spec "$spec" --task-title "$title" --json 2>/dev/null)"; then
     echo "mill-dispatch: task-create failed:" >&2
     printf '%s\n' "$task_json" >&2
     exit 1
@@ -164,7 +170,7 @@ echo "mill-dispatch: task $task_id"
 # A failed or unknown start exits non-zero; its receipt is parsed for the
 # dispatch id and the failure signal instead of being dropped.
 echo "mill-dispatch: starting worker (agent=$agent, worktree=$slug)"
-start_json="$(orca orchestration worker-start \
+start_json="$($ORCA_CLI orchestration worker-start \
         --task "$task_id" \
         --worktree new-top-level \
         --name "$slug" \
@@ -206,7 +212,7 @@ if [[ "$start_state" != "ready" && "$start_last_error" == "agent_prompt_stalled"
 
     # The agent terminal handle comes from worker-show, the documented owner
     # field; it is not guessed from the start receipt.
-    show_json="$(orca orchestration worker-show --dispatch "$dispatch_id" --json 2>/dev/null || true)"
+    show_json="$($ORCA_CLI orchestration worker-show --dispatch "$dispatch_id" --json 2>/dev/null || true)"
     agent_terminal="$(printf '%s' "$show_json" | jq -r '.result.worker.agent_terminal_handle // empty' 2>/dev/null || true)"
     if [[ -z "$agent_terminal" ]]; then
         echo "mill-dispatch: worker-show returned no agent terminal handle; cannot submit." >&2
@@ -214,7 +220,7 @@ if [[ "$start_state" != "ready" && "$start_last_error" == "agent_prompt_stalled"
         exit 1
     fi
 
-    send_json="$(orca terminal send --terminal "$agent_terminal" --enter --json 2>/dev/null)" || send_rc=$?
+    send_json="$($ORCA_CLI terminal send --terminal "$agent_terminal" --enter --json 2>/dev/null)" || send_rc=$?
     send_rc="${send_rc:-0}"
     send_accepted="$(printf '%s' "$send_json" | jq -r '.result.send.accepted // empty' 2>/dev/null || true)"
     if [[ "$send_rc" -ne 0 || "$send_accepted" != "true" ]]; then
@@ -230,7 +236,7 @@ if [[ "$start_state" != "ready" && "$start_last_error" == "agent_prompt_stalled"
     # whether the worker is parked on a prompt only a human can answer
     # (observation.agentWait: absent = never evaluated, null = evaluated and
     # not waiting, object = waiting on a human).
-    show_json="$(orca orchestration worker-show --dispatch "$dispatch_id" --json 2>/dev/null || true)"
+    show_json="$($ORCA_CLI orchestration worker-show --dispatch "$dispatch_id" --json 2>/dev/null || true)"
     obs_status="$(printf '%s' "$show_json" | jq -r '.result.observation.status // empty' 2>/dev/null || true)"
     obs_exact="$(printf '%s' "$show_json" | jq -r '.result.observation.exactWorker // empty' 2>/dev/null || true)"
     if [[ "$obs_status" != "live" || "$obs_exact" != "true" ]]; then
@@ -272,8 +278,8 @@ elif [[ "$start_state" != "ready" ]]; then
             echo "mill-dispatch: the worker never reached its first turn — a stalled worker, not a slow one." >&2
             echo "mill-dispatch: trusting the workspace is the operator's security decision; this script will not answer." >&2
             echo "mill-dispatch: the operator sends the bare trust key (no --enter) to the worker terminal:" >&2
-            echo "  orca terminal send --text 'a'" >&2
-            echo "mill-dispatch: worker terminal handle: orca orchestration worker-show --dispatch $dispatch_id --json (worker.agent_terminal_handle)" >&2
+            echo "  $ORCA_CLI terminal send --text 'a'" >&2
+            echo "mill-dispatch: worker terminal handle: $ORCA_CLI orchestration worker-show --dispatch $dispatch_id --json (worker.agent_terminal_handle)" >&2
             printf '%s\n' "$start_json" >&2
             exit 1
         fi
@@ -345,7 +351,7 @@ while true; do
     # Between slices we run mill-liveness to detect a worker that died without
     # sending a message.
     wait_ms=$(( remaining_ms < slice_ms ? remaining_ms : slice_ms ))
-    delivery="$(orca orchestration check --wait --types worker_done,escalation,question --timeout-ms "$wait_ms" --json 2>/dev/null || true)"
+    delivery="$($ORCA_CLI orchestration check --wait --types worker_done,escalation,question --timeout-ms "$wait_ms" --json 2>/dev/null || true)"
 
     count="$(printf '%s' "$delivery" | jq -r '.result.count // 0' 2>/dev/null || true)"
     if [[ -n "$delivery" ]] && [[ "$count" =~ ^[0-9]+$ ]] && [[ "$count" -gt 0 ]]; then
@@ -370,7 +376,7 @@ while true; do
                     echo "--- question body (verbatim) ---" >&2
                     printf '%s\n' "$mbody" >&2
                     echo "--- end question body ---" >&2
-                    echo "mill-dispatch: answer with: orca orchestration reply --id $mid --body '<answer>'" >&2
+                    echo "mill-dispatch: answer with: $ORCA_CLI orchestration reply --id $mid --body '<answer>'" >&2
                     echo "mill-dispatch: worker NOT released." >&2
                     exit 1
                     ;;
@@ -487,12 +493,12 @@ if [[ "$settled" -ne 1 ]]; then
     # by a concurrent supervisor (#213) is invisible to check --wait but
     # sits in the inbox. dispatchId lives inside payload, which is a JSON
     # string needing a second parse.
-    if inbox_hits="$(orca orchestration inbox --json 2>/dev/null | jq -r --arg d "$dispatch_id" '.result.messages[]? | select((.payload//"{}"|fromjson?|.dispatchId)==$d) | "\(.type): \(.subject // "")"' 2>/dev/null)" && [[ -n "$inbox_hits" ]]; then
+    if inbox_hits="$($ORCA_CLI orchestration inbox --json 2>/dev/null | jq -r --arg d "$dispatch_id" '.result.messages[]? | select((.payload//"{}"|fromjson?|.dispatchId)==$d) | "\(.type): \(.subject // "")"' 2>/dev/null)" && [[ -n "$inbox_hits" ]]; then
         echo "mill-dispatch: inbox has a delivery for this dispatch that this supervisor never saw (see #213):" >&2
         echo "$inbox_hits" >&2
     fi
     echo "mill-dispatch: no settled worker_done for dispatch $dispatch_id; worker NOT released." >&2
-    echo "mill-dispatch: inspect with: orca orchestration worker-show --dispatch $dispatch_id" >&2
+    echo "mill-dispatch: inspect with: $ORCA_CLI orchestration worker-show --dispatch $dispatch_id" >&2
     exit 1
 fi
 
@@ -518,7 +524,7 @@ fi
 # Orca RPC errors are JSON on stdout (ok:false); stderr is discarded so the
 # receipt below is always parseable.
 echo "mill-dispatch: releasing worker for dispatch $dispatch_id"
-if release_out="$(orca orchestration worker-release --dispatch "$dispatch_id" --json 2>/dev/null)"; then
+if release_out="$($ORCA_CLI orchestration worker-release --dispatch "$dispatch_id" --json 2>/dev/null)"; then
     release_rc=0
 else
     release_rc=$?

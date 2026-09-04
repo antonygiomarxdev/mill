@@ -68,3 +68,41 @@ run_step() {
         fail "$stepname — run: $cmd"
     fi
 }
+
+# resolve_orca resolves the Orca CLI executable name once and caches it in
+# ORCA_CLI. The rule (from Orca's orchestration guide, measured on this box):
+#
+#   1. $ORCA_CLI_COMMAND when set — Orca exports it for managed WSL sessions.
+#   2. orca-dev when $ORCA_DEV_REPO_ROOT is set.
+#   3. Linux and no $ORCA_WORKSPACE_ID → orca-ide.
+#   4. Otherwise → orca.
+#
+# The bare name `orca` collides with GNOME's screen reader at /usr/bin/orca on
+# Linux; which one wins depends on PATH order. $ORCA_WORKSPACE_ID is set by Orca
+# in every terminal it manages, so its presence means this session is inside one
+# and bare `orca` is correct. Its absence on Linux means an ordinary terminal,
+# where `orca-ide` is the documented name.
+#
+# Resolution is lazy (first use), not at source time: a script that sources this
+# file in a context with no Orca must not fail merely for being sourced. A
+# failure names what it looked for.
+#
+# Step 5 — the screen-reader guard — lives in the caller (mill-preflight), not
+# here: this function resolves a name, it does not judge it. That keeps the
+# resolver pure and testable, and lets the refusal fire exactly once at the
+# gate that should stop a bad dispatch.
+resolve_orca() {
+    if [[ -n "${ORCA_CLI:-}" ]]; then
+        return 0
+    fi
+
+    if [[ -n "${ORCA_CLI_COMMAND:-}" ]]; then
+        ORCA_CLI="$ORCA_CLI_COMMAND"
+    elif [[ -n "${ORCA_DEV_REPO_ROOT:-}" ]]; then
+        ORCA_CLI="orca-dev"
+    elif [[ "$(uname -s)" == "Linux" && -z "${ORCA_WORKSPACE_ID:-}" ]]; then
+        ORCA_CLI="orca-ide"
+    else
+        ORCA_CLI="orca"
+    fi
+}

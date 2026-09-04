@@ -65,8 +65,11 @@ mkdir -p "$state"
 printf '%s' "0" > "$state/check_count"
 
 # The stub orca. It is the only `orca` on PATH for the run.
-mkdir -p "$tmp/bin"
-cat > "$tmp/bin/orca" <<'STUB'
+# mill-preflight refuses any executable beginning with `#!` (it is the
+# screen reader, not Orca), so the stub must be a real ELF binary: a small
+# C wrapper that execs the bash logic.
+mkdir -p "$tmp/bin" "$tmp/stub"
+cat > "$tmp/stub/orca.sh" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 state="${ORCA_STUB_STATE:?ORCA_STUB_STATE not set}"
@@ -128,11 +131,34 @@ case "$1" in
         ;;
 esac
 STUB
+chmod +x "$tmp/stub/orca.sh"
+
+# Compile a tiny ELF wrapper that execs the bash stub. The wrapper's first two
+# bytes are the ELF magic, not `#!`, so the screen-reader guard lets it through.
+cat > "$tmp/stub/orca.c" <<'EOF'
+#include <unistd.h>
+#include <stdlib.h>
+int main(int argc, char *argv[]) {
+    char *path = getenv("ORCA_STUB_BIN");
+    if (!path) path = "/tmp/stub/orca.sh";
+    argv[0] = "orca";
+    execv(path, argv);
+    return 127;
+}
+EOF
+# Fall back to the repo-local stub dir if ORCA_STUB_BIN is unset.
+if [[ -z "${ORCA_STUB_BIN:-}" ]]; then
+    export ORCA_STUB_BIN="$tmp/stub/orca.sh"
+fi
+cc -o "$tmp/bin/orca" "$tmp/stub/orca.c"
 chmod +x "$tmp/bin/orca"
 
 # Run the dispatch from the project dir ($tmp) with the stub on PATH.
 mill_dispatch="$checks/mill-dispatch"
-stub_env="PATH=$tmp/bin:$PATH ORCA_STUB_STATE=$state"
+# ORCA_WORKSPACE_ID simulates an Orca-managed terminal: the resolver then
+# selects bare `orca` (found via the stub on PATH) instead of `orca-ide` (the
+# screen reader that the screen-reader guard would refuse).
+stub_env="PATH=$tmp/bin:$PATH ORCA_STUB_STATE=$state ORCA_WORKSPACE_ID=ws_test"
 
 # run_dispatch runs the script-under-test, returning its output in $out and its
 # exit code in $rc — a set -e-safe capture.

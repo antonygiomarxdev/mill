@@ -20,6 +20,10 @@
 
 set -uo pipefail
 
+# shellcheck source=common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+resolve_orca
+
 dispatch=""
 interval=30
 while [[ $# -gt 0 ]]; do
@@ -31,11 +35,11 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$dispatch" ]] || { echo "usage: mill-liveness --dispatch <ctx_id> [--interval <seconds>]" >&2; exit 2; }
 
-show="$(orca orchestration worker-show --dispatch "$dispatch" --json 2>/dev/null)" || true
+show="$($ORCA_CLI orchestration worker-show --dispatch "$dispatch" --json 2>/dev/null)" || true
 terminal="$(printf '%s' "$show" | jq -r '.result.worker.agent_terminal_handle // empty')"
 # worker-show does NOT return the worktree path (.result.worker.worktree_path
 # is null); it comes from orca terminal list, matched on the handle above.
-worktree="$(orca terminal list --json 2>/dev/null | jq -r --arg t "$terminal" '.result.terminals[]? | select(.handle==$t) | .worktreePath // empty')" || true
+worktree="$($ORCA_CLI terminal list --json 2>/dev/null | jq -r --arg t "$terminal" '.result.terminals[]? | select(.handle==$t) | .worktreePath // empty')" || true
 
 # agentWait: Orca already knows about a worker parked on a prompt only a human
 # can answer. Null means it looked and found none; an absent field means it never
@@ -67,7 +71,7 @@ if [[ -n "$wait_ev" && "$wait_ev" != "null" ]]; then
 fi
 
 cursor_of() {
-    orca terminal read --terminal "$1" --limit 1 --json 2>/dev/null \
+    $ORCA_CLI terminal read --terminal "$1" --limit 1 --json 2>/dev/null \
         | jq -r '.result.terminal.latestCursor // empty'
 }
 
@@ -98,7 +102,7 @@ else
 fi
 
 echo "tail:"
-orca terminal read --terminal "$terminal" --screen --json 2>/dev/null \
+$ORCA_CLI terminal read --terminal "$terminal" --screen --json 2>/dev/null \
     | jq -r '.result.terminal.tail[]? // empty' | grep -v '^[[:space:]]*$' | tail -4
 
 if [[ "$commits" -gt 0 ]]; then

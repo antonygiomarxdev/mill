@@ -42,7 +42,7 @@ screen separates dead from alive. You cannot tell by looking.
 
 ### Signals that lie
 
-**Orca's dispatch record lies.** `orca orchestration worker-show --dispatch <id>`
+**Orca's dispatch record lies.** `<orca> orchestration worker-show --dispatch <id>`
 reports `dispatch.status` and `last_failure`, and they are not reliable. Verified
 against this session's own dispatch (`ctx_5d8ac89d52ee`): while the agent was running
 and producing output, the dispatch record reported `status: failed` with
@@ -51,7 +51,7 @@ healthy, and it never corrected itself after the agent recovered. Treat the disp
 record as metadata, never as proof of liveness.
 
 ```
-$ orca orchestration worker-show --dispatch ctx_5d8ac89d52ee --json
+$ <orca> orchestration worker-show --dispatch ctx_5d8ac89d52ee --json
 dispatch.status: failed
 dispatch.last_failure: agent_prompt_stalled
 worker.state: failed
@@ -79,10 +79,10 @@ Runnable check — read twice, then read the last content lines (copy this):
 
 ```
 # READ 1
-$ orca terminal read --terminal <handle> --json
+$ <orca> terminal read --terminal <handle> --json
 # wait at least 20 seconds — do NOT interact with the terminal
 # READ 2
-$ orca terminal read --terminal <handle> --json
+$ <orca> terminal read --terminal <handle> --json
 # compare result.terminal.tail between the two reads (did output advance?)
 # then read the LAST CONTENT LINE above the prompt — it tells you which state
 ```
@@ -91,11 +91,11 @@ Evidence from this session (terminal `term_79bc3a2c-61e6-4069-bd1a-cbd5a71f100a`
 the command-code agent). Two reads, 26 seconds apart:
 
 ```
-$ orca terminal read --terminal term_79bc3a2c-61e6-4069-bd1a-cbd5a71f100a --json
+$ <orca> terminal read --terminal term_79bc3a2c-61e6-4069-bd1a-cbd5a71f100a --json
 { status: running, tail: [ ... "❯ Ask your question...", ... ] }
                                             ^^^ 16:35:13
 
-$ orca terminal read --terminal term_79bc3a2c-61e6-4069-bd1a-cbd5a71f100a --json
+$ <orca> terminal read --terminal term_79bc3a2c-61e6-4069-bd1a-cbd5a71f100a --json
 { status: running, tail: [ ... "❯ Ask your question...", ... ] }
                                             ^^^ 16:37:39  (26s later)
 ```
@@ -148,7 +148,7 @@ uncommitted work. Trust the worktree over the agent's self-report.
 ### Recovery
 
 A 503'd session resumes if you send the literal text `continue` followed by an
-enter (`orca terminal send --terminal <handle> --text "continue"`). Verified by
+enter (`<orca> terminal send --terminal <handle> --text "continue"`). Verified by
 the operator: it resumes the stalled session. Note what it does **not** do: it does
 not fix the underlying provider. The 503 will come back until the provider recovers,
 so resuming is a stopgap, not a cure. If resuming does not get output moving again
@@ -434,7 +434,7 @@ the initial **workspace-trust prompt** — it is only needed on a first run in a
 untrusted workspace; for a read-only `-p` run it is redundant (observed: no trust
 prompt blocked these runs). Note: do **not** auto-answer a workspace-trust prompt
 interactively — in the Orca launcher that prompt is resolved by the operator
-sending the bare trust key (`orca terminal send --text 'a'`); see
+sending the bare trust key (`<orca> terminal send --text 'a'`); see
 `.mill/checks/mill-dispatch` (blockedReason `codex-trust-workspace`).
 
 `--permission-mode dont-ask` (a.k.a. `defaultMode:"dont-ask"` in
@@ -520,7 +520,7 @@ the repository):
 > accept `--model` at launch.
 
 `mill-dispatch` itself never passes `--model` — it calls
-`orca orchestration worker-start --task <id> --worktree new-top-level --name
+`<orca> orchestration worker-start --task <id> --worktree new-top-level --name
 <slug> --agent command-code --setup run --json` (see
 `.mill/checks/mill-dispatch` lines 149-155) and relies on Orca to reject any
 `--model` for this agent. (This skill does not run `worker-start` — workers never

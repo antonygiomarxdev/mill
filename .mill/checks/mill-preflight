@@ -18,6 +18,9 @@
 # below.
 set -euo pipefail
 
+# shellcheck source=common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+
 # --- argument parsing --------------------------------------------------------
 brief_mode=0
 brief_role=""
@@ -63,13 +66,36 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# 1. Orca must be reachable
-if ! orca status 2>/dev/null | grep -q "runtimeReachable: true"; then
-    echo "error: Orca is not running. Run 'orca open' first." >&2
+# 1. Resolve the Orca CLI executable and refuse the screen reader --------------
+# Resolve before the reachability check so the refusal can name the path we
+# actually tried. Step 5 of the resolution rule (see common.sh) is not optional:
+# whatever branch was taken, if the resolved executable's first two bytes are
+# `#!` rather than the ELF magic, it is the screen reader — refuse, loudly,
+# naming the path and the fix.
+resolve_orca
+
+orca_path="$(command -v "$ORCA_CLI" 2>/dev/null || true)"
+if [[ -z "$orca_path" ]]; then
+    echo "error: '$ORCA_CLI' not found on PATH — cannot reach Orca." >&2
+    echo "  resolve order: \$ORCA_CLI_COMMAND, then orca-dev (when \$ORCA_DEV_REPO_ROOT is set), then orca-ide on Linux outside an Orca terminal, then orca." >&2
+    echo "  fix: set ORCA_CLI_COMMAND to the absolute path of your Orca CLI, e.g. export ORCA_CLI_COMMAND=/home/ksante/.local/bin/orca" >&2
+    exit 1
+fi
+if [[ -f "$orca_path" ]] && head -c 2 "$orca_path" | grep -qFx '#!'; then
+    echo "error: '$ORCA_CLI' resolves to '$orca_path', which is a script (begins with '#!')." >&2
+    echo "  on Linux this is the GNOME Orca screen reader, not the Orca CLI." >&2
+    echo "  the wrong executable won because \$PATH orders '$orca_path' ahead of the real one." >&2
+    echo "  fix: set ORCA_CLI_COMMAND to the absolute path of your Orca CLI, e.g. export ORCA_CLI_COMMAND=/home/ksante/.local/bin/orca" >&2
     exit 1
 fi
 
-# 2. Must be inside a git work tree.
+# 2. Orca must be reachable
+if ! $ORCA_CLI status 2>/dev/null | grep -q "runtimeReachable: true"; then
+    echo "error: Orca is not running. Run '$ORCA_CLI open' first." >&2
+    exit 1
+fi
+
+# 3. Must be inside a git work tree.
 # This is a working-directory check, like the .mill/roles layout check below:
 # it judges the tree the coordinator is dispatching from, so it reads the
 # working directory — never mill_root. The role-definition reads in the
@@ -89,7 +115,7 @@ if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" != "true" ]]; then
     exit 1
 fi
 
-# 3. Must be in a Mill project
+# 4. Must be in a Mill project
 # This is a working-directory layout check, not a role-definition read: it
 # only asks whether the caller is inside a Mill project. The role definitions
 # that decide what a role may write resolve from mill_root in the --brief
@@ -99,7 +125,7 @@ if [[ ! -d .mill/roles ]]; then
     exit 1
 fi
 
-# 4. --brief: the named role must be able to write every named path.
+# 5. --brief: the named role must be able to write every named path.
 if [[ "$brief_mode" -eq 1 ]]; then
     if [[ -z "$brief_role" ]]; then
         echo "error: --brief requires a role" >&2
@@ -178,5 +204,5 @@ if [[ "$brief_mode" -eq 1 ]]; then
 fi
 
 # Load Orca's coordination guide before relying on its surface.
-echo "Orca's coordination guide: load with 'orca skills get orca-cli' and 'orca skills get orchestration'"
+echo "Orca's coordination guide: load with '$ORCA_CLI skills get orca-cli' and '$ORCA_CLI skills get orchestration'"
 exit 0

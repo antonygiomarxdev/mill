@@ -13,5 +13,5 @@ config=".yml .yaml .json .toml .gitignore"
 # layouts; `test/*.sh` is where this repository's own tests live.
 tests="test/*.sh */__tests__/* *.test.* *.spec.*"
 policy=".md .sh .example role-capabilities"
-scripts=".sh"
+scripts=".sh .mill/checks/*"
 design=".pen .fig"

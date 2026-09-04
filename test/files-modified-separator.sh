@@ -111,9 +111,52 @@ else
     echo "ok: single path verifies (exit $rc)"
 fi
 
+# Case 4: an entry with a git status prefix (M) is accepted — the path after
+# the prefix is judged as a write. This is the form that reports a real change
+# set with status letters, and it must not be refused as whitespace.
+run_verify --project-root "$project" --worktree "$worktree" \
+    --role policy-author --files-modified "M INSTALL.md"
+if [[ "$rc" -ne 0 ]]; then
+    echo "FAIL: M-prefixed entry expected exit 0, got exit $rc" >&2
+    echo "$out" >&2
+    failures=1
+else
+    echo "ok: M-prefixed entry accepted (exit $rc)"
+fi
+
+# Case 5: a D-prefixed entry is accepted AND skipped as a non-write. The
+# deletion is not a worker produce, so it must not be judged — but the entry
+# itself is well-formed and must not be refused.
+run_verify --project-root "$project" --worktree "$worktree" \
+    --role policy-author --files-modified "D INSTALL.md"
+if [[ "$rc" -ne 0 ]]; then
+    echo "FAIL: D-prefixed entry expected exit 0, got exit $rc" >&2
+    echo "$out" >&2
+    failures=1
+elif ! grep -q "skipping deleted path" <<< "$out"; then
+    echo "FAIL: D-prefixed entry was not skipped as a deletion:" >&2
+    echo "$out" >&2
+    failures=1
+else
+    echo "ok: D-prefixed entry accepted and skipped as a non-write (exit $rc)"
+fi
+
+# Case 6: a two-word entry with NO status prefix is still refused. Only the
+# A/M/D/R prefix makes whitespace legitimate; "INSTALL.md README.md" with no
+# prefix is a space-separated list and must fail.
+run_verify --project-root "$project" --worktree "$worktree" \
+    --role policy-author --files-modified "INSTALL.md README.md"
+if [[ "$rc" -ne 2 ]]; then
+    echo "FAIL: no-prefix two-word entry expected exit 2, got exit $rc" >&2
+    echo "$out" >&2
+    failures=1
+else
+    echo "ok: no-prefix two-word entry refused (exit $rc)"
+fi
+
 if [[ "$failures" -ne 0 ]]; then
     echo "files-modified-separator: FAIL — see failures above" >&2
     exit 1
 fi
-echo "files-modified-separator: PASS — comma works, space refused, single works"
+echo "files-modified-separator: PASS — comma, status-prefix, and single work; space-separated refused"
 exit 0

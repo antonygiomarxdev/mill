@@ -215,6 +215,33 @@ cd "$worktree" || exit 1
 
 violation=0
 
+# --- 0. Refuse a malformed --files-modified before the gauntlet --------------
+# Runs first so a bad argument does not pay for a full build. After splitting
+# on commas, an entry may carry a git status prefix (A/M/D/R + whitespace) —
+# that form is legitimate and the path after it may itself contain spaces, so
+# we strip the prefix before testing. An entry with NO status prefix that still
+# contains whitespace is a space-separated list: it collapsed into one entry
+# and role-enforce would judge the whole change set by a single basename, so a
+# worker could hide a forbidden file in any non-last position. Refuse it.
+if [[ -n "$files_modified" ]]; then
+    entries="$(printf '%s' "$files_modified" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    while IFS= read -r entry; do
+        [[ -z "$entry" ]] && continue
+        # Strip an optional leading status letter (A/M/D/R) and the whitespace
+        # that follows it. A path may legally contain a space, so only the
+        # no-prefix case is a usage error.
+        if [[ "$entry" =~ ^[AMDR][[:space:]]+(.*) ]]; then
+            path="${BASH_REMATCH[1]}"
+        else
+            path="$entry"
+        fi
+        if [[ "$path" =~ [[:space:]] ]]; then
+            echo "error: --files-modified entry contains whitespace without a git status prefix; separate paths with commas, not spaces: $entry" >&2
+            exit 2
+        fi
+    done <<< "$entries"
+fi
+
 # --- 1. The gauntlet: build, lint, test in the worktree ----------------------
 # load_gauntlet and run_step live in common.sh beside this script. The config
 # is read from the project root (.mill/gauntlet, passed via --project-root), but
@@ -257,25 +284,7 @@ skip_deleted() {
 }
 
 if [[ -n "$files_modified" ]]; then
-    # Trim spaces around commas: payloads may arrive as "a, b, c".
-    entries="$(printf '%s' "$files_modified" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-
-    # Refuse an entry that still carries internal whitespace after the comma
-    # split. A space-separated list (the natural reading of the old <list>
-    # placeholder) collapses into ONE entry containing spaces; role-enforce
-    # then takes the basename of the whole string, so the entire change set is
-    # judged by whatever follows the last "/". A worker can smuggle a forbidden
-    # file into any position but the last and the gate never sees it. We do not
-    # guess a split on whitespace because a path may legally contain a space —
-    # refuse and say why, so the caller re-issues with commas.
-    while IFS= read -r entry; do
-        [[ -z "$entry" ]] && continue
-        if [[ "$entry" =~ [[:space:]] ]]; then
-            echo "error: --files-modified entry contains whitespace; separate paths with commas, not spaces: $entry" >&2
-            exit 2
-        fi
-    done <<< "$entries"
-
+    # entries is already split and trimmed in step 0 above.
     while IFS= read -r entry; do
         [[ -z "$entry" ]] && continue
         if [[ "$entry" =~ ^([AMDR])[[:space:]]+(.+) ]]; then

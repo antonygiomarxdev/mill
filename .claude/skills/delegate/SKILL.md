@@ -193,7 +193,7 @@ worker having read anything — it reads the worktree's git state and the
 terminal's cursor directly — which is why it is the one that matters (#214).
 
 ```
-.mill/checks/mill-verify --project-root <path> --worktree <path> --role <role> --files-modified "<list>"
+.mill/checks/mill-verify --project-root <path> --worktree <path> --role <role> --files-modified "<a,b,c>"
 .mill/checks/mill-verify --dispatch <ctx_id>                   # refuse while a question is unanswered
 ```
 

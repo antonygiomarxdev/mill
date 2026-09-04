@@ -48,3 +48,23 @@ an explicit enter after `worker-start` pastes the brief. The two values:
 There is no shared registry here. Each agent exposes its own models (omp lists
 its own in its status bar); the coordinator chooses per dispatch from what the
 chosen agent offers.
+
+The setup's second question — which model, for the agent just chosen — has a
+different answer for each agent, because each is wired differently:
+
+- **`omp`** — no `--model` flag. The model is configured inside omp, in the
+  `modelRoles` record (`omp config set modelRoles '{...}'`), and omp reports
+  the active model in its own status bar (`orca terminal read`). There is
+  nothing to choose at install time; the setting lives in omp, not in Mill.
+- **`command-code`** — rejects `--model` at `worker-start`. The model comes
+  from the global `~/.commandcode/config.json`, which command-code rewrites
+  itself. Its list is exposed and verified read-only: `command-code
+  --list-models`.
+- **`claude`** — accepts `--model` at launch (`worker-start --agent claude
+  --model <id>`). How to obtain the list of available ids is **unverified** —
+  nothing in this repository records it. Do not guess a command.
+- **`cursor`** — accepts `--model` at launch (`worker-start --agent cursor
+  --model <id>`). How to obtain the list of available ids is **unverified** —
+  nothing in this repository records it. Do not guess a command.
+- **`pi`** — catalogue `submit: explicit`. How its model is selected is
+  **unverified** — nothing in this repository records it.

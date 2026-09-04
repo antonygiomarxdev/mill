@@ -35,19 +35,46 @@ what you saw instead of continuing. Nothing in this step installs or writes.
 has configured on this machine, one entry per agent. Each entry carries a
 `submit:` marker that `mill-dispatch` reads to decide whether the worker needs
 an empty enter after its brief is pasted: `submit: self` submits its own
-brief, `submit: explicit` needs the enter. `.mill/agents.example` is the
-tracked template. Copy it to `.mill/agents` and edit the entries, because the
-example's ids are this machine's — the operator's file records what actually
-runs on their machine. `.mill/agents` is gitignored (it can hold the
-operator's credentials) and never committed; the example stays tracked.
+brief, `submit: explicit` needs the enter. `.mill/agents` is gitignored (it
+can hold the operator's credentials) and never committed; the example stays
+tracked.
 
-Every dispatch names an agent and a model, and there is no default to hide
-behind. Each agent exposes its own models, and they are wired differently:
-`omp` takes no `--model` flag (the model is configured inside omp),
-`command-code` reads a global `~/.commandcode/config.json` that it rewrites
-itself, and `claude` and `cursor` accept `--model` at launch.
-`.mill/agents.example` records each agent's wiring; pick the model from what
-the chosen agent offers.
+Build `.mill/agents` from the answers to these two questions — do not copy
+the example and edit it, because the example's ids are this machine's and the
+operator's file records what actually runs on theirs.
+
+**Question one: which agent.** The options are exactly the agents
+`.mill/agents.example` lists under `## Agents`, and no others:
+
+- **`omp`** — `submit: explicit`
+- **`command-code`** — `submit: self`
+- **`claude`** — `submit: explicit`
+- **`pi`** — `submit: explicit`
+- **`cursor`** — `submit: self`
+
+**Question two: which model, for the agent just chosen.** There is no shared
+registry — each agent is wired differently, and the second question has a
+different answer for each:
+
+- **`omp`** — no `--model` flag. The model is configured inside omp, in the
+  `modelRoles` record, and omp reports the active model in its own status
+  bar. There is nothing to choose at install time; the setting lives in omp,
+  not in Mill.
+- **`command-code`** — rejects `--model` at `worker-start`. The model comes
+  from the global `~/.commandcode/config.json`, which command-code rewrites
+  itself. Its list is exposed and verified read-only: run
+  `command-code --list-models`.
+- **`claude`** — accepts `--model` at launch (`worker-start --agent claude
+  --model <id>`). How to obtain the list of available ids is **unverified** —
+  nothing in this repository records it. Do not guess a command.
+- **`cursor`** — accepts `--model` at launch (`worker-start --agent cursor
+  --model <id>`). How to obtain the list of available ids is **unverified** —
+  nothing in this repository records it. Do not guess a command.
+- **`pi`** — catalogue `submit: explicit`. How its model is selected is
+  **unverified** — nothing in this repository records it.
+
+`.mill/agents.example` records each agent's wiring in its `## Models` section;
+the coordinator chooses per dispatch from what the chosen agent offers.
 
 ## 1. Install the extension
 
